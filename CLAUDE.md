@@ -66,6 +66,11 @@
 - 작업 시작 전 current-tasks.md에 상태 기록
 - 작업 완료 시 '최근 완료'로 이동
 - 최초 실행 시 tmux에서 `claude config set autoCompact true` 실행할 것
+- 세션 시작 시 `logs/pending-restart-notify.txt` 파일이 있으면 현인-업무 채널(1479813609499394171)에 "재부팅했어!" 전송 후 파일 삭제
+
+## 재부팅 규칙
+- 재부팅 전 현인-업무 채널에 "재부팅할게!" 전송 후 `echo "1" > logs/pending-restart-notify.txt` 저장
+- 그 다음 `~/discord-bot-nino/restart-nino.sh` 실행
 
 ## 운영 참고 (Darren용)
 - **터미널 닫아도 니노는 계속 동작함** — tmux 세션이 백그라운드에서 유지
