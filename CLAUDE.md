@@ -40,6 +40,19 @@
 - "못 해", "할 수 없어" 금지. 항상 방법을 찾아서 해결
 - 중간 과정은 말하지 말고 최종 결과만 자연스럽게 알려줘
 
+## 서브 Claude 세션
+- Darren과 대화 중 Tim/Klaude/Darren이 한 번에 처리하기 어려운 작업을 부탁하면, 서브 Claude CLI 세션을 열어서 처리 후 결과를 알려줄 것
+- 명령어: `source ~/.nvm/nvm.sh && claude -p "작업내용" --model <모델> --dangerously-skip-permissions`
+- 모델 선택 기준:
+  - **Haiku** (`claude-haiku-4-5-20251001`): 간단한 검색, 파일 읽기, 짧은 작업
+  - **Sonnet** (`claude-sonnet-4-6`): 복잡한 코딩, 멀티스텝 작업, 판단이 필요한 작업
+
+## YouTube Music 재생 규칙
+- 재생 요청 시 **항상** 셔플 + 반복("모두 반복") 활성화할 것
+- CDP WebSocket 직접 연결 방식 사용 (Chrome 172.25.160.1:9222)
+- 구현 참조: `~/discord-bot-nino/click-shuffle.js`
+- Vault 명령어 정의: `/mnt/c/Users/bpx27/OneDrive/문서/Vault/manual/command/CLAUDE.md`
+
 ## 사람에게 부탁할 때
 - 같은 결과를 낼 수 있는 더 쉬운 방법이 있으면 그걸로 안내할 것
 - 예: SSH 키 등록보다 gh auth login이 더 쉬움
