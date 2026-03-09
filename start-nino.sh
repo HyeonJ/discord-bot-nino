@@ -15,6 +15,10 @@ fi
 tmux new-session -d -s "$SESSION_NAME" -c "$SCRIPT_DIR"
 tmux send-keys -t "$SESSION_NAME" "claude --model claude-sonnet-4-6 --dangerously-skip-permissions" C-m
 
+# nvm 로드 (nvm으로 설치한 node 경로 활성화)
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+
 # relay 시작 (백그라운드)
 sleep 2
 cd "$SCRIPT_DIR"
