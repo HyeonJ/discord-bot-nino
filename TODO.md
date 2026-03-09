@@ -13,16 +13,7 @@
   git push origin main
   ```
 
-### 2. ChromeCDP 프로필로 네이버 로그인
-- 니노가 네이버 쇼핑을 하려면 Darren 네이버 계정 로그인이 필요
-- ChromeCDP로 실행한 Chrome 브라우저에서 네이버 로그인
-  ```bash
-  # Windows에서 ChromeCDP 프로필 Chrome 실행 후 직접 로그인
-  chrome.exe --remote-debugging-port=9222 --user-data-dir=C:\ChromeCDP
-  ```
-- 한번만 로그인하면 이후 니노가 자동으로 사용 가능
-
-### 3. 로그 경로 정리 (선택)
+### 2. 로그 경로 정리 (선택)
 - 현재 relay 로그가 `/tmp/nino-relay.log`에 저장됨
 - WSL 재부팅 시 /tmp가 초기화될 수 있음
 - 프로젝트 폴더(`~/discord-bot-nino/logs/`)로 변경 권장
@@ -39,3 +30,4 @@
 - [x] Windows 자동 실행 등록 (작업 스케줄러)
 - [x] Chrome CDP + agent-browser 연결
 - [x] 방화벽 규칙 추가 (CDP 포트)
+- [x] ChromeCDP 프로필로 네이버 로그인
