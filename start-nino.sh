@@ -31,8 +31,12 @@ export XDG_RUNTIME_DIR=/run/user/$(id -u)
 systemctl --user restart nino-relay.service
 echo "[start] relay 시작됨 (systemd)"
 
+# 재시작 알림 전송
+sleep 3
+"$SCRIPT_DIR/discord-send" -c 1480479067881865347 "니노 재부팅했어" || true
+
 # Claude Code가 준비될 때까지 대기 후 초기 메시지 전송
-sleep 8
+sleep 5
 TODAY=$(TZ=Asia/Seoul date +%Y-%m-%d)
 HISTORY_FILE="$SCRIPT_DIR/memory/discord-history/$TODAY.jsonl"
 if [[ -f "$HISTORY_FILE" ]]; then
