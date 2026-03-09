@@ -26,15 +26,10 @@ fi
 tmux new-session -d -s "$SESSION_NAME" -c "$SCRIPT_DIR"
 tmux send-keys -t "$SESSION_NAME" "claude --model claude-sonnet-4-6 --dangerously-skip-permissions" C-m
 
-# nvm 로드 (nvm으로 설치한 node 경로 활성화)
-export NVM_DIR="$HOME/.nvm"
-[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
-
-# relay 시작 (백그라운드)
-sleep 2
-cd "$SCRIPT_DIR"
-nohup node discord-relay.js > "$LOG_DIR/nino-relay.log" 2>&1 &
-echo $! > "$LOG_DIR/nino-relay.pid"
+# relay 시작 (systemd user service — 죽어도 자동 재시작됨)
+export XDG_RUNTIME_DIR=/run/user/$(id -u)
+systemctl --user restart nino-relay.service
+echo "[start] relay 시작됨 (systemd)"
 
 # Claude Code가 준비될 때까지 대기 후 초기 메시지 전송
 sleep 8
@@ -47,4 +42,3 @@ else
 fi
 
 echo "[start] 니노 시작 완료! tmux session: $SESSION_NAME"
-echo "[start] relay PID: $(cat "$LOG_DIR/nino-relay.pid")"
