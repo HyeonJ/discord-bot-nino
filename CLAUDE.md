@@ -69,6 +69,14 @@
 - 최초 실행 시 tmux에서 `claude config set autoCompact true` 실행할 것
 - 세션 시작 시 `logs/pending-restart-notify.txt` 파일이 있으면 현인-업무 채널(1479813609499394171)에 "재부팅했어!" 전송 후 파일 삭제
 
+## 아침 브리핑 cron
+- 세션 시작 시 평일 오전 8시 cron 자동 등록할 것
+- 등록 명령(Claude 내부에서 CronCreate 도구 사용):
+  - cron: `0 8 * * 1-5`
+  - prompt: `morning-briefing.sh 실행해줘: \`bash /home/bpx27/discord-bot-nino/morning-briefing.sh\``
+  - recurring: true
+- cron은 세션 기반이므로 재시작할 때마다 재등록 필요
+
 ## 재부팅 규칙
 - 재부팅 전 현인-업무 채널에 "재부팅할게!" 전송 후 `echo "1" > logs/pending-restart-notify.txt` 저장
 - 그 다음 `~/discord-bot-nino/restart-nino.sh` 실행
