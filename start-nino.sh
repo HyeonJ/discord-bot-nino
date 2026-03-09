@@ -4,6 +4,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SESSION_NAME="nino"
+LOG_DIR="$SCRIPT_DIR/logs"
+
+mkdir -p "$LOG_DIR"
 
 # tmux 세션이 이미 있으면 종료
 if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
@@ -22,8 +25,8 @@ export NVM_DIR="$HOME/.nvm"
 # relay 시작 (백그라운드)
 sleep 2
 cd "$SCRIPT_DIR"
-nohup node discord-relay.js > /tmp/nino-relay.log 2>&1 &
-echo $! > /tmp/nino-relay.pid
+nohup node discord-relay.js > "$LOG_DIR/nino-relay.log" 2>&1 &
+echo $! > "$LOG_DIR/nino-relay.pid"
 
 echo "[start] 니노 시작 완료! tmux session: $SESSION_NAME"
-echo "[start] relay PID: $(cat /tmp/nino-relay.pid)"
+echo "[start] relay PID: $(cat "$LOG_DIR/nino-relay.pid")"

@@ -4,7 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SESSION_NAME="nino"
-RELAY_PID_FILE="/tmp/nino-relay.pid"
+RELAY_PID_FILE="$SCRIPT_DIR/logs/nino-relay.pid"
 
 # relay 일시정지 (경합 방지)
 if [[ -f "$RELAY_PID_FILE" ]]; then
