@@ -54,6 +54,11 @@
 - 작업 완료 시 '최근 완료'로 이동
 - 최초 실행 시 tmux에서 `claude config set autoCompact true` 실행할 것
 
+## 운영 참고 (Darren용)
+- **터미널 닫아도 니노는 계속 동작함** — tmux 세션이 백그라운드에서 유지
+  - 다시 보려면 WSL에서: `tmux attach -t nino`
+- **컴퓨터 재부팅 후** — Windows 작업 스케줄러에 자동 실행 등록돼 있음. 자동으로 안 켜지면 WSL에서: `~/discord-bot-nino/start-nino.sh`
+
 ## 서버 정보
 - **서버**: 약수하우스 (Guild ID: 1479813608023134342)
 - **일반 채널 ID**: 1479813609499394169
