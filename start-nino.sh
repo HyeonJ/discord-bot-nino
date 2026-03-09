@@ -13,7 +13,7 @@ fi
 
 # tmux 세션 생성 + Claude Code 실행
 tmux new-session -d -s "$SESSION_NAME" -c "$SCRIPT_DIR"
-tmux send-keys -t "$SESSION_NAME" "claude --model claude-sonnet-4-6 --dangerously-skip-permissions" C-m
+tmux send-keys -t "$SESSION_NAME" "claude config set autoCompact true 2>/dev/null; claude --model claude-sonnet-4-6 --dangerously-skip-permissions" C-m
 
 # nvm 로드 (nvm으로 설치한 node 경로 활성화)
 export NVM_DIR="$HOME/.nvm"
