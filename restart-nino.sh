@@ -35,4 +35,17 @@ if [[ -f "$RELAY_PID_FILE" ]]; then
   fi
 fi
 
+# Claude Code가 준비될 때까지 대기 후 히스토리 트리거
+sleep 5
+TODAY=$(TZ=Asia/Seoul date +%Y-%m-%d)
+HISTORY_FILE="$SCRIPT_DIR/memory/discord-history/$TODAY.jsonl"
+
+# 재부팅 알림 파일 확인
+NOTIFY_FILE="$SCRIPT_DIR/logs/pending-restart-notify.txt"
+if [[ -f "$NOTIFY_FILE" ]]; then
+  tmux send-keys -t "$SESSION_NAME" "재부팅했어. logs/pending-restart-notify.txt 있으니까 처리해줘. 그리고 memory/discord-history/$TODAY.jsonl 읽고 못 봤던 대화 파악해줘." C-m
+elif [[ -f "$HISTORY_FILE" ]]; then
+  tmux send-keys -t "$SESSION_NAME" "재시작됐어. memory/discord-history/$TODAY.jsonl 읽고 못 봤던 대화 있으면 파악해줘." C-m
+fi
+
 echo "[restart] 니노 재시작 완료!"
