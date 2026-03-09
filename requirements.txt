@@ -1,0 +1,6 @@
+discord.py
+aiohttp
+edge_tts
+SpeechRecognition
+pydub
+python-dotenv
