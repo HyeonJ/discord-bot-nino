@@ -738,7 +738,8 @@ def ask_claude(channel_id: int, voice_mode: bool = False) -> str:
 
     history_text = "\n".join(conversation_history[channel_id])
     prompt_template = VOICE_SYSTEM_PROMPT if voice_mode else SYSTEM_PROMPT
-    prompt = f"{prompt_template}\n\n대화 기록:\n{history_text}\n\n니노의 답변:"
+    memory_context = get_memory_context()
+    prompt = f"{prompt_template}{memory_context}\n\n대화 기록:\n{history_text}\n\n니노의 답변:"
 
     # 마지막 사용자 발화 기반으로 모델 선택
     last_user_text = ""
@@ -865,6 +866,18 @@ async def on_message(message):
             bot_text = message.content or ""
             if bot_text.strip():
                 add_to_history(message.channel.id, message.author.display_name, bot_text)
+                # 다른 봇이 니노를 불렀으면 응답
+                bot_mention = f"<@{client.user.id}>"
+                if "니노" in bot_text or bot_mention in message.content:
+                    channel_id = message.channel.id
+                    if channel_id not in responding_lock:
+                        responding_lock.add(channel_id)
+                        try:
+                            async with message.channel.typing():
+                                reply = await asyncio.to_thread(ask_claude, channel_id)
+                            await send_reply(message.channel, reply)
+                        finally:
+                            responding_lock.discard(channel_id)
         return
 
     channel_id = message.channel.id
