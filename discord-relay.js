@@ -270,4 +270,12 @@ try {
   console.log('[relay] Fallback to fs.watchFile for status file');
 }
 
+// --- 크래시 방지 ---
+process.on('uncaughtException', (err) => {
+  console.error('[relay] uncaught exception:', err);
+});
+process.on('unhandledRejection', (err) => {
+  console.error('[relay] unhandled rejection:', err);
+});
+
 client.login(process.env.DISCORD_BOT_TOKEN);
