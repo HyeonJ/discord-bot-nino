@@ -4,16 +4,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SESSION_NAME="nino"
-RELAY_PID_FILE="$SCRIPT_DIR/logs/nino-relay.pid"
 
 # relay 일시정지 (경합 방지)
-if [[ -f "$RELAY_PID_FILE" ]]; then
-  RELAY_PID=$(cat "$RELAY_PID_FILE")
-  if kill -0 "$RELAY_PID" 2>/dev/null; then
-    kill -STOP "$RELAY_PID"
-    echo "[restart] relay paused (PID: $RELAY_PID)"
-  fi
-fi
+export XDG_RUNTIME_DIR=/run/user/$(id -u)
+systemctl --user stop nino-relay.service 2>/dev/null && echo "[restart] relay paused" || true
 
 # Claude Code 세션 재시작
 if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
@@ -27,13 +21,7 @@ fi
 
 # relay 재개
 sleep 2
-if [[ -f "$RELAY_PID_FILE" ]]; then
-  RELAY_PID=$(cat "$RELAY_PID_FILE")
-  if kill -0 "$RELAY_PID" 2>/dev/null; then
-    kill -CONT "$RELAY_PID"
-    echo "[restart] relay resumed"
-  fi
-fi
+systemctl --user start nino-relay.service 2>/dev/null && echo "[restart] relay resumed" || true
 
 # Claude Code가 준비될 때까지 대기 후 히스토리 트리거
 sleep 5
