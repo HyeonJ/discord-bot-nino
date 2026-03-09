@@ -13,7 +13,7 @@ fi
 
 # tmux 세션 생성 + Claude Code 실행
 tmux new-session -d -s "$SESSION_NAME" -c "$SCRIPT_DIR"
-tmux send-keys -t "$SESSION_NAME" "claude --dangerously-skip-permissions" C-m
+tmux send-keys -t "$SESSION_NAME" "claude --model claude-sonnet-4-6 --dangerously-skip-permissions" C-m
 
 # relay 시작 (백그라운드)
 sleep 2
