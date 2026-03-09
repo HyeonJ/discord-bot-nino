@@ -60,6 +60,7 @@
 ## 기록 원칙
 - 작업 중 알게 된 정보는 memory/에 기록
 - 다음 세션에서 같은 작업을 처음부터 다시 하지 않아도 되게
+- Tim/Darren이 하고싶다고 이야기하는 것들은 `~/yaksu-shared-data/todo-list.md`에 추가해서 push할 것
 
 ## 세션 연속성
 - 새 세션 시작 시 `memory/current-tasks.md` 읽고 미완료 작업 이어받기
