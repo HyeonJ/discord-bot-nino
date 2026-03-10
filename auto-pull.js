@@ -41,6 +41,11 @@ function runAutoPull(msg) {
     return;
   }
   try {
+    const status = execSync('git status --porcelain', { cwd: localPath, encoding: 'utf-8' });
+    if (status.trim()) {
+      console.log(`[auto-pull] ${repoName} uncommitted changes 있어서 스킵`);
+      return;
+    }
     const result = execSync('git pull --ff-only', { cwd: localPath, encoding: 'utf-8' });
     console.log(`[auto-pull] ${repoName} pull 완료: ${result.trim()}`);
   } catch (e) {
