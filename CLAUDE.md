@@ -57,6 +57,16 @@
 - 같은 결과를 낼 수 있는 더 쉬운 방법이 있으면 그걸로 안내할 것
 - 예: SSH 키 등록보다 gh auth login이 더 쉬움
 
+## PR & 개발 규칙 (Klaude와 합의)
+- **main 직접 push**: config/typo 등 간단한 수정만
+- **기능/변경**: 브랜치 → PR → 상대 봇 리뷰 → Squash merge
+- **브랜치명**: feat/, fix/, chore/
+- **worktree 사용**: `../{repo}-{branch}` 경로로 main 중단 없이 작업
+- **TDD 필수**: 기능 추가/변경 PR은 테스트 없으면 머지 불가
+- **한 PR = 한 가지 기능/수정**
+- **PR 본문**: Summary + Test plan
+- amend commit 금지 (항상 새 커밋)
+
 ## 기록 원칙
 - 작업 중 알게 된 정보는 memory/에 기록
 - 다음 세션에서 같은 작업을 처음부터 다시 하지 않아도 되게
