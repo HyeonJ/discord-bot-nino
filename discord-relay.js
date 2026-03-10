@@ -19,17 +19,17 @@ const RESPONSE_TIMEOUT_MS = 3 * 60 * 1000; // 3분
 // 응답 대기 중인 메시지 추적
 const pendingResponses = new Map(); // msgId → { channelId, timestamp, preview }
 
-// 주기적으로 타임아웃 체크 (10초마다) → 3분 지나면 Discord 알림
+// 주기적으로 타임아웃 체크 (10초마다) → 3분 지나면 tmux로 알림
 setInterval(() => {
   const now = Date.now();
   for (const [msgId, info] of pendingResponses) {
     if (now - info.timestamp > RESPONSE_TIMEOUT_MS) {
       pendingResponses.delete(msgId);
-      if (client.isReady()) {
-        client.channels.fetch(ALERT_CHANNEL).then(ch => {
-          ch.send(`⚠️ 메시지 응답 못 한 것 같아! 확인해줘:\n> ${info.preview}`);
-        }).catch(() => {});
-      }
+      const alert = `[SYSTEM] ⚠️ 응답 못 한 메시지 있어! 확인해줘: ${info.preview}`;
+      try {
+        const escaped = alert.replace(/'/g, "'\\''");
+        execSync(`tmux send-keys -t '${TMUX_SESSION}' -- '${escaped}' C-m`);
+      } catch (e) {}
     }
   }
 }, 10000);
