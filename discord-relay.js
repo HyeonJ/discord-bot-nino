@@ -4,6 +4,7 @@ const fs = require('fs');
 const https = require('https');
 const path = require('path');
 require('dotenv').config();
+const { shouldAutoPull, runAutoPull } = require('./auto-pull');
 
 const ATTACHMENT_DIR = '/tmp/discord-attachments';
 const HISTORY_DIR = path.join(__dirname, 'memory', 'discord-history');
@@ -248,6 +249,8 @@ client.on('messageCreate', async (msg) => {
 
   // 다른 봇(Klaude 등) 메시지 — 해당 채널 pending 제거 후 tmux로 전달
   if (msg.author.bot && msg.author.id !== botId) {
+    // GitHub auto-pull
+    if (shouldAutoPull(msg)) runAutoPull(msg);
     const chId = msg.channel.isThread() ? msg.channel.id : msg.channelId;
     for (const [pendingId, info] of pendingResponses) {
       if (info.channelId === chId) pendingResponses.delete(pendingId);
