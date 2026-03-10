@@ -243,6 +243,15 @@ client.on('messageCreate', async (msg) => {
 
   if (msg.guildId !== GUILD_ID) return;
 
+  // 다른 봇(Klaude 등)이 응답해도 해당 채널 pending 제거
+  if (msg.author.bot && msg.author.id !== botId) {
+    const chId = msg.channel.isThread() ? msg.channel.id : msg.channelId;
+    for (const [pendingId, info] of pendingResponses) {
+      if (info.channelId === chId) pendingResponses.delete(pendingId);
+    }
+    return;
+  }
+
   // Save own messages to history but don't relay to tmux
   if (msg.author.id === botId) {
     saveHistory({
@@ -294,8 +303,11 @@ client.on('messageCreate', async (msg) => {
     content: msg.content,
     attachments: msg.attachments.map(a => ({ name: a.name, url: a.url, contentType: a.contentType })),
   });
-  // 사람 메시지면 pending 등록 (봇이 아닌 경우만)
-  sendToTmux(payload, msg.id, channelId);
+  // 다른 사람(@Tim, @Darren 등)을 멘션하는 메시지는 pending 등록 안 함
+  // (나한테 하는 말이 아닐 가능성 높음)
+  const mentionsOtherHuman = msg.mentions.users.some(u => u.id !== botId && !u.bot);
+  const pendingId = mentionsOtherHuman ? null : msg.id;
+  sendToTmux(payload, pendingId, channelId);
 });
 
 client.on('guildMemberAdd', (member) => {
