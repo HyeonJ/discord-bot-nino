@@ -11,6 +11,40 @@ const HISTORY_DIR = path.join(__dirname, 'memory', 'discord-history');
 const TMUX_SESSION = process.env.TMUX_SESSION || 'nino';
 const GUILD_ID = '1479813608023134342';
 const DEFAULT_CHANNEL = '1479813609499394169';
+const ALERT_CHANNEL = '1480593132511826092'; // Darren 채널 (응답 실패 알림용)
+const MSG_DIR = '/tmp/nino-msgs';
+const MAX_INLINE_LENGTH = 1500;   // 이 이상이면 파일로 저장
+const RESPONSE_TIMEOUT_MS = 3 * 60 * 1000; // 3분
+
+// 응답 대기 중인 메시지 추적
+const pendingResponses = new Map(); // msgId → { channelId, timestamp, preview }
+
+// 주기적으로 타임아웃 체크 (10초마다) → 3분 지나면 Discord 알림
+setInterval(() => {
+  const now = Date.now();
+  for (const [msgId, info] of pendingResponses) {
+    if (now - info.timestamp > RESPONSE_TIMEOUT_MS) {
+      pendingResponses.delete(msgId);
+      if (client.isReady()) {
+        client.channels.fetch(ALERT_CHANNEL).then(ch => {
+          ch.send(`⚠️ 메시지 응답 못 한 것 같아! 확인해줘:\n> ${info.preview}`);
+        }).catch(() => {});
+      }
+    }
+  }
+}, 10000);
+
+// 5분마다 미응답 메시지 리마인더 → tmux로 시스템 메시지 전송
+setInterval(() => {
+  if (pendingResponses.size === 0) return;
+  const previews = [...pendingResponses.values()].map(v => `- ${v.preview}`).join('\n');
+  const reminder = `[SYSTEM] ⏰ 리마인더: 아직 응답 못 한 메시지 ${pendingResponses.size}개 있어!\n${previews}`;
+  console.log(`[relay] ${reminder}`);
+  try {
+    const escaped = reminder.replace(/'/g, "'\\''");
+    execSync(`tmux send-keys -t '${TMUX_SESSION}' -- '${escaped}' C-m`);
+  } catch (e) {}
+}, 5 * 60 * 1000);
 
 // 니노 봇 ID — .env의 NINO_BOT_ID 또는 아래 기본값
 const NINO_BOT_ID = process.env.NINO_BOT_ID || '';
@@ -103,10 +137,43 @@ function saveHistory(entry) {
   }
 }
 
-function sendToTmux(payload) {
-  console.log(`[relay] ${payload}`);
+function saveMsgToFile(content) {
+  if (!fs.existsSync(MSG_DIR)) fs.mkdirSync(MSG_DIR, { recursive: true });
+  const fpath = path.join(MSG_DIR, `msg-${Date.now()}.txt`);
+  fs.writeFileSync(fpath, content, 'utf-8');
+  return fpath;
+}
+
+function preprocessPayload(payload) {
+  // URL이 300자 이상이면 앞 200자만 남기고 파일에 전체 저장
+  let processed = payload.replace(/https?:\/\/\S{300,}/g, (url) => {
+    const fpath = saveMsgToFile(url);
+    return `${url.substring(0, 200)}...(전체 URL: ${fpath})`;
+  });
+  // 전체 길이가 너무 길면 파일로 저장
+  if (processed.length > MAX_INLINE_LENGTH) {
+    const fpath = saveMsgToFile(payload);
+    // 앞부분만 인라인으로, 나머지는 파일 참조
+    processed = processed.substring(0, MAX_INLINE_LENGTH) + `\n[LONG_MSG:${fpath}]`;
+  }
+  return processed;
+}
+
+function sendToTmux(payload, msgId = null, channelId = null) {
+  const processed = preprocessPayload(payload);
+  console.log(`[relay] ${payload.substring(0, 200)}${payload.length > 200 ? '...' : ''}`);
+
+  // 응답 대기 등록 (봇 메시지, Klaude 메시지 제외 — 사람 메시지만)
+  if (msgId && channelId) {
+    pendingResponses.set(msgId, {
+      channelId,
+      timestamp: Date.now(),
+      preview: payload.substring(0, 80).replace(/\n/g, ' '),
+    });
+  }
+
   try {
-    const escaped = payload.replace(/'/g, "'\\''");
+    const escaped = processed.replace(/'/g, "'\\''");
     execSync(`tmux send-keys -t '${TMUX_SESSION}' -- '${escaped}' C-m`);
   } catch (e) {
     if (!e.message.includes('no server running') && !e.message.includes("can't find")) {
@@ -170,7 +237,7 @@ client.on('messageCreate', async (msg) => {
       content: msg.content,
       attachments: msg.attachments.map(a => ({ name: a.name, url: a.url, contentType: a.contentType })),
     });
-    sendToTmux(payload);
+    sendToTmux(payload, msg.id, 'dm');
     return;
   }
 
@@ -190,6 +257,13 @@ client.on('messageCreate', async (msg) => {
       content: msg.content,
       attachments: msg.attachments.map(a => ({ name: a.name, url: a.url, contentType: a.contentType })),
     });
+    // 봇이 응답했으면 해당 채널의 pending 제거
+    const chId = msg.channel.isThread() ? msg.channel.id : msg.channelId;
+    for (const [pendingId, info] of pendingResponses) {
+      if (info.channelId === chId) {
+        pendingResponses.delete(pendingId);
+      }
+    }
     return;
   }
 
@@ -220,7 +294,8 @@ client.on('messageCreate', async (msg) => {
     content: msg.content,
     attachments: msg.attachments.map(a => ({ name: a.name, url: a.url, contentType: a.contentType })),
   });
-  sendToTmux(payload);
+  // 사람 메시지면 pending 등록 (봇이 아닌 경우만)
+  sendToTmux(payload, msg.id, channelId);
 });
 
 client.on('guildMemberAdd', (member) => {
