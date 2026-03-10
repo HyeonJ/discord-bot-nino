@@ -226,29 +226,55 @@ client.on('messageCreate', async (msg) => {
     }
     if (msg.author.bot) return;
     const name = USER_MAP[msg.author.id] || msg.author.username;
+    const dmChannelId = msg.channelId;
     const msgId = `[M:${msg.id}]`;
+    const channelTag = `[C:${dmChannelId}]`;
     const attTags = await handleAttachments(msg);
-    const payload = `[DM][${name}]${msgId} ${msg.content}${attTags}`;
+    const payload = `[DM][${name}]${channelTag}${msgId} ${msg.content}${attTags}`;
     saveHistory({
       type: 'dm',
       sender: name,
       senderId: msg.author.id,
       messageId: msg.id,
+      channelId: dmChannelId,
       content: msg.content,
       attachments: msg.attachments.map(a => ({ name: a.name, url: a.url, contentType: a.contentType })),
     });
-    sendToTmux(payload, msg.id, 'dm');
+    sendToTmux(payload, msg.id, dmChannelId);
     return;
   }
 
   if (msg.guildId !== GUILD_ID) return;
 
-  // 다른 봇(Klaude 등)이 응답해도 해당 채널 pending 제거
+  // 다른 봇(Klaude 등) 메시지 — 해당 채널 pending 제거 후 tmux로 전달
   if (msg.author.bot && msg.author.id !== botId) {
     const chId = msg.channel.isThread() ? msg.channel.id : msg.channelId;
     for (const [pendingId, info] of pendingResponses) {
       if (info.channelId === chId) pendingResponses.delete(pendingId);
     }
+    const botName = msg.author.username || msg.author.globalName || 'Bot';
+    const content = resolveMentions(msg);
+    const channelTag = chId !== DEFAULT_CHANNEL ? `[C:${chId}]` : '';
+    const threadTag = msg.channel.isThread() ? `[T:${msg.channel.id}]` : '';
+    const msgId = `[M:${msg.id}]`;
+    const replyTag = msg.reference?.messageId ? `[R:${msg.reference.messageId}]` : '';
+    const attTags = msg.attachments.size > 0
+      ? ' ' + [...msg.attachments.values()].map(a => `[ATT:${a.name}]`).join(' ')
+      : '';
+    const payload = `[D][${botName}]${channelTag}${threadTag}${msgId}${replyTag} ${content}${attTags}`;
+    saveHistory({
+      type: 'guild',
+      sender: botName,
+      senderId: msg.author.id,
+      messageId: msg.id,
+      channelId: chId,
+      channelName: msg.channel.name || '',
+      threadId: msg.channel.isThread() ? msg.channel.id : null,
+      replyTo: msg.reference?.messageId || null,
+      content: msg.content,
+      attachments: msg.attachments.map(a => ({ name: a.name, url: a.url, contentType: a.contentType })),
+    });
+    sendToTmux(payload);
     return;
   }
 

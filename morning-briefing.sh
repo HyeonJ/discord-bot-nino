@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # 매일 아침 Darren 채널에 오늘의 할 일 브리핑 전송
 set -euo pipefail
 
