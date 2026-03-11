@@ -223,6 +223,10 @@ client.on('messageCreate', async (msg) => {
         content: msg.content,
         attachments: msg.attachments.map(a => ({ name: a.name, url: a.url, contentType: a.contentType })),
       });
+      // DM 응답 시 해당 채널 pending 제거
+      for (const [pendingId, info] of pendingResponses) {
+        if (info.channelId === msg.channelId) pendingResponses.delete(pendingId);
+      }
       return;
     }
     if (msg.author.bot) return;
