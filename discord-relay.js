@@ -45,7 +45,7 @@ setInterval(() => {
     const escaped = reminder.replace(/'/g, "'\\''");
     execSync(`tmux send-keys -t '${TMUX_SESSION}' -- '${escaped}' C-m`);
   } catch (e) {}
-}, 5 * 60 * 1000);
+}, 30 * 60 * 1000);
 
 // 니노 봇 ID — .env의 NINO_BOT_ID 또는 아래 기본값
 const NINO_BOT_ID = process.env.NINO_BOT_ID || '';
@@ -338,8 +338,8 @@ client.on('messageCreate', async (msg) => {
   });
   // 다른 사람(@Tim, @Darren 등)을 멘션하는 메시지는 pending 등록 안 함
   // (나한테 하는 말이 아닐 가능성 높음)
-  const mentionsOtherHuman = msg.mentions.users.some(u => u.id !== botId && !u.bot);
-  const pendingId = mentionsOtherHuman ? null : msg.id;
+  const mentionsOtherUser = msg.mentions.users.some(u => u.id !== botId);
+  const pendingId = mentionsOtherUser ? null : msg.id;
   sendToTmux(payload, pendingId, channelId);
 });
 

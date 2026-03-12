@@ -44,7 +44,7 @@ DAY_LABEL="$DAY_NAME (${MONTH}/${DAY})"
 
 # 서브 Claude로 오늘 섹션 읽고 브리핑 전송
 source ~/.nvm/nvm.sh
-claude -p "
+env -u CLAUDECODE claude -p "
 다음 파일을 읽고, '$DAY_LABEL' 섹션의 할 일들을 파악해.
 파일: $SCHEDULE_FILE
 
