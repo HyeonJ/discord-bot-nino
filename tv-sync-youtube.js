@@ -16,8 +16,6 @@ if (!ytmUrl) {
   process.exit(1);
 }
 
-// YouTube Music URL → YouTube URL 변환 (TV용)
-const ytUrl = ytmUrl.replace('music.youtube.com', 'www.youtube.com');
 let playlistId = null;
 try {
   playlistId = new URL(ytmUrl).searchParams.get('list');
@@ -25,8 +23,8 @@ try {
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-// TV: YouTube 재생 (프로필 선택 없이 darren 계정으로 직행 → 재생목록으로 이동)
-// 방법: contentId 없이 accountIndex:0으로 실행 → darren 피드 직행 → contentTarget으로 재생목록 이동
+// TV: YouTube 재생목록 바로 재생 (프로필 선택창 없음)
+// 핵심: contentId = playlist ID (full URL X), accountIndex:0 → 프로필 선택창 없이 재생목록 바로 시작
 async function playOnTV() {
   return new Promise(async (resolve, reject) => {
     const lgtv = lgtv2({
@@ -42,28 +40,17 @@ async function playOnTV() {
       await new Promise(r => lgtv.request('ssap://system.launcher/close', { id: 'youtube.leanback.v4' }, r));
       await sleep(1000);
 
-      // Step 1: contentId 없이 실행 → 프로필 선택창 없이 darren 피드로 직행
+      // contentId = playlist ID만 (URL 아님) + accountIndex:0 → 프로필 선택창 없이 재생목록 바로 재생
       await new Promise((res, rej) => {
         lgtv.request('ssap://system.launcher/launch', {
           id: 'youtube.leanback.v4',
+          contentId: playlistId,
           params: { accountIndex: 0 },
         }, (err) => { if (err) rej(err); else res(); });
       });
 
-      // darren 피드 로딩 대기
-      await sleep(5000);
-
-      // Step 2: contentTarget으로 재생목록으로 이동
-      const tvPlaylistUrl = `https://www.youtube.com/tv?autoplay=1&list=${playlistId}&listType=playlist`;
-      await new Promise((res, rej) => {
-        lgtv.request('ssap://system.launcher/launch', {
-          id: 'youtube.leanback.v4',
-          params: { contentTarget: tvPlaylistUrl, accountIndex: 0 },
-        }, (err) => { if (err) rej(err); else res(); });
-      });
-
       lgtv.disconnect();
-      resolve('TV YouTube 재생 완료 (darren 계정, 프로필 선택 없음)');
+      resolve('TV YouTube 재생목록 재생 시작 (darren 계정, 프로필 선택 없음)');
     });
   });
 }
