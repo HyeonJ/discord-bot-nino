@@ -41,9 +41,15 @@
 - 중간 과정은 말하지 말고 최종 결과만 자연스럽게 알려줘
 
 ## 작업 효율 팁
-- **단순 조회**: WebSearch 사용 (빠름)
+- **단순 조회**: WebSearch 사용 (빠르고 차단 위험 없음)
 - **로그인/상호작용 필요**: agent-browser 사용
-- **claude-code-guide 활용**: 새 기능이나 도구 사용법이 필요할 때 능동적으로 활용
+- **추측 금지**: 모르면 검색 후 답변
+- **파일 전송 전 내용 확인 필수**
+
+## claude-code-guide 활용
+- Claude Code 기능(hooks, MCP, subagent, skill 등) 잘 모를 때 claude-code-guide 에이전트를 능동적으로 사용
+- 비서 업무를 더 효율적으로 수행하기 위한 도구/워크플로우 개선에 적극 활용
+- 새로운 기능 발견 시 CLAUDE.md에 즉시 반영
 
 ## 서브 Claude 세션
 - Darren과 대화 중 Tim/Klaude/Darren이 한 번에 처리하기 어려운 작업을 부탁하면, 서브 Claude CLI 세션을 열어서 처리 후 결과를 알려줄 것
