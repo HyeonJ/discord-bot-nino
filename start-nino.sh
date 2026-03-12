@@ -22,9 +22,14 @@ if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
   tmux kill-session -t "$SESSION_NAME"
 fi
 
+# .env 로드
+if [[ -f "$SCRIPT_DIR/.env" ]]; then
+  set -a; source "$SCRIPT_DIR/.env"; set +a
+fi
+
 # tmux 세션 생성 + Claude Code 실행
-tmux new-session -d -s "$SESSION_NAME" -c "$SCRIPT_DIR"
-tmux send-keys -t "$SESSION_NAME" "claude --model claude-sonnet-4-6 --dangerously-skip-permissions" C-m
+tmux new-session -d -s "$SESSION_NAME" -c "$SCRIPT_DIR" -e "ALARM_TOOL_SESSION=nino"
+tmux send-keys -t "$SESSION_NAME" "claude --model claude-opus-4-6 --dangerously-skip-permissions" C-m
 
 # relay 시작 (systemd user service — 죽어도 자동 재시작됨)
 export XDG_RUNTIME_DIR=/run/user/$(id -u)
