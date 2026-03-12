@@ -11,7 +11,7 @@ systemctl --user stop nino-relay.service 2>/dev/null && echo "[restart] relay pa
 
 # Claude Code 세션 재시작
 if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
-  tmux respawn-pane -k -t "$SESSION_NAME" "cd $SCRIPT_DIR && claude --model claude-sonnet-4-6 --dangerously-skip-permissions --continue"
+  tmux respawn-pane -k -t "$SESSION_NAME" "cd $SCRIPT_DIR && claude --model claude-opus-4-6 --dangerously-skip-permissions --continue"
   echo "[restart] Claude Code restarted"
 else
   echo "[restart] No session found, starting fresh..."
