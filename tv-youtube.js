@@ -74,35 +74,34 @@ lgtv.on('connect', async () => {
   await new Promise(r => lgtv.request('ssap://system.launcher/close', { id: YOUTUBE_APP_ID }, r));
   await sleep(1000);
 
-  // YouTube 실행: playlist URL이면 비디오ID+listParam, 아니면 URL 직접
-  const launchParams = {
-    id: YOUTUBE_APP_ID,
-    params: { accountIndex: 0 },
-  };
-  if (playlistId && videoId) {
-    launchParams.contentId = videoId;
-    launchParams.params.list = playlistId;
-  } else if (playlistId) {
-    // playlist만 있는 경우: playlist ID로 시도
-    launchParams.contentId = rawUrl;
-    launchParams.params.list = playlistId;
+  // Step 1: contentId 없이 실행 → 프로필 선택창 없이 darren 피드로 직행
+  await new Promise((resolve, reject) => {
+    lgtv.request('ssap://system.launcher/launch', {
+      id: YOUTUBE_APP_ID,
+      params: { accountIndex: 0 },
+    }, (err) => { if (err) reject(err); else resolve(); });
+  });
+  console.log('YouTube 실행됨, darren 피드 로딩 대기 중...');
+
+  // darren 피드 로딩 대기
+  await sleep(5000);
+
+  // Step 2: contentTarget으로 원하는 URL로 이동
+  let contentTarget;
+  if (playlistId) {
+    contentTarget = `https://www.youtube.com/tv?autoplay=1&list=${playlistId}&listType=playlist`;
+    if (videoId) contentTarget += `&v=${videoId}`;
   } else {
-    launchParams.contentId = rawUrl;
+    contentTarget = rawUrl;
   }
 
   await new Promise((resolve, reject) => {
-    lgtv.request('ssap://system.launcher/launch', launchParams, (err) => {
-      if (err) reject(err); else resolve();
-    });
+    lgtv.request('ssap://system.launcher/launch', {
+      id: YOUTUBE_APP_ID,
+      params: { contentTarget, accountIndex: 0 },
+    }, (err) => { if (err) reject(err); else resolve(); });
   });
-  console.log('YouTube 실행됨, 프로필 선택 대기 중...');
-
-  // 프로필 선택창이 나타날 때까지 대기
-  await sleep(3000);
-
-  // darren 프로필 자동 클릭
-  await selectDarrenProfile(lgtv);
-  console.log('darren 프로필 선택 완료');
+  console.log('콘텐츠 이동 완료');
 
   lgtv.disconnect();
   process.exit(0);

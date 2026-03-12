@@ -9,9 +9,6 @@ const WebSocket = require('ws');
 
 const TV_IP = '192.168.68.73';
 const CHROME_CDP = 'http://172.25.160.1:9222';
-// darren 프로필 좌표 (TV, 1920x1080 기준)
-const PROFILE_X = 200;
-const PROFILE_Y = 526;
 
 const ytmUrl = process.argv[2];
 if (!ytmUrl) {
@@ -28,7 +25,8 @@ try {
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-// TV: YouTube 재생 + darren 프로필 자동 선택
+// TV: YouTube 재생 (프로필 선택 없이 darren 계정으로 직행 → 재생목록으로 이동)
+// 방법: contentId 없이 accountIndex:0으로 실행 → darren 피드 직행 → contentTarget으로 재생목록 이동
 async function playOnTV() {
   return new Promise(async (resolve, reject) => {
     const lgtv = lgtv2({
@@ -44,42 +42,28 @@ async function playOnTV() {
       await new Promise(r => lgtv.request('ssap://system.launcher/close', { id: 'youtube.leanback.v4' }, r));
       await sleep(1000);
 
-      // YouTube 실행 (playlist URL + accountIndex:0)
+      // Step 1: contentId 없이 실행 → 프로필 선택창 없이 darren 피드로 직행
       await new Promise((res, rej) => {
         lgtv.request('ssap://system.launcher/launch', {
           id: 'youtube.leanback.v4',
-          contentId: ytUrl,
-          params: { accountIndex: 0, list: playlistId },
+          params: { accountIndex: 0 },
         }, (err) => { if (err) rej(err); else res(); });
       });
 
-      // 프로필 선택창 대기
-      await sleep(3000);
+      // darren 피드 로딩 대기
+      await sleep(5000);
 
-      // darren 프로필 픽셀 클릭
-      await new Promise(res => {
-        lgtv.request('ssap://com.webos.service.networkinput/getPointerInputSocket', {}, async (err, r) => {
-          if (err || !r || !r.socketPath) { res(); return; }
-          const ws = new WebSocket(r.socketPath, { rejectUnauthorized: false });
-          ws.on('open', async () => {
-            for (let i = 0; i < 300; i++) ws.send(JSON.stringify({ type: 'move', dx: -1, dy: -1, down: 0 }));
-            await sleep(200);
-            for (let i = 0; i < PROFILE_X; i++) ws.send(JSON.stringify({ type: 'move', dx: 1, dy: 0, down: 0 }));
-            for (let i = 0; i < PROFILE_Y; i++) ws.send(JSON.stringify({ type: 'move', dx: 0, dy: 1, down: 0 }));
-            await sleep(300);
-            ws.send(JSON.stringify({ type: 'down' }));
-            await sleep(100);
-            ws.send(JSON.stringify({ type: 'up' }));
-            await sleep(500);
-            ws.close();
-            res();
-          });
-          ws.on('error', () => res());
-        });
+      // Step 2: contentTarget으로 재생목록으로 이동
+      const tvPlaylistUrl = `https://www.youtube.com/tv?autoplay=1&list=${playlistId}&listType=playlist`;
+      await new Promise((res, rej) => {
+        lgtv.request('ssap://system.launcher/launch', {
+          id: 'youtube.leanback.v4',
+          params: { contentTarget: tvPlaylistUrl, accountIndex: 0 },
+        }, (err) => { if (err) rej(err); else res(); });
       });
 
       lgtv.disconnect();
-      resolve('TV YouTube 재생 완료 (darren 프로필)');
+      resolve('TV YouTube 재생 완료 (darren 계정, 프로필 선택 없음)');
     });
   });
 }
