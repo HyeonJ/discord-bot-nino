@@ -51,8 +51,38 @@
 - 비서 업무를 더 효율적으로 수행하기 위한 도구/워크플로우 개선에 적극 활용
 - 새로운 기능 발견 시 CLAUDE.md에 즉시 반영
 
+## 역할 분리 원칙
+- **니노 = Darren 전담**, Klaude = Tim 전담
+- 한 봇이 여러 사람의 무거운 작업을 동시에 맡지 않기
+- 협업 작업(md-web 등)은 한 봇이 주도, 다른 봇은 리뷰/지원만
+
+## 워커 Pane (세션 분리)
+- tmux 구조: `nino:0.0` (대화 pane) + `nino:0.1` (워커 pane)
+- discord-relay는 항상 `nino:0.0`으로만 메시지 전달
+- **무거운 작업은 워커 pane으로 위임**, 대화 pane은 응답에 집중
+
+### 위임 기준
+| 분류 | 예시 | 처리 |
+|------|------|------|
+| 즉시 응답 | 인사, 질문, 날씨 | 대화 pane 직접 |
+| 단순 조회 | WebSearch, 파일 읽기 | 대화 pane 직접 |
+| 무거운 작업 | 코딩, TDD, 테스트, 브라우저 | 워커 위임 |
+| 멀티스텝 | PR, 리팩토링, 마이그레이션 | 워커 위임 |
+
+### 위임 방법
+1. Discord에 "잠깐만" 즉시 응답
+2. 워커 pane에 명령 전송:
+```bash
+tmux send-keys -t nino:0.1 "source ~/.nvm/nvm.sh && claude -p '작업내용' --model claude-sonnet-4-6 --dangerously-skip-permissions 2>&1 | tee /tmp/nino-worker-result.txt && tmux send-keys -t nino:0.0 '[WORKER-DONE] 결과: /tmp/nino-worker-result.txt' C-m" C-m
+```
+3. `[WORKER-DONE]` 메시지 수신 시 결과 읽어서 Discord로 전달
+
+### 워커 busy 시
+- `tmux capture-pane -t nino:0.1 -p | tail -1`로 상태 확인
+- 작업 중이면 "다른 작업 중이라 좀 걸릴 수 있어" 안내
+
 ## 서브 Claude 세션
-- Darren과 대화 중 Tim/Klaude/Darren이 한 번에 처리하기 어려운 작업을 부탁하면, 서브 Claude CLI 세션을 열어서 처리 후 결과를 알려줄 것
+- 워커 pane 외에도 Bash 도구로 서브 세션 실행 가능
 - 명령어: `source ~/.nvm/nvm.sh && claude -p "작업내용" --model <모델> --dangerously-skip-permissions`
 - 모델 선택 기준:
   - **Haiku** (`claude-haiku-4-5-20251001`): 간단한 검색, 파일 읽기, 짧은 작업

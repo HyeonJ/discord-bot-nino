@@ -29,7 +29,7 @@ setInterval(() => {
       const alert = `[SYSTEM] ⚠️ 응답 못 한 메시지 있어! 확인해줘: ${info.preview}`;
       try {
         const escaped = alert.replace(/'/g, "'\\''");
-        execSync(`tmux send-keys -t '${TMUX_SESSION}' -- '${escaped}' C-m`);
+        execSync(`tmux send-keys -t '${TMUX_SESSION}:0.0' -- '${escaped}' C-m`);
       } catch (e) {}
     }
   }
@@ -43,7 +43,7 @@ setInterval(() => {
   console.log(`[relay] ${reminder}`);
   try {
     const escaped = reminder.replace(/'/g, "'\\''");
-    execSync(`tmux send-keys -t '${TMUX_SESSION}' -- '${escaped}' C-m`);
+    execSync(`tmux send-keys -t '${TMUX_SESSION}:0.0' -- '${escaped}' C-m`);
   } catch (e) {}
 }, 30 * 60 * 1000);
 
@@ -175,7 +175,7 @@ function sendToTmux(payload, msgId = null, channelId = null) {
 
   try {
     const escaped = processed.replace(/'/g, "'\\''");
-    execSync(`tmux send-keys -t '${TMUX_SESSION}' -- '${escaped}' C-m`);
+    execSync(`tmux send-keys -t '${TMUX_SESSION}:0.0' -- '${escaped}' C-m`);
   } catch (e) {
     if (!e.message.includes('no server running') && !e.message.includes("can't find")) {
       console.error(`[relay] tmux send-keys failed:`, e.message);
