@@ -5,6 +5,8 @@ const https = require('https');
 const path = require('path');
 require('dotenv').config();
 const { shouldAutoPull, runAutoPull } = require('./auto-pull');
+const health = require('./health');
+const { startChecking } = require('./health-checker');
 
 const ATTACHMENT_DIR = '/tmp/discord-attachments';
 const HISTORY_DIR = path.join(__dirname, 'memory', 'discord-history');
@@ -74,6 +76,9 @@ client.once('ready', () => {
     process.env.NINO_BOT_ID = client.user.id;
   }
   updatePresence();
+  // 헬스체크 시작
+  health.start();
+  startChecking();
 });
 
 function downloadAttachment(url, filename) {
@@ -211,6 +216,9 @@ function resolveMentions(msg) {
 
 client.on('messageCreate', async (msg) => {
   const botId = process.env.NINO_BOT_ID || client.user?.id;
+  if (msg.author.id !== botId) {
+    health.setLastMessageAt();
+  }
 
   // DM 처리
   if (!msg.guildId) {
