@@ -6,19 +6,54 @@ source "$SCRIPT_DIR/.env"
 
 CHANNEL_ID="${DISCORD_CHANNEL_ID:-1479813609499394169}"
 AUTH="Authorization: Bot $DISCORD_BOT_TOKEN"
+CHANNEL_MAP="$SCRIPT_DIR/channel-map.json"
 
 FILE=""
 MESSAGE=""
 REPLY_TO=""
+THREAD_NAME=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -f|--file) FILE="$2"; shift 2 ;;
     -c|--channel) CHANNEL_ID="$2"; shift 2 ;;
     -r|--reply) REPLY_TO="$2"; shift 2 ;;
+    -t|--thread) THREAD_NAME="$2"; shift 2 ;;
     *) MESSAGE="$1"; shift ;;
   esac
 done
+
+# Resolve channel name to ID via channel-map.json
+if [[ -n "$CHANNEL_ID" && ! "$CHANNEL_ID" =~ ^[0-9]+$ && -f "$CHANNEL_MAP" ]]; then
+  RESOLVED=$(python3 -c "import json,sys; m=json.load(open(sys.argv[1])); print(m.get(sys.argv[2],''))" "$CHANNEL_MAP" "$CHANNEL_ID" 2>/dev/null)
+  if [[ -n "$RESOLVED" ]]; then
+    CHANNEL_ID="$RESOLVED"
+  fi
+fi
+
+# --thread: 부모 채널에 스레드 생성 후 그 스레드에 메시지 전송
+if [[ -n "$THREAD_NAME" ]]; then
+  THREAD_PAYLOAD=$(python3 -c "import json,sys; print(json.dumps({'name':sys.argv[1],'type':11,'auto_archive_duration':10080}))" "$THREAD_NAME")
+  THREAD_RESPONSE=$(curl -s -X POST "https://discord.com/api/v10/channels/$CHANNEL_ID/threads" \
+    -H "$AUTH" \
+    -H "Content-Type: application/json" \
+    -d "$THREAD_PAYLOAD")
+  THREAD_ID=$(python3 -c "import json,sys; d=json.loads(sys.argv[1]); print(d.get('id',''))" "$THREAD_RESPONSE")
+  if [[ -z "$THREAD_ID" ]]; then
+    echo "Error: 스레드 생성 실패: $THREAD_RESPONSE" >&2
+    exit 1
+  fi
+  # channel-map.json에 스레드명 → ID 등록
+  python3 -c "
+import json,sys
+path=sys.argv[1]
+m=json.load(open(path))
+m[sys.argv[2]]=sys.argv[3]
+json.dump(m, open(path,'w'), ensure_ascii=False, indent=2)
+print('Registered thread: ' + sys.argv[2] + ' -> ' + sys.argv[3])
+" "$CHANNEL_MAP" "$THREAD_NAME" "$THREAD_ID"
+  CHANNEL_ID="$THREAD_ID"
+fi
 
 API="https://discord.com/api/v10/channels/$CHANNEL_ID/messages"
 
@@ -35,6 +70,6 @@ if [[ -n "$FILE" ]]; then
 elif [[ -n "$MESSAGE" ]]; then
   curl -s -H "$AUTH" -H "Content-Type: application/json" -d "$JSON_PAYLOAD" "$API" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('content','') or d.get('message','error'))"
 else
-  echo "Usage: discord-send [-f file] [-c channel_id] [-r reply_msg_id] \"message\""
+  echo "Usage: discord-send [-f file] [-c channel_id] [-r reply_msg_id] [-t thread_name] \"message\""
   exit 1
 fi
