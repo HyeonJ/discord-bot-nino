@@ -33,4 +33,13 @@ if [ "$HOUR" = "03" ] && [ -f "$HISTORY_DB" ]; then
     log "OK: yaksu-history snapshot created"
 fi
 
+# 3. .env 암호화 백업 (매일 새벽 3시에만)
+AGE_BIN="$HOME/.local/bin/age"
+AGE_PUBKEY="age1zx3fzyhgk3ysv9nxnhvrw3wezzpkj9ktchdclzdz9k7td5zkjdnqgd3pkl"
+ENV_FILE="$HOME/discord-bot-nino/.env"
+if [ "$HOUR" = "03" ] && [ -f "$ENV_FILE" ] && [ -x "$AGE_BIN" ]; then
+    "$AGE_BIN" -r "$AGE_PUBKEY" -o "$NAS_DIR/env.age" "$ENV_FILE"
+    log "OK: .env encrypted backup created"
+fi
+
 log "OK: backup complete"

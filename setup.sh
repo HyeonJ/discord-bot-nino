@@ -222,6 +222,21 @@ step "Phase 7: .env 확인"
 
 if [[ -f "$BOT_DIR/.env" ]]; then
     ok ".env 존재"
+elif [[ -f "$NAS_DIR/env.age" ]]; then
+    # NAS에 암호화된 .env가 있으면 복호화 시도
+    AGE_BIN=$(command -v age 2>/dev/null || echo "$HOME/.local/bin/age")
+    if [[ -x "$AGE_BIN" ]]; then
+        warn "NAS에서 암호화된 .env 발견 — 복호화 키 파일 경로를 입력하세요"
+        read -rp "age 키 파일 경로 (예: /path/to/nino-age-key.txt): " AGE_KEY_PATH
+        if [[ -f "$AGE_KEY_PATH" ]]; then
+            "$AGE_BIN" -d -i "$AGE_KEY_PATH" "$NAS_DIR/env.age" > "$BOT_DIR/.env"
+            ok ".env 복호화 완료!"
+        else
+            warn "키 파일 없음 — .env 수동 생성 필요"
+        fi
+    else
+        warn "age 미설치 — .env 수동 생성 필요"
+    fi
 else
     if [[ -f "$BOT_DIR/.env.example" ]]; then
         cp "$BOT_DIR/.env.example" "$BOT_DIR/.env"
