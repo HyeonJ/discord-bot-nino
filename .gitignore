@@ -1,4 +1,5 @@
 .env
+.envn
 *.log
 __pycache__/
 *.pyc
@@ -7,3 +8,12 @@ logs/
 node_modules/
 package-lock.json
 package.json
+
+# .claude — project settings만 트래킹
+.claude/*
+!.claude/settings.json
+
+# claude-config — skills/hooks 백업 (홈 디렉토리 ~/.claude/ 미러)
+# claude-config/skills/
+# claude-config/hooks/
+# claude-config/user-settings.json

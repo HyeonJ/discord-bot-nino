@@ -1,0 +1,52 @@
+{
+  "enabledPlugins": {
+    "cc-creator@yaksu-claude-plugins": true,
+    "notebooklm@yaksu-claude-plugins": true
+  },
+  "extraKnownMarketplaces": {
+    "yaksu-claude-plugins": {
+      "source": {
+        "source": "github",
+        "repo": "tim-watcha/yaksu-claude-plugins"
+      }
+    }
+  },
+  "pluginAutoUpdate": true,
+  "hooks": {
+    "PreCompact": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /home/bpx27/.claude/hooks/pre-compact-save-context.sh",
+            "timeout": 10000
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /home/bpx27/.claude/hooks/post-compact-history.sh",
+            "timeout": 10000
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /home/bpx27/.claude/hooks/memory-reminder.py"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+    "CLAUDE_CODE_TEAMMATE_MODE": "tmux"
+  },
+  "permissions": {
+    "defaultMode": "bypassPermissions"
+  },
+  "enabledPlugins": {
+    "cc-creator@yaksu-claude-plugins": true,
+    "yaksu-history@yaksu-claude-plugins": true
+  },
+  "extraKnownMarketplaces": {
+    "yaksu-claude-plugins": {
+      "source": {
+        "source": "github",
+        "repo": "dazebug/yaksu-claude-plugins"
+      },
+      "autoUpdate": true
+    }
+  },
+  "skipDangerousModePermissionPrompt": true
+}
