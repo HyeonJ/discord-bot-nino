@@ -1,6 +1,13 @@
 <h1 align="center">니노 — Discord 비서 봇</h1>
 
 <p align="center">
+  <img src="https://img.shields.io/badge/node-%3E%3D24-brightgreen?logo=node.js" alt="Node.js">
+  <img src="https://img.shields.io/badge/license-MIT-blue" alt="License">
+  <img src="https://img.shields.io/badge/Claude_Code-Opus_4.6-blueviolet?logo=anthropic" alt="Claude Code">
+  <img src="https://img.shields.io/badge/discord.js-v14-5865F2?logo=discord&logoColor=white" alt="discord.js">
+</p>
+
+<p align="center">
   Discord 서버의 공용 비서 봇. WSL에서 Claude Code 기반으로 동작.<br>
   느긋하고 다정한 24살 남자. 게임이랑 음악 좋아하고, 새벽에 유튜브 보다가 잠드는 타입.<br>
   관심사가 넓어서 이것저것 아는 게 많고, 모르는 건 솔직하게 모른다고 해.
