@@ -6,14 +6,14 @@
 ```bash
 git clone https://github.com/HyeonJ/discord-bot-nino.git
 cd discord-bot-nino
-./setup.sh --mode bootstrap
+./scripts/setup.sh --mode bootstrap
 ```
 
 ### 시나리오 2: 백업에서 빠른 복구 (fast-restore)
 ```bash
 cd ~/discord-bot-nino
 git pull
-./setup.sh --mode fast-restore
+./scripts/setup.sh --mode fast-restore
 ```
 
 ## 복구 체크리스트
@@ -30,7 +30,7 @@ git pull
 
 ### 3. 봇 시작
 ```bash
-bash ~/discord-bot-nino/start-nino.sh
+bash ~/discord-bot-nino/scripts/start-nino.sh
 ```
 
 ### 4. 검증
@@ -43,15 +43,18 @@ bash ~/discord-bot-nino/start-nino.sh
 
 ```
 GitHub 레포 (public)
-├── 코드 (relay, send, scripts)
+├── src/           ← 코어 봇 코드 (relay, send, health)
+├── scripts/       ← 운영 스크립트 (start, watchdog, backup)
+├── config/        ← 설정 파일 (bots.json, channel-map)
+├── tools/         ← 유틸리티 (calendar, podcast, onedrive)
+├── media/         ← 미디어 제어 (TV, YouTube Music, ATV)
+├── of/            ← OF 다운로드 도구
 ├── claude-config/
 │   ├── skills/     ← ~/.claude/skills/ 미러
 │   ├── hooks/      ← ~/.claude/hooks/ 미러
 │   └── user-settings.json
 ├── .claude/settings.json (프로젝트 설정)
 ├── .env.example
-├── backup-to-nas.sh
-├── setup.sh
 └── RECOVERY.md
 
 NAS (/mnt/d/Darren/backup/nino/)

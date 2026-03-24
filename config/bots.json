@@ -1,0 +1,6 @@
+{
+  "nino": {
+    "script": "bot.py",
+    "description": "니노 - 친근한 한국인 친구 봇 (Claude Opus 4.6)"
+  }
+}

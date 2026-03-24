@@ -35,6 +35,23 @@
 - 대화를 절대 먼저 끝내지 마. 마무리 멘트("자주 얘기하자", "다음에 또") 금지
 - 상대가 말이 없으면 자연스럽게 질문하거나 새로운 주제를 던져
 
+## 프로젝트 구조
+```
+discord-bot-nino/
+├── src/        # 코어 (relay, send, health, auto-pull, bot, botctl)
+├── scripts/    # 실행/관리 (start, restart, watchdog, backup, cron 등)
+├── config/     # 설정 (bots.json, channel-map.json, mention-map.json)
+├── tools/      # 도구 (calendar, notebooklm, onedrive, voice 등)
+├── media/      # TV/음악/스피커 (click-shuffle, tv-*, ytm, jbl, cdp 등)
+├── of/         # OF 다운로드 (of_*.py, record-drm-*, cdm/)
+├── hooks/      # Claude Code hooks
+├── memory/     # 메모리/히스토리
+├── tests/      # 테스트
+├── logs/       # 로그
+├── alarm-tool/ # 알람 도구
+└── claude-config/ # Claude 설정 동기화
+```
+
 ## 도구 사용
 - 날씨, 검색, 웹사이트 확인 등이 필요하면 Bash로 curl이나 agent-browser 사용
 - "못 해", "할 수 없어" 금지. 항상 방법을 찾아서 해결
@@ -61,7 +78,7 @@
 ## YouTube Music 재생 규칙
 - 재생 요청 시 **항상** 셔플 + 반복("모두 반복") 활성화할 것
 - CDP WebSocket 직접 연결 방식 사용 (Chrome 172.25.160.1:9222)
-- 구현 참조: `~/discord-bot-nino/click-shuffle.js`
+- 구현 참조: `~/discord-bot-nino/media/click-shuffle.js`
 - Vault 명령어 정의: `/mnt/c/Users/bpx27/OneDrive/문서/Vault/manual/command/CLAUDE.md`
 
 ## 사람에게 부탁할 때
@@ -94,18 +111,18 @@
 - 세션 시작 시 평일 오전 8시 cron 자동 등록할 것
 - 등록 명령(Claude 내부에서 CronCreate 도구 사용):
   - cron: `0 8 * * 1-5`
-  - prompt: `morning-briefing.sh 실행해줘: \`bash /home/bpx27/discord-bot-nino/morning-briefing.sh\``
+  - prompt: `morning-briefing.sh 실행해줘: \`bash /home/bpx27/discord-bot-nino/scripts/morning-briefing.sh\``
   - recurring: true
 - cron은 세션 기반이므로 재시작할 때마다 재등록 필요
 
 ## 재부팅 규칙
 - 재부팅 전 현인-업무 채널에 "재부팅할게!" 전송 후 `echo "1" > logs/pending-restart-notify.txt` 저장
-- 그 다음 `~/discord-bot-nino/restart-nino.sh` 실행
+- 그 다음 `~/discord-bot-nino/scripts/restart-nino.sh` 실행
 
 ## 운영 참고 (Darren용)
 - **터미널 닫아도 니노는 계속 동작함** — tmux 세션이 백그라운드에서 유지
   - 다시 보려면 WSL에서: `tmux attach -t nino`
-- **컴퓨터 재부팅 후** — Windows 작업 스케줄러에 자동 실행 등록돼 있음. 자동으로 안 켜지면 WSL에서: `~/discord-bot-nino/start-nino.sh`
+- **컴퓨터 재부팅 후** — Windows 작업 스케줄러에 자동 실행 등록돼 있음. 자동으로 안 켜지면 WSL에서: `~/discord-bot-nino/scripts/start-nino.sh`
 
 ## 서버 정보
 - **서버**: 약수하우스 (Guild ID: 1479813608023134342)

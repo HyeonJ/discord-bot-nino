@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# onedrive-upload - Upload files/folders to OneDrive via rclone
+# Bypasses broken WSL2 → OneDrive local sync by uploading directly to cloud.
+set -euo pipefail
+
+RCLONE="$HOME/.local/bin/rclone"
+REMOTE="onedrive"
+
+usage() {
+    cat <<'USAGE'
+Usage:
+  onedrive-upload <file_or_dir> <onedrive_path>   Upload file/folder
+  onedrive-upload --mkdir <onedrive_path>          Create folder
+  onedrive-upload --sync <local_dir> <onedrive_path>  Sync directory
+  onedrive-upload --ls <onedrive_path>             List contents
+
+Examples:
+  onedrive-upload file.md 문서/Vault/research/
+  onedrive-upload ./my-folder/ 문서/Vault/
+  onedrive-upload --mkdir 문서/Vault/new-folder
+  onedrive-upload --sync /mnt/c/Users/bpx27/OneDrive/문서/Vault/research 문서/Vault/research
+  onedrive-upload --ls 문서/Vault/
+USAGE
+    exit 1
+}
+
+[[ $# -lt 1 ]] && usage
+
+case "$1" in
+    --mkdir)
+        [[ $# -lt 2 ]] && usage
+        $RCLONE mkdir "$REMOTE:$2"
+        echo "Created: $2"
+        ;;
+    --sync)
+        [[ $# -lt 3 ]] && usage
+        $RCLONE sync "$2" "$REMOTE:$3" --progress
+        ;;
+    --ls)
+        [[ $# -lt 2 ]] && usage
+        $RCLONE lsd "$REMOTE:$2"
+        ;;
+    -h|--help)
+        usage
+        ;;
+    *)
+        [[ $# -lt 2 ]] && usage
+        if [[ -d "$1" ]]; then
+            $RCLONE copy "$1" "$REMOTE:$2" --progress
+        elif [[ -f "$1" ]]; then
+            $RCLONE copy "$1" "$REMOTE:$2" --progress
+        else
+            echo "Error: $1 not found" >&2
+            exit 1
+        fi
+        echo "Uploaded: $1 -> $2"
+        ;;
+esac
