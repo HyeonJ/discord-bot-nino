@@ -7,7 +7,8 @@ BOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 SESSION="nino"
 LOG="$BOT_DIR/logs/watchdog.log"
 DISCORD_SEND="$BOT_DIR/src/discord-send"
-ALERT_CHANNEL="1479813609499394171"  # 현인-업무
+CHANNEL_MAP="$BOT_DIR/config/channel-map.json"
+ALERT_CHANNEL=$(jq -r '.["현인-업무"]' "$CHANNEL_MAP")
 
 source "$BOT_DIR/.env" 2>/dev/null || true
 
