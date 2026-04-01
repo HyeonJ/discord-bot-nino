@@ -6,6 +6,8 @@ BOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 LAST_ALERT_FILE="/tmp/nino-auth-last-alert"
 ALERT_INTERVAL=3600
 CREDENTIALS="$HOME/.claude/.credentials.json"
+CHANNEL_MAP="$BOT_DIR/config/channel-map.json"
+ALERT_CHANNEL=$(jq -r '.["현인-업무"]' "$CHANNEL_MAP")
 
 # 만료 전 경고: 1시간 이내 만료 시 미리 알림
 if [[ -f "$CREDENTIALS" ]]; then
@@ -20,7 +22,7 @@ if [[ -f "$CREDENTIALS" ]]; then
       [[ -f "/tmp/nino-auth-expiry-alert" ]] && LAST_EXPIRY_ALERT=$(cat /tmp/nino-auth-expiry-alert)
       NOW_S=$(date +%s)
       if [[ $((NOW_S - LAST_EXPIRY_ALERT)) -ge 1800 ]]; then
-        "$BOT_DIR/src/discord-send" -c 1479813609499394171 "<@353914579929268226> 니노 토큰이 ${REMAINING_MIN}분 후 만료돼! tmux attach -t nino 후 /login 해줘"
+        "$BOT_DIR/src/discord-send" -c "$ALERT_CHANNEL" "<@353914579929268226> 니노 토큰이 ${REMAINING_MIN}분 후 만료돼! tmux attach -t nino 후 /login 해줘"
         echo "$NOW_S" > /tmp/nino-auth-expiry-alert
       fi
     fi
@@ -41,6 +43,6 @@ LAST_ALERT=0
 ELAPSED=$((NOW - LAST_ALERT))
 
 if [[ $ELAPSED -ge $ALERT_INTERVAL ]]; then
-  "$BOT_DIR/src/discord-send" -c 1479813609499394171 "<@353914579929268226> Claude Code 인증이 만료됐어! tmux attach -t nino 후 /login 해줘"
+  "$BOT_DIR/src/discord-send" -c "$ALERT_CHANNEL" "<@353914579929268226> Claude Code 인증이 만료됐어! tmux attach -t nino 후 /login 해줘"
   echo "$NOW" > "$LAST_ALERT_FILE"
 fi

@@ -17,3 +17,18 @@ package.json
 # claude-config/skills/
 # claude-config/hooks/
 # claude-config/user-settings.json
+
+# 런타임/임시 파일
+null
+*.wav
+current-playlist.json
+cdp-ports.json
+playlist-add-results.json
+nino-mic-test.txt
+
+# 이미지
+nino_avatar.png
+.topSection
+
+# 도구 로컬 설정
+.python-version
