@@ -11,7 +11,7 @@
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 CHANNEL_MAP="$BOT_DIR/config/channel-map.json"
-DISCORD_CHANNEL=$(jq -r '.["현인-다용도"]' "$CHANNEL_MAP")
+DISCORD_CHANNEL=$(python3 -c "import json; print(json.load(open('$CHANNEL_MAP'))['현인-다용도'])" 2>/dev/null || echo "1480593132511826092")
 
 # 1. OAuth 토큰 추출
 TOKEN=$(python3 -c "import json; d=json.load(open('$HOME/.claude/.credentials.json')); print(d['claudeAiOauth']['accessToken'])" 2>/dev/null)

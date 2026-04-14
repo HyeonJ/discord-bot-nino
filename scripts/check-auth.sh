@@ -7,7 +7,7 @@ LAST_ALERT_FILE="/tmp/nino-auth-last-alert"
 ALERT_INTERVAL=3600
 CREDENTIALS="$HOME/.claude/.credentials.json"
 CHANNEL_MAP="$BOT_DIR/config/channel-map.json"
-ALERT_CHANNEL=$(jq -r '.["현인-업무"]' "$CHANNEL_MAP")
+ALERT_CHANNEL=$(python3 -c "import json; print(json.load(open('$CHANNEL_MAP'))['현인-업무'])" 2>/dev/null || echo "1479813609499394171")
 
 # 만료 전 경고: 1시간 이내 만료 시 미리 알림
 if [[ -f "$CREDENTIALS" ]]; then

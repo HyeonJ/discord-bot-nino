@@ -5,7 +5,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 VAULT_SCHEDULE="/mnt/c/Users/bpx27/OneDrive/문서/Vault/schedule"
-CHANNEL_ID="1480593132511826092"
+CHANNEL_MAP="$BOT_DIR/config/channel-map.json"
+CHANNEL_ID=$(python3 -c "import json; print(json.load(open('$CHANNEL_MAP'))['현인-다용도'])" 2>/dev/null || echo "1480593132511826092")
 
 TODAY=$(TZ=Asia/Seoul date +%Y-%m-%d)
 DAY_OF_WEEK=$(TZ=Asia/Seoul date +%u)  # 1=Mon ... 7=Sun

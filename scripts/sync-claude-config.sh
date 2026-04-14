@@ -50,15 +50,14 @@ if ! diff -q "$BOT_DIR/.claude/settings.json" "$CLAUDE_DIR/settings.json" &>/dev
     :
 fi
 
-# 변경 있으면 커밋+푸시
+# 변경 있으면 커밋 (push는 수동 — PR 규칙 준수)
 if [[ $CHANGED -gt 0 ]]; then
     cd "$BOT_DIR"
     git add claude-config/ .claude/settings.json
     git commit -m "chore: claude-config 자동 동기화 ($CHANGED 파일)
 
 Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>" 2>/dev/null || true
-    git push 2>/dev/null || true
-    log "OK: $CHANGED files synced and pushed"
+    log "OK: $CHANGED files synced and committed (push는 수동)"
 else
     log "OK: no changes"
 fi
