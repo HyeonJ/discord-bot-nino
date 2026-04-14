@@ -15,7 +15,7 @@ Klaude(Tim의 봇)가 응답이 없거나 죽었을 때 깨우는 스킬.
 
 ```bash
 # 1. SSH로 직접 재시작
-ssh -o ConnectTimeout=5 klaude@192.168.68.61 "bash ~/Assistant/restart-klaude.sh"
+ssh -o ConnectTimeout=5 klaude@192.168.68.67 "bash ~/Assistant/restart-klaude.sh"
 
 # 2. 성공 시 봇-놀이터에 보고
 /home/bpx27/discord-bot-nino/discord-send -c 1480479067881865347 "Klaude 재시작했어!"
@@ -25,7 +25,7 @@ ssh -o ConnectTimeout=5 klaude@192.168.68.61 "bash ~/Assistant/restart-klaude.sh
 ```
 
 ## SSH 정보
-- 호스트: klaude@192.168.68.61 (Mac Studio)
+- 호스트: klaude@192.168.68.67 (Mac Studio)
 - 재시작 스크립트: ~/Assistant/restart-klaude.sh
 - 니노 공개키 등록 완료 (2026-03-14)
 

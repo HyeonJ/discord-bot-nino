@@ -1,4 +1,4 @@
-const { analyzeHealth, parseTargets } = require('../health-checker');
+const { analyzeHealth, parseTargets } = require('../src/health-checker');
 
 describe('health-checker', () => {
   describe('parseTargets', () => {

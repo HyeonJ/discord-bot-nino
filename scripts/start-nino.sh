@@ -9,12 +9,15 @@ LOG_DIR="$BOT_DIR/logs"
 
 mkdir -p "$LOG_DIR"
 
-# git pull (손상된 오브젝트 방어 포함)
+# git pull (안전 모드 — uncommitted changes 있으면 스킵)
 echo "[start] git pull 중..."
 cd "$BOT_DIR"
 find .git/objects -type f -empty -delete 2>/dev/null || true
-git fetch --all 2>&1 | tail -1
-git reset --hard origin/main 2>&1 | tail -1
+if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then
+  echo "[start] ⚠️ uncommitted changes 있어서 pull 스킵"
+else
+  git pull --ff-only 2>&1 | tail -1
+fi
 echo "[start] 최신 커밋: $(git log --oneline -1)"
 
 # tmux 세션이 이미 있으면 종료

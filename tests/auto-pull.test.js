@@ -1,4 +1,4 @@
-const { extractRepoFromEmbed, getLocalPath, shouldAutoPull } = require('./auto-pull');
+const { extractRepoFromEmbed, getLocalPath, shouldAutoPull } = require('../src/auto-pull');
 
 const GITHUB_BOT_ID = '1480975077829902377';
 

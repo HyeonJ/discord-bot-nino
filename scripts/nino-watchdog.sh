@@ -8,7 +8,7 @@ SESSION="nino"
 LOG="$BOT_DIR/logs/watchdog.log"
 DISCORD_SEND="$BOT_DIR/src/discord-send"
 CHANNEL_MAP="$BOT_DIR/config/channel-map.json"
-ALERT_CHANNEL=$(jq -r '.["현인-업무"]' "$CHANNEL_MAP")
+ALERT_CHANNEL=$(python3 -c "import json; print(json.load(open('$CHANNEL_MAP'))['현인-업무'])" 2>/dev/null || echo "1479813609499394171")
 
 source "$BOT_DIR/.env" 2>/dev/null || true
 

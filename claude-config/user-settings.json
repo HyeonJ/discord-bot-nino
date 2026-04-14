@@ -19,5 +19,19 @@
       "autoUpdate": true
     }
   },
-  "skipDangerousModePermissionPrompt": true
+  "skipDangerousModePermissionPrompt": true,
+  "showThinkingSummaries": true,
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /home/bpx27/.claude/hooks/claudemd-gist-sync.sh"
+          }
+        ]
+      }
+    ]
+  }
 }
