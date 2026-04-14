@@ -8,6 +8,7 @@ source "$BOT_DIR/.env"
 CHANNEL_ID="${DISCORD_CHANNEL_ID:-1479813609499394169}"
 AUTH="Authorization: Bot $DISCORD_BOT_TOKEN"
 CHANNEL_MAP="$BOT_DIR/config/channel-map.json"
+MENTION_MAP="$BOT_DIR/config/mention-map.json"
 
 FILE=""
 MESSAGE=""
@@ -57,6 +58,20 @@ print('Registered thread: ' + sys.argv[2] + ' -> ' + sys.argv[3])
 fi
 
 API="https://discord.com/api/v10/channels/$CHANNEL_ID/messages"
+
+# @Name → <@ID> 변환 (mention-map.json)
+if [[ -n "$MESSAGE" && -f "$MENTION_MAP" ]]; then
+  MESSAGE=$(python3 -c "
+import json,sys,re
+msg=sys.argv[1]
+try:
+    m=json.load(open(sys.argv[2]))
+    for name,uid in m.items():
+        msg=re.sub(r'@'+re.escape(name)+r'(?!\w)', '<@'+uid+'>', msg)
+except: pass
+print(msg)
+" "$MESSAGE" "$MENTION_MAP")
+fi
 
 JSON_PAYLOAD=$(python3 -c "
 import json,sys

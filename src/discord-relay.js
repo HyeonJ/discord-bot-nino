@@ -12,9 +12,8 @@ const ATTACHMENT_DIR = '/tmp/discord-attachments';
 const HISTORY_DIR = path.join(__dirname, '..', 'memory', 'discord-history');
 
 const TMUX_SESSION = process.env.TMUX_SESSION || 'nino';
-const GUILD_ID = '1479813608023134342';
-const DEFAULT_CHANNEL = '1479813609499394169';
-const ALERT_CHANNEL = '1480593132511826092'; // Darren 채널 (응답 실패 알림용)
+const GUILD_ID = process.env.GUILD_ID || '1479813608023134342';
+const DEFAULT_CHANNEL = process.env.DEFAULT_CHANNEL || '1479813609499394169';
 const MSG_DIR = '/tmp/nino-msgs';
 const MAX_INLINE_LENGTH = 1500;   // 이 이상이면 파일로 저장
 const RESPONSE_TIMEOUT_MS = 3 * 60 * 1000; // 3분
@@ -32,7 +31,7 @@ setInterval(() => {
       try {
         const escaped = alert.replace(/'/g, "'\\''");
         execSync(`tmux send-keys -t '${TMUX_SESSION}' -- '${escaped}' C-m`);
-      } catch (e) {}
+      } catch (_e) {}
     }
   }
 }, 10000);
@@ -46,17 +45,25 @@ setInterval(() => {
   try {
     const escaped = reminder.replace(/'/g, "'\\''");
     execSync(`tmux send-keys -t '${TMUX_SESSION}' -- '${escaped}' C-m`);
-  } catch (e) {}
+  } catch (_e) {}
 }, 30 * 60 * 1000);
 
 // 니노 봇 ID — .env의 NINO_BOT_ID 또는 아래 기본값
 const NINO_BOT_ID = process.env.NINO_BOT_ID || '';
 
-// Discord user ID → display name mapping
-const USER_MAP = {
-  '265454241387249665': 'Tim',
-  '353914579929268226': 'Darren',
-};
+// Discord user ID → display name mapping (mention-map.json의 역방향)
+const USER_MAP = (() => {
+  try {
+    const mentionMap = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'config', 'mention-map.json'), 'utf-8'));
+    const reversed = {};
+    for (const [name, id] of Object.entries(mentionMap)) {
+      if (!reversed[id]) reversed[id] = name;
+    }
+    return reversed;
+  } catch {
+    return { '265454241387249665': 'Tim', '353914579929268226': 'Darren' };
+  }
+})();
 
 const client = new Client({
   intents: [
@@ -391,7 +398,7 @@ try {
     if (filename === statusBase) updatePresence();
   });
   console.log('[relay] Using fs.watch for status file');
-} catch (e) {
+} catch (_e) {
   fs.watchFile(STATUS_FILE, { interval: 2000 }, () => {
     updatePresence();
   });

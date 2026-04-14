@@ -39,7 +39,7 @@ function fetchHealth(url) {
         clearTimeout(timeout);
         try {
           resolve(JSON.parse(body));
-        } catch (e) {
+        } catch (_e) {
           reject(new Error('invalid json'));
         }
       });
@@ -99,7 +99,7 @@ async function checkBot(target) {
   let data = null;
   try {
     data = await fetchHealth(target.url);
-  } catch (e) {
+  } catch (_e) {
     // 연결 실패
   }
 
