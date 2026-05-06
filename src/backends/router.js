@@ -1,3 +1,5 @@
+const codexAdapter = require('./codex');
+
 function createDefaultState() {
   return new Map();
 }
@@ -18,6 +20,21 @@ function isBackendEnabled(config, backendId) {
 
 function getBackendConfig(config, backendId) {
   return config && config.backends ? config.backends[backendId] : undefined;
+}
+
+function parseChannelList(value) {
+  if (!value) {
+    return [];
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((channel) => String(channel).trim()).filter(Boolean);
+  }
+
+  return String(value)
+    .split(',')
+    .map((channel) => channel.trim())
+    .filter(Boolean);
 }
 
 function canRoute(adapter, backendConfig) {
@@ -53,34 +70,53 @@ function completedResult(requestId, stateEntry) {
   };
 }
 
-function createRouter({ config, adapters, state } = {}) {
+function createRouter({ config, adapters, state, env } = {}) {
   const requestState = state || createDefaultState();
-  const backendAdapters = adapters || {};
+  const backendAdapters = { codex: codexAdapter, ...(adapters || {}) };
   const backendConfig = config || { primary: null, fallback: [], backends: {} };
+  const runtimeEnv = env || process.env;
+  const codexTestChannels = new Set(parseChannelList(
+    backendConfig.codexTestChannels ||
+    backendConfig.testChannels ||
+    (runtimeEnv && runtimeEnv.CODEX_TEST_CHANNELS)
+  ));
 
-  function chooseBackend(requestId) {
+  function getRoutableBackend(backendId) {
+    if (!isBackendEnabled(backendConfig, backendId)) {
+      return null;
+    }
+
+    const adapter = backendAdapters[backendId];
+    const configForBackend = getBackendConfig(backendConfig, backendId);
+    if (!canRoute(adapter, configForBackend)) {
+      return null;
+    }
+
+    return { ok: true, backendId, adapter, config: configForBackend };
+  }
+
+  function chooseBackend(requestId, request) {
+    if (request && request.channelId && codexTestChannels.has(String(request.channelId))) {
+      const codex = getRoutableBackend('codex');
+      if (codex) {
+        return codex;
+      }
+    }
+
     const primary = backendConfig.primary;
     if (!primary) {
       return { ok: false, reason: 'no_primary', requestId };
     }
 
-    if (isBackendEnabled(backendConfig, primary)) {
-      const primaryAdapter = backendAdapters[primary];
-      const primaryConfig = getBackendConfig(backendConfig, primary);
-      if (canRoute(primaryAdapter, primaryConfig)) {
-        return { ok: true, backendId: primary, adapter: primaryAdapter, config: primaryConfig };
-      }
+    const primaryBackend = getRoutableBackend(primary);
+    if (primaryBackend) {
+      return primaryBackend;
     }
 
     for (const backendId of backendConfig.fallback || []) {
-      if (!isBackendEnabled(backendConfig, backendId)) {
-        continue;
-      }
-
-      const adapter = backendAdapters[backendId];
-      const fallbackConfig = getBackendConfig(backendConfig, backendId);
-      if (canRoute(adapter, fallbackConfig)) {
-        return { ok: true, backendId, adapter, config: fallbackConfig };
+      const fallbackBackend = getRoutableBackend(backendId);
+      if (fallbackBackend) {
+        return fallbackBackend;
       }
     }
 
@@ -94,7 +130,7 @@ function createRouter({ config, adapters, state } = {}) {
       return completedResult(requestId, current);
     }
 
-    const selected = chooseBackend(requestId);
+    const selected = chooseBackend(requestId, request);
     if (!selected.ok) {
       return selected;
     }
