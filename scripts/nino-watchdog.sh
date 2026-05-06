@@ -43,6 +43,12 @@ restart_backend() {
   fi
 }
 
+scan_quota() {
+  local backend="$1"
+  local session="$2"
+  "$SCRIPT_DIR/scan-backend-quota.sh" "$backend" "$session" >> "$LOG" 2>&1 || true
+}
+
 check_backend() {
   local backend="$1"
   local session="$2"
@@ -110,11 +116,13 @@ check_claude_d_state() {
 
 if is_enabled "$CLAUDE_ENABLED"; then
   check_backend "claude" "$CLAUDE_SESSION" "claude" || exit 0
+  scan_quota "claude" "$CLAUDE_SESSION"
   check_claude_d_state "$CLAUDE_SESSION" || exit 0
 fi
 
 if is_enabled "$CODEX_ENABLED"; then
   check_backend "codex" "$CODEX_SESSION" "codex" || exit 0
+  scan_quota "codex" "$CODEX_SESSION"
 fi
 
 exit 0

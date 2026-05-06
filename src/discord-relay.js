@@ -48,6 +48,25 @@ function checkPendingTimeouts() {
   const now = Date.now();
   for (const [msgId, info] of pendingResponses) {
     if (now - info.timestamp > RESPONSE_TIMEOUT_MS) {
+      if (!info.fallbackAttempted && info.payload && typeof backendRouter.routeFallback === 'function') {
+        const result = backendRouter.routeFallback({
+          requestId: msgId,
+          payload: info.payload,
+          messageId: msgId,
+          channelId: info.channelId,
+          preview: info.preview,
+        });
+        if (result.ok) {
+          pendingResponses.set(msgId, {
+            ...info,
+            timestamp: now,
+            backendId: result.backendId,
+            fallbackAttempted: true,
+          });
+          continue;
+        }
+      }
+
       pendingResponses.delete(msgId);
       const alert = `[SYSTEM] ⚠️ 응답 못 한 메시지 있어! 확인해줘: ${info.preview}`;
       try {
@@ -196,6 +215,7 @@ function sendToTmux(payload, msgId = null, channelId = null) {
       channelId,
       timestamp: Date.now(),
       preview,
+      payload: processed,
     });
   }
 
@@ -470,6 +490,7 @@ module.exports = {
   startRelay,
   __test: {
     pendingResponses,
+    checkPendingTimeouts,
     completePendingInChannel,
   },
 };

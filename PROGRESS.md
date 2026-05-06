@@ -49,6 +49,7 @@ Phase 2 shared Codex context implementation is in progress.
 14. Verified shared-context Discord smoke tests in the Codex test channel.
 15. Started Codex-only runtime test and fixed watchdog provider-process detection for pane-owned backend processes.
 16. Verified Codex-only Discord routing from a non-test channel, then restored mixed-test mode.
+17. Added provider-neutral runtime backend status, timeout fallback routing, and quota scanner hooks for true hybrid operation.
 
 ## Current Temporary Runtime State
 
@@ -128,8 +129,9 @@ After restarting `nino-codex`, test shared context with:
 
 ## Verification
 
-- `npm test`: 12 suites / 102 tests passed.
-- `bash -n scripts/shared-data.sh scripts/start-backend.sh scripts/start-codex-nino.sh scripts/restart-backend.sh scripts/nino-watchdog.sh scripts/start-nino.sh scripts/restart-nino.sh`: passed.
+- `npm test`: 13 suites / 113 tests passed.
+- `bash -n scripts/backend-status.sh scripts/scan-backend-quota.sh scripts/shared-data.sh scripts/start-backend.sh scripts/start-codex-nino.sh scripts/restart-backend.sh scripts/nino-watchdog.sh scripts/start-nino.sh scripts/restart-nino.sh`: passed.
+- `BACKEND_STATUS_DIR=<tmp> bash scripts/backend-status.sh set/clear codex quota_exhausted`: passed.
 - `node scripts/build-memory-index.js`: generated `shared-context/MEMORY_INDEX.md`.
 - `bash scripts/shared-data.sh read todo-list.md`: read live shared-data through the wrapper.
 - Codex-only `/health` with temporary env:
@@ -153,9 +155,9 @@ After restarting `nino-codex`, test shared context with:
 
 ## Next Tasks
 
-1. Decide whether to keep the feature worktree override until merge or switch back to main before merge.
-2. Decide whether Codex-only mode should route all channels or require an explicit `PRIMARY_BACKEND=codex` for production.
-3. Prepare final review covering optional backends, Codex shared context, memory index, shared-data wrapper, and Codex-only smoke.
+1. Smoke test `PRIMARY_BACKEND=codex` + `FALLBACK_BACKENDS=claude` with `backend-status.sh set codex quota_exhausted`.
+2. Decide whether to keep the feature worktree override until merge or switch back to main before merge.
+3. Prepare final review covering optional backends, hybrid failover, Codex shared context, memory index, shared-data wrapper, and Codex-only smoke.
 4. Prepare PR/merge only after final review is clean.
 
 ## Open Questions

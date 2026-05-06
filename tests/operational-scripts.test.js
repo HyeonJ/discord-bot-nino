@@ -47,6 +47,9 @@ describe('operational backend scripts', () => {
     expect(watchdog).toContain('check_claude_d_state "$CLAUDE_SESSION"');
     expect(watchdog).toContain('"$SCRIPT_DIR/restart-nino.sh"');
     expect(watchdog).toContain('"$SCRIPT_DIR/restart-backend.sh" "$backend"');
+    expect(watchdog).toContain('scan_quota "claude" "$CLAUDE_SESSION"');
+    expect(watchdog).toContain('scan_quota "codex" "$CODEX_SESSION"');
+    expect(watchdog).toContain('"$SCRIPT_DIR/scan-backend-quota.sh" "$backend" "$session"');
     expect(watchdog).toContain('check_backend "codex" "$CODEX_SESSION" "codex"');
   });
 
@@ -75,5 +78,26 @@ describe('operational backend scripts', () => {
     expect(sharedData).toContain('read)');
     expect(sharedData).toContain('write)');
     expect(sharedData).toContain('append)');
+  });
+
+  test('backend-status script manages provider-neutral runtime status files', () => {
+    const backendStatus = script('backend-status.sh');
+
+    expect(backendStatus).toContain('STATUS_DIR="${BACKEND_STATUS_DIR:-$BOT_DIR/runtime/backend-status}"');
+    expect(backendStatus).toContain('set|clear|show|list');
+    expect(backendStatus).toContain('quota_exhausted|cooldown|maintenance|disabled|ready');
+    expect(backendStatus).toContain('"state": "$state"');
+    expect(backendStatus).toContain('"reason": "$reason"');
+    expect(backendStatus).toContain('"until": "$until"');
+    expect(backendStatus).toContain('rm -f "$status_file"');
+  });
+
+  test('backend quota scanner can mark any backend quota_exhausted from tmux output', () => {
+    const scanner = script('scan-backend-quota.sh');
+
+    expect(scanner).toContain('tmux capture-pane');
+    expect(scanner).toContain('usage limit reached|rate limit|quota exceeded|limit reached|try again later|too many requests|insufficient_quota');
+    expect(scanner).toContain('backend-status.sh" set "$backend" quota_exhausted');
+    expect(scanner).toContain('QUOTA_COOLDOWN_UNTIL');
   });
 });

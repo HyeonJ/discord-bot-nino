@@ -1,4 +1,5 @@
 const codexAdapter = require('./codex');
+const runtimeStatus = require('./runtime-status');
 
 function createDefaultState() {
   return new Map();
@@ -43,6 +44,11 @@ function canRoute(adapter, backendConfig) {
   }
 
   try {
+    const status = runtimeStatus.getRuntimeStatus(adapter.id);
+    if (status && status.blocked) {
+      return false;
+    }
+
     if (typeof adapter.canRoute === 'function') {
       return Boolean(adapter.canRoute(backendConfig));
     }
@@ -126,18 +132,7 @@ function createRouter({ config, adapters, state, env } = {}) {
     return { ok: false, reason: 'backend_unavailable', backendId: primary, requestId };
   }
 
-  function routeRequest(request = {}) {
-    const requestId = makeRequestId(request);
-    const current = requestState.get(requestId);
-    if (current && current.status === 'completed') {
-      return completedResult(requestId, current);
-    }
-
-    const selected = chooseBackend(requestId, request);
-    if (!selected.ok) {
-      return selected;
-    }
-
+  function routeToSelectedBackend(selected, request, requestId, previousBackendIds = []) {
     const requestWithId = request.requestId ? request : { ...request, requestId };
     let sent = false;
     try {
@@ -146,6 +141,7 @@ function createRouter({ config, adapters, state, env } = {}) {
       requestState.set(requestId, {
         status: 'failed',
         backendId: selected.backendId,
+        previousBackendIds,
         error: error.message,
       });
       return {
@@ -158,12 +154,56 @@ function createRouter({ config, adapters, state, env } = {}) {
     }
 
     if (sent === false) {
-      requestState.set(requestId, { status: 'failed', backendId: selected.backendId });
+      requestState.set(requestId, { status: 'failed', backendId: selected.backendId, previousBackendIds });
       return { ok: false, reason: 'send_failed', backendId: selected.backendId, requestId };
     }
 
-    requestState.set(requestId, { status: 'sent', backendId: selected.backendId });
+    requestState.set(requestId, { status: 'sent', backendId: selected.backendId, previousBackendIds });
     return { ok: true, backendId: selected.backendId, requestId };
+  }
+
+  function routeRequest(request = {}) {
+    const requestId = makeRequestId(request);
+    const current = requestState.get(requestId);
+    if (current && current.status === 'completed') {
+      return completedResult(requestId, current);
+    }
+
+    const selected = chooseBackend(requestId, request);
+    if (!selected.ok) {
+      return selected;
+    }
+
+    return routeToSelectedBackend(selected, request, requestId);
+  }
+
+  function routeFallback(request = {}) {
+    const requestId = makeRequestId(request);
+    const current = requestState.get(requestId);
+    if (!current || current.status !== 'sent' || !current.backendId) {
+      return { ok: false, reason: 'no_current_backend', requestId };
+    }
+    if (current.status === 'completed') {
+      return completedResult(requestId, current);
+    }
+
+    const chain = [backendConfig.primary, ...(backendConfig.fallback || [])].filter(Boolean);
+    const currentIndex = chain.indexOf(current.backendId);
+    const candidates = currentIndex >= 0 ? chain.slice(currentIndex + 1) : backendConfig.fallback || [];
+    for (const backendId of candidates) {
+      const fallbackBackend = getRoutableBackend(backendId);
+      if (fallbackBackend) {
+        const previousBackendIds = [...(current.previousBackendIds || []), current.backendId];
+        return routeToSelectedBackend(fallbackBackend, request, requestId, previousBackendIds);
+      }
+    }
+
+    return {
+      ok: false,
+      reason: 'fallback_unavailable',
+      backendId: current.backendId,
+      requestId,
+    };
   }
 
   function markCompleted(requestId, backendId) {
@@ -192,6 +232,7 @@ function createRouter({ config, adapters, state, env } = {}) {
 
   return {
     routeRequest,
+    routeFallback,
     markCompleted,
     getState,
   };

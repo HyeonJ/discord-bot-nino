@@ -261,4 +261,36 @@ describe('discord relay module', () => {
       { submitDelaySeconds: 1 }
     );
   });
+
+  test('timed out primary request is routed to configured fallback backend', () => {
+    process.env.PRIMARY_BACKEND = 'codex';
+    process.env.FALLBACK_BACKENDS = 'claude';
+    process.env.CODEX_ENABLED = 'true';
+    process.env.CODEX_TMUX_SESSION = 'nino-codex-test';
+    const claudeBackend = require('../src/backends/claude');
+    claudeBackend.health.mockReturnValue({ enabled: true, sessionAlive: true, alive: true, pid: 123 });
+    claudeBackend.send.mockReturnValue(true);
+    mockTmuxCheckSession.mockReturnValue(true);
+    mockTmuxGetChildPid.mockReturnValue(456);
+    const relay = require('../src/discord-relay');
+
+    relay.sendToTmux('[D][Tim] hello', 'msg-timeout', 'chan-1');
+    const pending = relay.__test.pendingResponses.get('msg-timeout');
+    pending.timestamp = Date.now() - (4 * 60 * 1000);
+    relay.__test.checkPendingTimeouts();
+
+    expect(claudeBackend.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestId: 'msg-timeout',
+        payload: '[D][Tim] hello',
+        messageId: 'msg-timeout',
+        channelId: 'chan-1',
+      }),
+      expect.objectContaining({ session: 'nino' })
+    );
+    expect(relay.__test.pendingResponses.get('msg-timeout')).toMatchObject({
+      backendId: 'claude',
+      fallbackAttempted: true,
+    });
+  });
 });

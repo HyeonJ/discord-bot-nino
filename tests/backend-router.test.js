@@ -4,8 +4,19 @@ jest.mock('../src/backends/tmux', () => ({
   getChildPid: jest.fn(() => 34567),
 }));
 
+jest.mock('../src/backends/runtime-status', () => ({
+  getRuntimeStatus: jest.fn((backendId) => ({
+    backendId,
+    state: 'ready',
+    blocked: false,
+    reason: null,
+    until: null,
+  })),
+}));
+
 const { createRouter } = require('../src/backends/router');
 const tmux = require('../src/backends/tmux');
+const runtimeStatus = require('../src/backends/runtime-status');
 
 function makeAdapter(id, { healthy = true, healthResult } = {}) {
   return {
@@ -27,6 +38,16 @@ function makeRequest(overrides = {}) {
 }
 
 describe('backend router', () => {
+  beforeEach(() => {
+    runtimeStatus.getRuntimeStatus.mockImplementation((backendId) => ({
+      backendId,
+      state: 'ready',
+      blocked: false,
+      reason: null,
+      until: null,
+    }));
+  });
+
   test('routes to Claude primary when Claude is enabled and Codex is disabled', () => {
     const claude = makeAdapter('claude');
     const codex = makeAdapter('codex');
@@ -291,6 +312,94 @@ describe('backend router', () => {
     expect(router.getState('req-1')).toMatchObject({
       backendId: 'fallback',
       status: 'sent',
+    });
+  });
+
+  test('routes to fallback when any primary backend is quota blocked by runtime status', () => {
+    runtimeStatus.getRuntimeStatus.mockImplementation((backendId) => ({
+      backendId,
+      state: backendId === 'codex' ? 'quota_exhausted' : 'ready',
+      blocked: backendId === 'codex',
+      reason: backendId === 'codex' ? 'usage limit' : null,
+      until: null,
+    }));
+    const codex = makeAdapter('codex');
+    const claude = makeAdapter('claude');
+    const router = createRouter({
+      config: {
+        primary: 'codex',
+        fallback: ['claude'],
+        backends: {
+          codex: { enabled: true, session: 'nino-codex' },
+          claude: { enabled: true, session: 'nino' },
+        },
+      },
+      adapters: { codex, claude },
+    });
+
+    const result = router.routeRequest(makeRequest());
+
+    expect(result).toEqual({ ok: true, backendId: 'claude', requestId: 'req-1' });
+    expect(codex.send).not.toHaveBeenCalled();
+    expect(claude.send).toHaveBeenCalled();
+  });
+
+  test('routeFallback skips current owner and sends to later fallback backend', () => {
+    const codex = makeAdapter('codex');
+    const claude = makeAdapter('claude');
+    const backup = makeAdapter('backup');
+    const router = createRouter({
+      config: {
+        primary: 'codex',
+        fallback: ['claude', 'backup'],
+        backends: {
+          codex: { enabled: true, session: 'nino-codex' },
+          claude: { enabled: true, session: 'nino' },
+          backup: { enabled: true, session: 'nino-backup' },
+        },
+      },
+      adapters: { codex, claude, backup },
+    });
+
+    expect(router.routeRequest(makeRequest())).toEqual({
+      ok: true,
+      backendId: 'codex',
+      requestId: 'req-1',
+    });
+    const fallbackResult = router.routeFallback(makeRequest());
+
+    expect(fallbackResult).toEqual({ ok: true, backendId: 'claude', requestId: 'req-1' });
+    expect(codex.send).toHaveBeenCalledTimes(1);
+    expect(claude.send).toHaveBeenCalledTimes(1);
+    expect(router.getState('req-1')).toMatchObject({
+      status: 'sent',
+      backendId: 'claude',
+      previousBackendIds: ['codex'],
+    });
+  });
+
+  test('routeFallback returns unavailable when no later fallback backend is routable', () => {
+    const codex = makeAdapter('codex');
+    const claude = makeAdapter('claude', { healthy: false });
+    const router = createRouter({
+      config: {
+        primary: 'codex',
+        fallback: ['claude'],
+        backends: {
+          codex: { enabled: true, session: 'nino-codex' },
+          claude: { enabled: true, session: 'nino' },
+        },
+      },
+      adapters: { codex, claude },
+    });
+
+    router.routeRequest(makeRequest());
+
+    expect(router.routeFallback(makeRequest())).toEqual({
+      ok: false,
+      reason: 'fallback_unavailable',
+      backendId: 'codex',
+      requestId: 'req-1',
     });
   });
 

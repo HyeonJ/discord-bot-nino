@@ -157,6 +157,35 @@ CODEX_ENABLED=true
 CODEX_TEST_CHANNELS=1480593132511826092
 ```
 
+## Hybrid Failover Test
+
+Use this when validating a real hybrid setup where the primary may change:
+
+```env
+PRIMARY_BACKEND=codex
+FALLBACK_BACKENDS=claude
+CLAUDE_ENABLED=true
+CODEX_ENABLED=true
+```
+
+Force the current primary out of rotation:
+
+```bash
+cd /mnt/c/Dev/Workspace/discord-bot-nino/.worktrees/feat-optional-ai-backends
+bash scripts/backend-status.sh set codex quota_exhausted "manual smoke test"
+systemctl --user restart nino-relay.service
+curl -s http://localhost:58090/health
+```
+
+Then send a Discord message. Expected: the router skips Codex and sends the request to Claude.
+
+Clear the status after the test:
+
+```bash
+bash scripts/backend-status.sh clear codex
+systemctl --user restart nino-relay.service
+```
+
 ## Roll Back To Main Runtime
 
 Remove the feature worktree override:

@@ -41,9 +41,10 @@ Expected behavior:
 - Claude auth/usage status is not treated as an outage.
 - Claude-specific hooks remain backed up but are not required for normal operation.
 
-### 3. Codex Primary, Claude Fallback
+### 3. Provider Primary, Ordered Fallback
 
 Use this during migration and while both subscriptions are available.
+`PRIMARY_BACKEND` is an operator choice, not a fixed product decision.
 
 ```env
 PRIMARY_BACKEND=codex
@@ -53,9 +54,34 @@ CODEX_ENABLED=true
 ```
 
 Expected behavior:
-- Codex receives new requests first.
-- Claude is used only if Codex is disabled, unhealthy, or misses a request deadline.
+- The configured primary receives new requests first.
+- Fallback backends are tried in `FALLBACK_BACKENDS` order when the primary is disabled, unhealthy, quota-blocked, cooled down, or misses a request deadline.
 - The router prevents duplicate Discord replies if both backends eventually respond.
+
+The same structure can be inverted later:
+
+```env
+PRIMARY_BACKEND=claude
+FALLBACK_BACKENDS=codex
+CLAUDE_ENABLED=true
+CODEX_ENABLED=true
+```
+
+Runtime status files live under:
+
+```text
+runtime/backend-status
+```
+
+Examples:
+
+```bash
+bash scripts/backend-status.sh set codex quota_exhausted "usage limit reached"
+bash scripts/backend-status.sh set claude cooldown "maintenance" "2026-05-06T22:00:00+09:00"
+bash scripts/backend-status.sh clear codex
+```
+
+The watchdog runs `scripts/scan-backend-quota.sh` for enabled backends. If tmux output contains clear limit/rate-limit phrases, it marks that backend `quota_exhausted`, making the router skip it until the status is cleared or expires.
 
 ### 4. Claude Primary, Codex Test Channels
 
