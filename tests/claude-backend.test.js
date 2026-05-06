@@ -20,6 +20,7 @@ describe('claude backend adapter', () => {
   test('health reports disabled backend without checking tmux', () => {
     expect(claude.health({ enabled: false, session: 'nino' })).toEqual({
       enabled: false,
+      sessionAlive: false,
       alive: false,
       pid: null,
     });
@@ -34,8 +35,24 @@ describe('claude backend adapter', () => {
 
     expect(claude.health({ enabled: true, session: 'nino' })).toEqual({
       enabled: true,
+      sessionAlive: true,
       alive: true,
       pid: 12345,
+    });
+
+    expect(tmux.checkSession).toHaveBeenCalledWith('nino');
+    expect(tmux.getChildPid).toHaveBeenCalledWith('nino', 'claude');
+  });
+
+  test('health reports session alive but backend not alive when provider pid is missing', () => {
+    tmux.checkSession.mockReturnValue(true);
+    tmux.getChildPid.mockReturnValue(null);
+
+    expect(claude.health({ enabled: true, session: 'nino' })).toEqual({
+      enabled: true,
+      sessionAlive: true,
+      alive: false,
+      pid: null,
     });
 
     expect(tmux.checkSession).toHaveBeenCalledWith('nino');
@@ -58,6 +75,12 @@ describe('claude backend adapter', () => {
 
   test('send throws when payload is missing', () => {
     expect(() => claude.send({}, { session: 'nino' })).toThrow(/payload/i);
+
+    expect(tmux.sendKeys).not.toHaveBeenCalled();
+  });
+
+  test('send throws when backend session is missing', () => {
+    expect(() => claude.send({ payload: 'full message' }, {})).toThrow(/session/i);
 
     expect(tmux.sendKeys).not.toHaveBeenCalled();
   });

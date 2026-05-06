@@ -71,4 +71,23 @@ describe('tmux backend transport', () => {
 
     expect(tmux.getChildPid('nino', 'claude')).toBeNull();
   });
+
+  test('getChildPid returns null and skips pgrep for non-numeric pane pid output', () => {
+    childProcess.execSync.mockReturnValueOnce(Buffer.from('not-a-pid\n'));
+
+    expect(tmux.getChildPid('nino', 'claude')).toBeNull();
+
+    expect(childProcess.execSync).toHaveBeenCalledTimes(1);
+    expect(childProcess.execSync).toHaveBeenCalledWith(
+      "tmux list-panes -t 'nino' -F '#{pane_pid}' 2>/dev/null"
+    );
+  });
+
+  test('getChildPid returns null for non-numeric provider pid output', () => {
+    childProcess.execSync
+      .mockReturnValueOnce(Buffer.from('1234\n'))
+      .mockReturnValueOnce(Buffer.from('not-a-pid\n'));
+
+    expect(tmux.getChildPid('nino', 'claude')).toBeNull();
+  });
 });

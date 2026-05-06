@@ -30,14 +30,15 @@ function getChildPid(sessionName, processPattern) {
       `tmux list-panes -t ${shellSingleQuote(sessionName)} -F '#{pane_pid}' 2>/dev/null`
     ).toString().trim();
     const panePid = paneResult.split('\n')[0];
-    if (!panePid) {
+    if (!/^\d+$/.test(panePid)) {
       return null;
     }
 
     const childResult = childProcess.execSync(
       `pgrep -P ${panePid} -f ${shellSingleQuote(processPattern)} 2>/dev/null || echo ""`
     ).toString().trim();
-    return childResult ? parseInt(childResult.split('\n')[0], 10) : null;
+    const childPid = childResult.split('\n')[0];
+    return /^\d+$/.test(childPid) ? parseInt(childPid, 10) : null;
   } catch {
     return null;
   }
