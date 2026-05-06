@@ -59,4 +59,19 @@ describe('operational backend scripts', () => {
     expect(startCodex).toContain('codex --no-alt-screen --dangerously-bypass-approvals-and-sandbox "$prompt"');
     expect(startCodex).toContain('/home/bpx27/discord-bot-nino/src/discord-send -c CHANNEL_ID -r MESSAGE_ID');
   });
+
+  test('shared-data wrapper limits files and performs git sync workflow', () => {
+    const sharedData = script('shared-data.sh');
+
+    expect(sharedData).toContain('SHARED_DATA_DIR="${SHARED_DATA_DIR:-/home/bpx27/yaksu-shared-data}"');
+    expect(sharedData).toContain('todo-list.md|shopping-list.md|pantry.md|purchase-history.md');
+    expect(sharedData).toContain('git -C "$SHARED_DATA_DIR" pull --rebase');
+    expect(sharedData).toContain('git -C "$SHARED_DATA_DIR" add -- "$file"');
+    expect(sharedData).toContain('git -C "$SHARED_DATA_DIR" commit -m');
+    expect(sharedData).toContain('git -C "$SHARED_DATA_DIR" push');
+    expect(sharedData).toContain('case "$command" in');
+    expect(sharedData).toContain('read)');
+    expect(sharedData).toContain('write)');
+    expect(sharedData).toContain('append)');
+  });
 });

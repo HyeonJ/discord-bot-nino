@@ -70,9 +70,16 @@ This starts `nino-codex` through:
 scripts/start-codex-nino.sh
 codex-config/NINO_CODEX.md
 shared-context/NINO_SHARED_CONTEXT.md
+shared-context/MEMORY_INDEX.md
 ```
 
 The shared context file is appended to the Codex startup prompt. It contains only paths and operating rules, not private memory contents.
+The memory index is generated metadata. Refresh it from WSL with:
+
+```bash
+cd /mnt/c/Dev/Workspace/discord-bot-nino/.worktrees/feat-optional-ai-backends
+node scripts/build-memory-index.js
+```
 
 ## Shared Context Smoke Tests
 
@@ -101,6 +108,18 @@ Expected: Codex says to use `git pull --rebase`, edit, commit, and `git push` in
 ```
 
 Expected: Codex treats them as legacy references and does not assume Claude-only tools are directly available.
+
+```text
+니노야 MEMORY_INDEX.md에서 feedback_utf8_bom.md 경로를 찾아서 어느 메모리 루트에 있는지만 말해줘.
+```
+
+Expected: Codex uses `shared-context/MEMORY_INDEX.md` and answers with the Claude project memory root.
+
+```text
+니노야 shared-data todo-list 읽을 때 이제 어떤 스크립트를 쓰면 돼?
+```
+
+Expected: Codex names `bash scripts/shared-data.sh read todo-list.md`.
 
 ## Restart Relay In Test Mode
 

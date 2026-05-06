@@ -4,6 +4,20 @@ This file is a provider-neutral index for Nino's long-running memory, operating 
 
 Do not copy private memory contents into this repository. Read the live WSL paths below when the conversation requires them.
 
+Generated memory metadata index:
+
+```text
+shared-context/MEMORY_INDEX.md
+```
+
+Use the index first when you need to decide which memory file to inspect. The index contains file paths, categories, sizes, and modified times only. It intentionally does not contain private memory contents.
+
+Refresh it with:
+
+```bash
+node scripts/build-memory-index.js
+```
+
 ## Live Memory Paths
 
 Primary bot memory:
@@ -71,9 +85,17 @@ Codex does not receive Claude Code hook events directly. Apply these equivalent 
 
 - Memory reminder: before finishing a meaningful response, decide whether a durable fact or task status should be written to live memory.
 - Current task continuity: before starting or resuming non-trivial work, read `/home/bpx27/discord-bot-nino/memory/current-tasks.md` when present.
-- Shared-data sync: before reading or editing files in `/home/bpx27/yaksu-shared-data`, run `git pull --rebase` in that repo when possible. After edits, commit and `git push`.
+- Shared-data sync: prefer `scripts/shared-data.sh` for `todo-list.md`, `shopping-list.md`, `pantry.md`, and `purchase-history.md`. It runs `git pull --rebase` before access and commits changes before `git push`.
 - Context snapshot: for long-running work, record enough status in `memory/current-tasks.md` or another appropriate memory file so the next session can continue.
 - Secrets: never write passwords, tokens, recovery codes, or private authentication material into memory or git.
+
+Shared-data examples:
+
+```bash
+bash scripts/shared-data.sh read todo-list.md
+bash scripts/shared-data.sh append todo-list.md "- 새 할 일" "Update todo-list.md"
+bash scripts/shared-data.sh write shopping-list.md "새 목록 내용" "Update shopping-list.md"
+```
 
 ## Legacy Skills
 

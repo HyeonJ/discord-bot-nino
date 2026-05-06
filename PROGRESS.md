@@ -45,6 +45,7 @@ Phase 2 shared Codex context implementation is in progress.
 10. Hardened backend watchdog and health semantics after final review.
 11. Added provider-neutral shared context for Codex to find Claude-era memory, hook rules, shared-data rules, and legacy skills.
 12. Fixed tmux backend pid detection when the provider process is the tmux pane process itself.
+13. Added metadata-only memory index generation and shared-data git workflow wrapper.
 
 ## Current Temporary Runtime State
 
@@ -103,6 +104,8 @@ cd /mnt/c/Dev/Workspace/discord-bot-nino/.worktrees/feat-optional-ai-backends
 bash scripts/start-backend.sh codex
 systemctl --user restart nino-relay.service
 curl -s http://localhost:58090/health
+node scripts/build-memory-index.js
+bash scripts/shared-data.sh read todo-list.md
 ```
 
 After restarting `nino-codex`, test shared context with:
@@ -112,12 +115,16 @@ After restarting `nino-codex`, test shared context with:
 니노야 Claude 프로젝트 MEMORY.md 경로 알고 있어? 파일 내용은 길게 말하지 말고 어떤 경로를 봐야하는지만 말해줘.
 니노야 shared-data todo-list 수정할 때 어떤 git 절차 따라야 해?
 니노야 claude-config/skills는 코덱스에서 어떻게 써야해?
+니노야 MEMORY_INDEX.md에서 feedback_utf8_bom.md 경로를 찾아서 어느 메모리 루트에 있는지만 말해줘.
+니노야 shared-data todo-list 읽을 때 이제 어떤 스크립트를 쓰면 돼?
 ```
 
 ## Verification
 
-- `npm test`: 11 suites / 100 tests passed.
-- `bash -n scripts/start-backend.sh scripts/start-codex-nino.sh scripts/restart-backend.sh scripts/nino-watchdog.sh scripts/start-nino.sh scripts/restart-nino.sh`: passed.
+- `npm test`: 12 suites / 102 tests passed.
+- `bash -n scripts/shared-data.sh scripts/start-backend.sh scripts/start-codex-nino.sh scripts/restart-backend.sh scripts/nino-watchdog.sh scripts/start-nino.sh scripts/restart-nino.sh`: passed.
+- `node scripts/build-memory-index.js`: generated `shared-context/MEMORY_INDEX.md`.
+- `bash scripts/shared-data.sh read todo-list.md`: read live shared-data through the wrapper.
 - Live `/health` after relay restart:
   - `backends.claude.alive=true`, `pid=48284`
   - `backends.codex.alive=true`, `pid=87155`

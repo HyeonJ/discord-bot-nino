@@ -1,0 +1,1229 @@
+# Nino Memory Index
+
+This is a generated metadata-only index. private memory contents are intentionally omitted.
+
+Generated: 2026-05-06T11:34:32.614Z
+
+## Roots
+
+- /home/bpx27/discord-bot-nino/memory
+- /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory
+
+## Files
+
+### /home/bpx27/discord-bot-nino/memory
+
+- alarms/barrier-setup.md
+  - path: /home/bpx27/discord-bot-nino/memory/alarms/barrier-setup.md
+  - category: alarm
+  - size_bytes: 553
+  - modified: 2026-04-06T08:48:13.579Z
+- alarms/darren-bedtime.md
+  - path: /home/bpx27/discord-bot-nino/memory/alarms/darren-bedtime.md
+  - category: alarm
+  - size_bytes: 429
+  - modified: 2026-03-16T05:45:26.957Z
+- alarms/darren-dahanjung.md
+  - path: /home/bpx27/discord-bot-nino/memory/alarms/darren-dahanjung.md
+  - category: alarm
+  - size_bytes: 233
+  - modified: 2026-03-18T15:18:22.681Z
+- alarms/darren-daiso-timer.md
+  - path: /home/bpx27/discord-bot-nino/memory/alarms/darren-daiso-timer.md
+  - category: alarm
+  - size_bytes: 325
+  - modified: 2026-03-28T03:58:47.576Z
+- alarms/darren-medicine.md
+  - path: /home/bpx27/discord-bot-nino/memory/alarms/darren-medicine.md
+  - category: alarm
+  - size_bytes: 426
+  - modified: 2026-03-16T00:45:08.542Z
+- alarms/darren-qr-attendance.md
+  - path: /home/bpx27/discord-bot-nino/memory/alarms/darren-qr-attendance.md
+  - category: alarm
+  - size_bytes: 195
+  - modified: 2026-03-22T17:14:17.942Z
+- alarms/darren-work-noti.md
+  - path: /home/bpx27/discord-bot-nino/memory/alarms/darren-work-noti.md
+  - category: alarm
+  - size_bytes: 454
+  - modified: 2026-03-15T18:24:51.902Z
+- alarms/dishwasher-inquiry.md
+  - path: /home/bpx27/discord-bot-nino/memory/alarms/dishwasher-inquiry.md
+  - category: alarm
+  - size_bytes: 622
+  - modified: 2026-03-17T16:35:31.205Z
+- alarms/evening-routine-0422.md
+  - path: /home/bpx27/discord-bot-nino/memory/alarms/evening-routine-0422.md
+  - category: alarm
+  - size_bytes: 264
+  - modified: 2026-04-22T01:05:35.100Z
+- alarms/jinsu-meeting-0318.md
+  - path: /home/bpx27/discord-bot-nino/memory/alarms/jinsu-meeting-0318.md
+  - category: alarm
+  - size_bytes: 484
+  - modified: 2026-03-16T18:59:41.017Z
+- alarms/katakana-study.md
+  - path: /home/bpx27/discord-bot-nino/memory/alarms/katakana-study.md
+  - category: alarm
+  - size_bytes: 518
+  - modified: 2026-04-21T02:30:57.655Z
+- alarms/mdweb-tailscale.md
+  - path: /home/bpx27/discord-bot-nino/memory/alarms/mdweb-tailscale.md
+  - category: alarm
+  - size_bytes: 633
+  - modified: 2026-03-15T18:15:39.890Z
+- alarms/tim-wakeup.md
+  - path: /home/bpx27/discord-bot-nino/memory/alarms/tim-wakeup.md
+  - category: alarm
+  - size_bytes: 592
+  - modified: 2026-03-15T18:13:05.253Z
+- current-tasks.md
+  - path: /home/bpx27/discord-bot-nino/memory/current-tasks.md
+  - category: active-tasks
+  - size_bytes: 9098
+  - modified: 2026-04-03T16:09:28.138Z
+- discord-history/2026-03-09.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-03-09.jsonl
+  - category: discord-history
+  - size_bytes: 162327
+  - modified: 2026-03-09T14:47:21.431Z
+- discord-history/2026-03-10.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-03-10.jsonl
+  - category: discord-history
+  - size_bytes: 308467
+  - modified: 2026-03-10T14:59:42.448Z
+- discord-history/2026-03-11.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-03-11.jsonl
+  - category: discord-history
+  - size_bytes: 810365
+  - modified: 2026-03-11T14:43:37.889Z
+- discord-history/2026-03-12.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-03-12.jsonl
+  - category: discord-history
+  - size_bytes: 525092
+  - modified: 2026-03-12T14:59:57.347Z
+- discord-history/2026-03-13.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-03-13.jsonl
+  - category: discord-history
+  - size_bytes: 569148
+  - modified: 2026-03-13T14:59:56.207Z
+- discord-history/2026-03-14.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-03-14.jsonl
+  - category: discord-history
+  - size_bytes: 1003862
+  - modified: 2026-03-14T14:34:51.622Z
+- discord-history/2026-03-15.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-03-15.jsonl
+  - category: discord-history
+  - size_bytes: 564609
+  - modified: 2026-03-15T14:59:51.637Z
+- discord-history/2026-03-16.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-03-16.jsonl
+  - category: discord-history
+  - size_bytes: 896797
+  - modified: 2026-03-16T14:57:02.317Z
+- discord-history/2026-03-17.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-03-17.jsonl
+  - category: discord-history
+  - size_bytes: 336696
+  - modified: 2026-03-17T14:50:20.028Z
+- discord-history/2026-03-18.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-03-18.jsonl
+  - category: discord-history
+  - size_bytes: 225409
+  - modified: 2026-03-18T14:57:05.904Z
+- discord-history/2026-03-19.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-03-19.jsonl
+  - category: discord-history
+  - size_bytes: 424786
+  - modified: 2026-03-19T14:40:15.846Z
+- discord-history/2026-03-20.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-03-20.jsonl
+  - category: discord-history
+  - size_bytes: 400079
+  - modified: 2026-03-20T14:59:40.387Z
+- discord-history/2026-03-21.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-03-21.jsonl
+  - category: discord-history
+  - size_bytes: 251744
+  - modified: 2026-03-21T14:59:37.172Z
+- discord-history/2026-03-22.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-03-22.jsonl
+  - category: discord-history
+  - size_bytes: 709762
+  - modified: 2026-03-22T14:58:01.426Z
+- discord-history/2026-03-23.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-03-23.jsonl
+  - category: discord-history
+  - size_bytes: 606640
+  - modified: 2026-03-23T14:59:44.894Z
+- discord-history/2026-03-24.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-03-24.jsonl
+  - category: discord-history
+  - size_bytes: 388561
+  - modified: 2026-03-24T14:13:26.414Z
+- discord-history/2026-03-25.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-03-25.jsonl
+  - category: discord-history
+  - size_bytes: 321354
+  - modified: 2026-03-25T14:56:32.269Z
+- discord-history/2026-03-26.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-03-26.jsonl
+  - category: discord-history
+  - size_bytes: 388268
+  - modified: 2026-03-26T14:04:19.938Z
+- discord-history/2026-03-27.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-03-27.jsonl
+  - category: discord-history
+  - size_bytes: 472941
+  - modified: 2026-03-27T11:21:58.257Z
+- discord-history/2026-03-28.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-03-28.jsonl
+  - category: discord-history
+  - size_bytes: 111628
+  - modified: 2026-03-28T14:13:59.478Z
+- discord-history/2026-03-29.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-03-29.jsonl
+  - category: discord-history
+  - size_bytes: 483657
+  - modified: 2026-03-29T12:38:11.187Z
+- discord-history/2026-03-30.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-03-30.jsonl
+  - category: discord-history
+  - size_bytes: 338307
+  - modified: 2026-03-30T14:59:33.340Z
+- discord-history/2026-03-31.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-03-31.jsonl
+  - category: discord-history
+  - size_bytes: 313972
+  - modified: 2026-03-31T14:58:25.647Z
+- discord-history/2026-04-01.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-04-01.jsonl
+  - category: discord-history
+  - size_bytes: 90859
+  - modified: 2026-04-01T14:58:07.318Z
+- discord-history/2026-04-02.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-04-02.jsonl
+  - category: discord-history
+  - size_bytes: 41166
+  - modified: 2026-04-02T14:58:30.747Z
+- discord-history/2026-04-03.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-04-03.jsonl
+  - category: discord-history
+  - size_bytes: 209952
+  - modified: 2026-04-03T14:56:14.293Z
+- discord-history/2026-04-04.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-04-04.jsonl
+  - category: discord-history
+  - size_bytes: 109790
+  - modified: 2026-04-04T14:14:49.644Z
+- discord-history/2026-04-05.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-04-05.jsonl
+  - category: discord-history
+  - size_bytes: 37407
+  - modified: 2026-04-05T14:29:04.710Z
+- discord-history/2026-04-06.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-04-06.jsonl
+  - category: discord-history
+  - size_bytes: 123426
+  - modified: 2026-04-06T12:46:30.538Z
+- discord-history/2026-04-07.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-04-07.jsonl
+  - category: discord-history
+  - size_bytes: 62724
+  - modified: 2026-04-07T14:56:52.453Z
+- discord-history/2026-04-08.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-04-08.jsonl
+  - category: discord-history
+  - size_bytes: 252605
+  - modified: 2026-04-08T14:57:55.763Z
+- discord-history/2026-04-09.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-04-09.jsonl
+  - category: discord-history
+  - size_bytes: 156117
+  - modified: 2026-04-09T14:59:37.485Z
+- discord-history/2026-04-10.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-04-10.jsonl
+  - category: discord-history
+  - size_bytes: 126294
+  - modified: 2026-04-10T08:59:16.479Z
+- discord-history/2026-04-11.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-04-11.jsonl
+  - category: discord-history
+  - size_bytes: 10506
+  - modified: 2026-04-11T14:57:28.840Z
+- discord-history/2026-04-12.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-04-12.jsonl
+  - category: discord-history
+  - size_bytes: 5077
+  - modified: 2026-04-12T12:36:32.139Z
+- discord-history/2026-04-13.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-04-13.jsonl
+  - category: discord-history
+  - size_bytes: 21124
+  - modified: 2026-04-13T14:05:14.666Z
+- discord-history/2026-04-14.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-04-14.jsonl
+  - category: discord-history
+  - size_bytes: 41525
+  - modified: 2026-04-14T13:21:15.594Z
+- discord-history/2026-04-15.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-04-15.jsonl
+  - category: discord-history
+  - size_bytes: 26800
+  - modified: 2026-04-15T14:39:06.295Z
+- discord-history/2026-04-16.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-04-16.jsonl
+  - category: discord-history
+  - size_bytes: 91909
+  - modified: 2026-04-16T13:22:47.660Z
+- discord-history/2026-04-17.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-04-17.jsonl
+  - category: discord-history
+  - size_bytes: 2745
+  - modified: 2026-04-16T23:15:05.886Z
+- discord-history/2026-04-19.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-04-19.jsonl
+  - category: discord-history
+  - size_bytes: 4580
+  - modified: 2026-04-19T09:30:54.878Z
+- discord-history/2026-04-20.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-04-20.jsonl
+  - category: discord-history
+  - size_bytes: 1931
+  - modified: 2026-04-20T12:25:19.144Z
+- discord-history/2026-04-21.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-04-21.jsonl
+  - category: discord-history
+  - size_bytes: 41735
+  - modified: 2026-04-21T12:10:41.847Z
+- discord-history/2026-04-22.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-04-22.jsonl
+  - category: discord-history
+  - size_bytes: 25447
+  - modified: 2026-04-22T03:25:02.246Z
+- discord-history/2026-04-23.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-04-23.jsonl
+  - category: discord-history
+  - size_bytes: 2540
+  - modified: 2026-04-23T08:01:41.229Z
+- discord-history/2026-04-24.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-04-24.jsonl
+  - category: discord-history
+  - size_bytes: 293
+  - modified: 2026-04-24T14:31:46.869Z
+- discord-history/2026-04-25.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-04-25.jsonl
+  - category: discord-history
+  - size_bytes: 7660
+  - modified: 2026-04-25T01:34:36.498Z
+- discord-history/2026-04-27.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-04-27.jsonl
+  - category: discord-history
+  - size_bytes: 5337
+  - modified: 2026-04-27T13:50:57.380Z
+- discord-history/2026-04-28.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-04-28.jsonl
+  - category: discord-history
+  - size_bytes: 10407
+  - modified: 2026-04-28T08:11:26.423Z
+- discord-history/2026-04-29.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-04-29.jsonl
+  - category: discord-history
+  - size_bytes: 7930
+  - modified: 2026-04-29T14:53:23.090Z
+- discord-history/2026-04-30.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-04-30.jsonl
+  - category: discord-history
+  - size_bytes: 12807
+  - modified: 2026-04-30T14:30:02.602Z
+- discord-history/2026-05-01.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-05-01.jsonl
+  - category: discord-history
+  - size_bytes: 3715
+  - modified: 2026-05-01T01:00:02.227Z
+- discord-history/2026-05-02.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-05-02.jsonl
+  - category: discord-history
+  - size_bytes: 6418
+  - modified: 2026-05-02T12:05:25.545Z
+- discord-history/2026-05-03.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-05-03.jsonl
+  - category: discord-history
+  - size_bytes: 3465
+  - modified: 2026-05-03T12:51:09.787Z
+- discord-history/2026-05-04.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-05-04.jsonl
+  - category: discord-history
+  - size_bytes: 8489
+  - modified: 2026-05-04T06:45:33.071Z
+- discord-history/2026-05-05.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-05-05.jsonl
+  - category: discord-history
+  - size_bytes: 6741
+  - modified: 2026-05-05T14:47:55.077Z
+- discord-history/2026-05-06.jsonl
+  - path: /home/bpx27/discord-bot-nino/memory/discord-history/2026-05-06.jsonl
+  - category: discord-history
+  - size_bytes: 3495
+  - modified: 2026-05-06T03:18:12.655Z
+- ref_bot_health_check.md
+  - path: /home/bpx27/discord-bot-nino/memory/ref_bot_health_check.md
+  - category: reference
+  - size_bytes: 1186
+  - modified: 2026-03-22T19:48:17.791Z
+- ref_haru_ssh_access.md
+  - path: /home/bpx27/discord-bot-nino/memory/ref_haru_ssh_access.md
+  - category: reference
+  - size_bytes: 789
+  - modified: 2026-03-22T19:48:26.435Z
+- ref_mckinsey_pptx.md
+  - path: /home/bpx27/discord-bot-nino/memory/ref_mckinsey_pptx.md
+  - category: reference
+  - size_bytes: 1298
+  - modified: 2026-04-25T00:45:29.419Z
+- research_tokyo_gay_sm_scene.md
+  - path: /home/bpx27/discord-bot-nino/memory/research_tokyo_gay_sm_scene.md
+  - category: memory
+  - size_bytes: 12838
+  - modified: 2026-03-25T02:23:31.046Z
+- research-results/2026-03-14-darren-career-change.md
+  - path: /home/bpx27/discord-bot-nino/memory/research-results/2026-03-14-darren-career-change.md
+  - category: research
+  - size_bytes: 6351
+  - modified: 2026-03-22T15:29:22.965Z
+- research-results/2026-03-14-flydeal-sideproject.md
+  - path: /home/bpx27/discord-bot-nino/memory/research-results/2026-03-14-flydeal-sideproject.md
+  - category: research
+  - size_bytes: 2691
+  - modified: 2026-03-22T15:59:26.341Z
+- research-results/2026-03-14-fullstack-job-trends.md
+  - path: /home/bpx27/discord-bot-nino/memory/research-results/2026-03-14-fullstack-job-trends.md
+  - category: research
+  - size_bytes: 11214
+  - modified: 2026-03-22T17:00:20.694Z
+- research-results/2026-03-18-side-jobs.md
+  - path: /home/bpx27/discord-bot-nino/memory/research-results/2026-03-18-side-jobs.md
+  - category: research
+  - size_bytes: 23535
+  - modified: 2026-03-22T13:16:29.966Z
+- research-results/2026-03-23-bot-health-monitoring.md
+  - path: /home/bpx27/discord-bot-nino/memory/research-results/2026-03-23-bot-health-monitoring.md
+  - category: research
+  - size_bytes: 3562
+  - modified: 2026-03-22T18:34:38.022Z
+- research-results/2026-03-25-bot-mutual-monitoring.md
+  - path: /home/bpx27/discord-bot-nino/memory/research-results/2026-03-25-bot-mutual-monitoring.md
+  - category: research
+  - size_bytes: 18073
+  - modified: 2026-03-24T17:24:24.873Z
+- research-results/picky-app-spec.md
+  - path: /home/bpx27/discord-bot-nino/memory/research-results/picky-app-spec.md
+  - category: research
+  - size_bytes: 12035
+  - modified: 2026-03-29T08:20:35.788Z
+- research-topics.md
+  - path: /home/bpx27/discord-bot-nino/memory/research-topics.md
+  - category: memory
+  - size_bytes: 2907
+  - modified: 2026-03-24T17:24:57.454Z
+- research/2026-03-20-nino-architecture.md
+  - path: /home/bpx27/discord-bot-nino/memory/research/2026-03-20-nino-architecture.md
+  - category: research
+  - size_bytes: 3956
+  - modified: 2026-03-29T02:49:47.774Z
+- research/images/1-medion-lactomedi.jpg
+  - path: /home/bpx27/discord-bot-nino/memory/research/images/1-medion-lactomedi.jpg
+  - category: research
+  - size_bytes: 294876
+  - modified: 2026-03-19T19:06:38.840Z
+- research/images/2-pepe-clear.jpg
+  - path: /home/bpx27/discord-bot-nino/memory/research/images/2-pepe-clear.jpg
+  - category: research
+  - size_bytes: 40638
+  - modified: 2026-03-19T19:06:38.840Z
+- research/images/3-slippery-stuff-gel.jpg
+  - path: /home/bpx27/discord-bot-nino/memory/research/images/3-slippery-stuff-gel.jpg
+  - category: research
+  - size_bytes: 53015
+  - modified: 2026-03-19T19:06:38.840Z
+- research/images/4-sliquid-h2o.png
+  - path: /home/bpx27/discord-bot-nino/memory/research/images/4-sliquid-h2o.png
+  - category: research
+  - size_bytes: 311650
+  - modified: 2026-03-19T19:06:38.840Z
+- research/images/5-good-clean-love-bionude.jpg
+  - path: /home/bpx27/discord-bot-nino/memory/research/images/5-good-clean-love-bionude.jpg
+  - category: research
+  - size_bytes: 49148
+  - modified: 2026-03-19T19:06:38.840Z
+- research/images/6-lubilicious-organic-aloe.jpg
+  - path: /home/bpx27/discord-bot-nino/memory/research/images/6-lubilicious-organic-aloe.jpg
+  - category: research
+  - size_bytes: 120799
+  - modified: 2026-03-19T19:06:38.843Z
+- research/living-profile-model.md
+  - path: /home/bpx27/discord-bot-nino/memory/research/living-profile-model.md
+  - category: research
+  - size_bytes: 43079
+  - modified: 2026-03-25T01:57:48.649Z
+- subtitle-skill-spec.md
+  - path: /home/bpx27/discord-bot-nino/memory/subtitle-skill-spec.md
+  - category: memory
+  - size_bytes: 4866
+  - modified: 2026-03-30T16:06:24.896Z
+
+### /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory
+
+- compression-log.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/compression-log.md
+  - category: memory
+  - size_bytes: 4122
+  - modified: 2026-04-27T23:59:46.361Z
+- feedback_agent_browser_check.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_agent_browser_check.md
+  - category: feedback
+  - size_bytes: 868
+  - modified: 2026-03-24T07:08:39.618Z
+- feedback_best_practices.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_best_practices.md
+  - category: feedback
+  - size_bytes: 549
+  - modified: 2026-03-23T09:23:12.752Z
+- feedback_bot_sync_exact_check.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_bot_sync_exact_check.md
+  - category: feedback
+  - size_bytes: 642
+  - modified: 2026-03-23T09:23:12.752Z
+- feedback_cdp_browser_tab.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_cdp_browser_tab.md
+  - category: feedback
+  - size_bytes: 1042
+  - modified: 2026-03-23T09:23:12.752Z
+- feedback_channel_routing.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_channel_routing.md
+  - category: feedback
+  - size_bytes: 801
+  - modified: 2026-04-06T07:22:51.283Z
+- feedback_chrome_debug_mode.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_chrome_debug_mode.md
+  - category: feedback
+  - size_bytes: 790
+  - modified: 2026-03-23T09:23:12.756Z
+- feedback_claude_vs_nino.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_claude_vs_nino.md
+  - category: feedback
+  - size_bytes: 832
+  - modified: 2026-03-23T09:23:12.756Z
+- feedback_claudemd_update.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_claudemd_update.md
+  - category: feedback
+  - size_bytes: 593
+  - modified: 2026-03-23T09:23:12.756Z
+- feedback_cli_help.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_cli_help.md
+  - category: feedback
+  - size_bytes: 394
+  - modified: 2026-03-23T09:23:12.756Z
+- feedback_color_extract.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_color_extract.md
+  - category: feedback
+  - size_bytes: 1009
+  - modified: 2026-03-25T07:40:55.388Z
+- feedback_css_js_double_check.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_css_js_double_check.md
+  - category: feedback
+  - size_bytes: 741
+  - modified: 2026-03-23T09:23:12.756Z
+- feedback_darren_name.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_darren_name.md
+  - category: feedback
+  - size_bytes: 338
+  - modified: 2026-03-23T09:23:12.756Z
+- feedback_darren_volume.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_darren_volume.md
+  - category: feedback
+  - size_bytes: 409
+  - modified: 2026-03-23T09:23:12.756Z
+- feedback_detailed_path.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_detailed_path.md
+  - category: feedback
+  - size_bytes: 786
+  - modified: 2026-03-23T09:23:12.756Z
+- feedback_discord_newline.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_discord_newline.md
+  - category: feedback
+  - size_bytes: 604
+  - modified: 2026-03-23T09:23:12.756Z
+- feedback_discord_response.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_discord_response.md
+  - category: feedback
+  - size_bytes: 1378
+  - modified: 2026-04-14T05:44:53.868Z
+- feedback_discord_send_escape.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_discord_send_escape.md
+  - category: feedback
+  - size_bytes: 796
+  - modified: 2026-03-23T09:23:12.756Z
+- feedback_frontend_debug_flow.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_frontend_debug_flow.md
+  - category: feedback
+  - size_bytes: 1292
+  - modified: 2026-03-30T14:42:14.054Z
+- feedback_gpt_image_prompt.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_gpt_image_prompt.md
+  - category: feedback
+  - size_bytes: 957
+  - modified: 2026-03-23T09:23:12.756Z
+- feedback_gradlew_spring.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_gradlew_spring.md
+  - category: feedback
+  - size_bytes: 1242
+  - modified: 2026-03-30T15:55:20.731Z
+- feedback_hotel_search_background.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_hotel_search_background.md
+  - category: feedback
+  - size_bytes: 956
+  - modified: 2026-03-23T09:23:12.756Z
+- feedback_idle_research.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_idle_research.md
+  - category: feedback
+  - size_bytes: 722
+  - modified: 2026-03-23T09:23:12.756Z
+- feedback_interrupt_resume.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_interrupt_resume.md
+  - category: feedback
+  - size_bytes: 1002
+  - modified: 2026-03-25T07:58:09.326Z
+- feedback_mdweb_check.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_mdweb_check.md
+  - category: feedback
+  - size_bytes: 505
+  - modified: 2026-03-23T09:23:12.756Z
+- feedback_memory_read_when.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_memory_read_when.md
+  - category: feedback
+  - size_bytes: 624
+  - modified: 2026-03-23T09:23:12.756Z
+- feedback_memory_tools.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_memory_tools.md
+  - category: feedback
+  - size_bytes: 1775
+  - modified: 2026-03-23T16:29:24.095Z
+- feedback_no_delete_messages.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_no_delete_messages.md
+  - category: feedback
+  - size_bytes: 648
+  - modified: 2026-03-23T09:23:12.756Z
+- feedback_no_personal_info_in_repo.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_no_personal_info_in_repo.md
+  - category: feedback
+  - size_bytes: 1258
+  - modified: 2026-04-14T07:01:31.029Z
+- feedback_no_qr_for_secrets.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_no_qr_for_secrets.md
+  - category: feedback
+  - size_bytes: 735
+  - modified: 2026-03-23T15:01:49.284Z
+- feedback_no_speculation.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_no_speculation.md
+  - category: feedback
+  - size_bytes: 898
+  - modified: 2026-03-29T02:59:13.625Z
+- feedback_notify_before_long_task.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_notify_before_long_task.md
+  - category: feedback
+  - size_bytes: 665
+  - modified: 2026-03-23T09:23:12.756Z
+- feedback_notion_page_split.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_notion_page_split.md
+  - category: feedback
+  - size_bytes: 806
+  - modified: 2026-03-23T09:23:12.756Z
+- feedback_notion_workflow.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_notion_workflow.md
+  - category: feedback
+  - size_bytes: 1347
+  - modified: 2026-03-27T08:45:57.767Z
+- feedback_of_dm_only.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_of_dm_only.md
+  - category: feedback
+  - size_bytes: 605
+  - modified: 2026-03-23T09:23:12.756Z
+- feedback_of_download_cycle.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_of_download_cycle.md
+  - category: feedback
+  - size_bytes: 784
+  - modified: 2026-03-23T09:23:12.756Z
+- feedback_onlyfans_download.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_onlyfans_download.md
+  - category: feedback
+  - size_bytes: 1646
+  - modified: 2026-03-23T09:23:12.756Z
+- feedback_plan_first.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_plan_first.md
+  - category: feedback
+  - size_bytes: 722
+  - modified: 2026-03-23T09:23:12.756Z
+- feedback_plugin_install.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_plugin_install.md
+  - category: feedback
+  - size_bytes: 1229
+  - modified: 2026-03-23T09:23:12.756Z
+- feedback_price_shipping.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_price_shipping.md
+  - category: feedback
+  - size_bytes: 424
+  - modified: 2026-03-23T09:23:12.756Z
+- feedback_project_spec.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_project_spec.md
+  - category: feedback
+  - size_bytes: 720
+  - modified: 2026-03-23T09:23:12.756Z
+- feedback_publ_analysis_first.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_publ_analysis_first.md
+  - category: feedback
+  - size_bytes: 1096
+  - modified: 2026-03-23T09:23:12.756Z
+- feedback_publ_priority.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_publ_priority.md
+  - category: feedback
+  - size_bytes: 821
+  - modified: 2026-03-23T09:23:12.760Z
+- feedback_remember_working_pattern.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_remember_working_pattern.md
+  - category: feedback
+  - size_bytes: 1034
+  - modified: 2026-03-29T06:41:54.459Z
+- feedback_repo_coordination.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_repo_coordination.md
+  - category: feedback
+  - size_bytes: 712
+  - modified: 2026-03-23T09:23:12.760Z
+- feedback_research_rules.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_research_rules.md
+  - category: feedback
+  - size_bytes: 1597
+  - modified: 2026-03-23T09:23:12.760Z
+- feedback_security_confirm.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_security_confirm.md
+  - category: feedback
+  - size_bytes: 680
+  - modified: 2026-04-07T15:24:13.558Z
+- feedback_session_context.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_session_context.md
+  - category: feedback
+  - size_bytes: 1054
+  - modified: 2026-03-23T09:23:12.760Z
+- feedback_session_resume_tasks.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_session_resume_tasks.md
+  - category: feedback
+  - size_bytes: 809
+  - modified: 2026-03-24T08:58:04.652Z
+- feedback_session_thread_memory.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_session_thread_memory.md
+  - category: feedback
+  - size_bytes: 983
+  - modified: 2026-03-23T09:23:12.760Z
+- feedback_shared_lessons_20260323.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_shared_lessons_20260323.md
+  - category: feedback
+  - size_bytes: 3046
+  - modified: 2026-03-27T07:12:03.802Z
+- feedback_skill_check_first.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_skill_check_first.md
+  - category: feedback
+  - size_bytes: 624
+  - modified: 2026-03-23T09:23:12.760Z
+- feedback_subtitle_filename.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_subtitle_filename.md
+  - category: feedback
+  - size_bytes: 499
+  - modified: 2026-04-20T22:56:35.797Z
+- feedback_tdd_strict_typing.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_tdd_strict_typing.md
+  - category: feedback
+  - size_bytes: 475
+  - modified: 2026-03-23T09:23:12.760Z
+- feedback_teammate_naming.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_teammate_naming.md
+  - category: feedback
+  - size_bytes: 606
+  - modified: 2026-03-23T09:23:12.760Z
+- feedback_test_before_deliver.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_test_before_deliver.md
+  - category: feedback
+  - size_bytes: 890
+  - modified: 2026-04-01T07:55:07.150Z
+- feedback_thread_creation.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_thread_creation.md
+  - category: feedback
+  - size_bytes: 818
+  - modified: 2026-03-29T06:41:36.221Z
+- feedback_tts_voice.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_tts_voice.md
+  - category: feedback
+  - size_bytes: 982
+  - modified: 2026-03-23T09:23:12.760Z
+- feedback_usage_kst.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_usage_kst.md
+  - category: feedback
+  - size_bytes: 528
+  - modified: 2026-04-16T03:05:37.356Z
+- feedback_usage_script.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_usage_script.md
+  - category: feedback
+  - size_bytes: 683
+  - modified: 2026-04-08T14:24:04.872Z
+- feedback_utf8_bom.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_utf8_bom.md
+  - category: feedback
+  - size_bytes: 1749
+  - modified: 2026-03-29T11:32:12.589Z
+- feedback_vault_path.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_vault_path.md
+  - category: feedback
+  - size_bytes: 1270
+  - modified: 2026-03-23T09:23:12.760Z
+- feedback_verify_before_done.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_verify_before_done.md
+  - category: feedback
+  - size_bytes: 555
+  - modified: 2026-03-23T09:23:12.760Z
+- feedback_work_completion_check.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_work_completion_check.md
+  - category: feedback
+  - size_bytes: 768
+  - modified: 2026-03-23T09:23:12.760Z
+- feedback_work_pc_claude_session.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_work_pc_claude_session.md
+  - category: feedback
+  - size_bytes: 1415
+  - modified: 2026-03-26T02:52:36.967Z
+- feedback_work_pc_claude.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_work_pc_claude.md
+  - category: feedback
+  - size_bytes: 959
+  - modified: 2026-03-23T09:23:12.760Z
+- feedback_work_pc_git_push.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_work_pc_git_push.md
+  - category: feedback
+  - size_bytes: 762
+  - modified: 2026-03-29T10:58:42.639Z
+- feedback_work_session.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/feedback_work_session.md
+  - category: feedback
+  - size_bytes: 2550
+  - modified: 2026-03-26T08:29:59.680Z
+- MEMORY.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/MEMORY.md
+  - category: long-term-memory
+  - size_bytes: 18460
+  - modified: 2026-04-25T00:45:40.407Z
+- pcb-vox-admin-patterns.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/pcb-vox-admin-patterns.md
+  - category: memory
+  - size_bytes: 3673
+  - modified: 2026-04-05T04:40:16.514Z
+- project_ai_cover_skill.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/project_ai_cover_skill.md
+  - category: project
+  - size_bytes: 2449
+  - modified: 2026-04-05T03:32:17.355Z
+- project_ble_location.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/project_ble_location.md
+  - category: project
+  - size_bytes: 1372
+  - modified: 2026-03-23T09:23:12.760Z
+- project_bot_core_module.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/project_bot_core_module.md
+  - category: project
+  - size_bytes: 1665
+  - modified: 2026-03-27T03:12:08.583Z
+- project_bot_roles.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/project_bot_roles.md
+  - category: project
+  - size_bytes: 871
+  - modified: 2026-03-23T09:23:12.760Z
+- project_darren_hospital.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/project_darren_hospital.md
+  - category: project
+  - size_bytes: 441
+  - modified: 2026-03-23T09:23:12.760Z
+- project_darren_kmong.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/project_darren_kmong.md
+  - category: project
+  - size_bytes: 1137
+  - modified: 2026-04-22T02:34:22.581Z
+- project_dr_backup.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/project_dr_backup.md
+  - category: project
+  - size_bytes: 1774
+  - modified: 2026-03-23T09:38:50.214Z
+- project_fansone.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/project_fansone.md
+  - category: project
+  - size_bytes: 1674
+  - modified: 2026-03-23T09:23:12.760Z
+- project_flydeal_api_change.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/project_flydeal_api_change.md
+  - category: project
+  - size_bytes: 831
+  - modified: 2026-04-06T12:10:04.390Z
+- project_gcloud_migration.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/project_gcloud_migration.md
+  - category: project
+  - size_bytes: 978
+  - modified: 2026-04-13T09:45:17.807Z
+- project_growndcard_analysis.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/project_growndcard_analysis.md
+  - category: project
+  - size_bytes: 1007
+  - modified: 2026-04-08T05:47:44.088Z
+- project_haru_bot.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/project_haru_bot.md
+  - category: project
+  - size_bytes: 1057
+  - modified: 2026-03-23T09:23:12.779Z
+- project_kt_agentic_harness.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/project_kt_agentic_harness.md
+  - category: project
+  - size_bytes: 1085
+  - modified: 2026-04-14T06:42:36.998Z
+- project_of_drm_solution.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/project_of_drm_solution.md
+  - category: project
+  - size_bytes: 2607
+  - modified: 2026-03-23T09:23:12.779Z
+- project_picky_app.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/project_picky_app.md
+  - category: project
+  - size_bytes: 1351
+  - modified: 2026-03-29T08:02:06.680Z
+- project_qr_dryrun.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/project_qr_dryrun.md
+  - category: project
+  - size_bytes: 635
+  - modified: 2026-03-23T09:23:12.779Z
+- project_qr_test_priority.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/project_qr_test_priority.md
+  - category: project
+  - size_bytes: 852
+  - modified: 2026-03-23T09:23:12.779Z
+- project_ragu_sauce.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/project_ragu_sauce.md
+  - category: project
+  - size_bytes: 320
+  - modified: 2026-03-23T09:23:12.779Z
+- project_restart_script_fix.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/project_restart_script_fix.md
+  - category: project
+  - size_bytes: 1435
+  - modified: 2026-03-29T12:16:03.470Z
+- project_spring_jwt_plate.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/project_spring_jwt_plate.md
+  - category: project
+  - size_bytes: 762
+  - modified: 2026-03-31T15:06:54.623Z
+- project_tailnet_merge.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/project_tailnet_merge.md
+  - category: project
+  - size_bytes: 943
+  - modified: 2026-03-23T09:23:12.779Z
+- project_teammate_routing_bug.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/project_teammate_routing_bug.md
+  - category: project
+  - size_bytes: 784
+  - modified: 2026-03-23T09:23:12.783Z
+- project_test_fake_member.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/project_test_fake_member.md
+  - category: project
+  - size_bytes: 1330
+  - modified: 2026-03-31T02:07:44.813Z
+- project_tmux_paste_fix.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/project_tmux_paste_fix.md
+  - category: project
+  - size_bytes: 758
+  - modified: 2026-03-23T09:23:12.783Z
+- project_tokyo_hotel_search.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/project_tokyo_hotel_search.md
+  - category: project
+  - size_bytes: 1941
+  - modified: 2026-04-27T23:52:48.678Z
+- project_vibe_coding_orchestrator.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/project_vibe_coding_orchestrator.md
+  - category: project
+  - size_bytes: 2343
+  - modified: 2026-04-09T00:29:55.738Z
+- project_voice_iot_plan.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/project_voice_iot_plan.md
+  - category: project
+  - size_bytes: 770
+  - modified: 2026-03-23T09:23:12.783Z
+- ref_agent_browser.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/ref_agent_browser.md
+  - category: reference
+  - size_bytes: 4163
+  - modified: 2026-03-24T07:20:57.109Z
+- ref_bettercast.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/ref_bettercast.md
+  - category: reference
+  - size_bytes: 771
+  - modified: 2026-04-07T15:20:05.878Z
+- ref_bot_health_check.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/ref_bot_health_check.md
+  - category: reference
+  - size_bytes: 1142
+  - modified: 2026-03-23T09:23:12.783Z
+- ref_caddy_proxy.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/ref_caddy_proxy.md
+  - category: reference
+  - size_bytes: 1781
+  - modified: 2026-03-29T06:12:08.350Z
+- ref_calendar_tool.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/ref_calendar_tool.md
+  - category: reference
+  - size_bytes: 1837
+  - modified: 2026-03-25T00:40:33.120Z
+- ref_colab_rvc_training.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/ref_colab_rvc_training.md
+  - category: reference
+  - size_bytes: 1869
+  - modified: 2026-04-06T03:59:34.861Z
+- ref_devices.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/ref_devices.md
+  - category: reference
+  - size_bytes: 3152
+  - modified: 2026-04-07T11:37:12.470Z
+- ref_esgpn_harness.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/ref_esgpn_harness.md
+  - category: reference
+  - size_bytes: 802
+  - modified: 2026-04-15T03:16:16.441Z
+- ref_figma_mcp_production_2026.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/ref_figma_mcp_production_2026.md
+  - category: reference
+  - size_bytes: 3928
+  - modified: 2026-04-09T09:27:41.204Z
+- ref_figma_to_code_tools.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/ref_figma_to_code_tools.md
+  - category: reference
+  - size_bytes: 3591
+  - modified: 2026-04-09T09:24:58.898Z
+- ref_gemini_mcp.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/ref_gemini_mcp.md
+  - category: reference
+  - size_bytes: 1263
+  - modified: 2026-03-26T03:26:03.554Z
+- ref_github_workflow_scope.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/ref_github_workflow_scope.md
+  - category: reference
+  - size_bytes: 629
+  - modified: 2026-04-14T08:04:13.959Z
+- ref_grok_mcp.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/ref_grok_mcp.md
+  - category: reference
+  - size_bytes: 1396
+  - modified: 2026-03-26T07:04:57.186Z
+- ref_hotlink_bypass.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/ref_hotlink_bypass.md
+  - category: reference
+  - size_bytes: 2132
+  - modified: 2026-03-24T10:14:42.010Z
+- ref_kiwi_tequila_api.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/ref_kiwi_tequila_api.md
+  - category: reference
+  - size_bytes: 1660
+  - modified: 2026-04-06T06:50:42.361Z
+- ref_macbook_ssh.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/ref_macbook_ssh.md
+  - category: reference
+  - size_bytes: 666
+  - modified: 2026-04-07T15:19:56.462Z
+- ref_mcp_popular_servers_2026.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/ref_mcp_popular_servers_2026.md
+  - category: reference
+  - size_bytes: 3284
+  - modified: 2026-04-22T00:06:46.118Z
+- ref_mcp_tool_integration_2026.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/ref_mcp_tool_integration_2026.md
+  - category: reference
+  - size_bytes: 1975
+  - modified: 2026-04-22T00:07:19.417Z
+- ref_mdweb.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/ref_mdweb.md
+  - category: reference
+  - size_bytes: 1561
+  - modified: 2026-03-31T08:10:38.776Z
+- ref_narita_to_shinjuku.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/ref_narita_to_shinjuku.md
+  - category: reference
+  - size_bytes: 680
+  - modified: 2026-04-16T00:48:56.019Z
+- ref_notebooklm.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/ref_notebooklm.md
+  - category: reference
+  - size_bytes: 757
+  - modified: 2026-03-23T09:23:12.783Z
+- ref_notion_personal.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/ref_notion_personal.md
+  - category: reference
+  - size_bytes: 684
+  - modified: 2026-03-29T20:57:50.727Z
+- ref_obsidian_vault.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/ref_obsidian_vault.md
+  - category: reference
+  - size_bytes: 1975
+  - modified: 2026-04-16T03:16:32.651Z
+- ref_of_download_tools.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/ref_of_download_tools.md
+  - category: reference
+  - size_bytes: 2024
+  - modified: 2026-03-23T09:23:12.783Z
+- ref_orchestrator_prompts.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/ref_orchestrator_prompts.md
+  - category: reference
+  - size_bytes: 5844
+  - modified: 2026-04-08T08:48:53.862Z
+- ref_printer.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/ref_printer.md
+  - category: reference
+  - size_bytes: 612
+  - modified: 2026-04-07T15:19:46.812Z
+- ref_react_router_page_pattern.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/ref_react_router_page_pattern.md
+  - category: reference
+  - size_bytes: 1671
+  - modified: 2026-04-16T06:36:25.085Z
+- ref_rustdesk_server.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/ref_rustdesk_server.md
+  - category: reference
+  - size_bytes: 961
+  - modified: 2026-03-31T07:59:05.098Z
+- ref_sheet_music_extractor.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/ref_sheet_music_extractor.md
+  - category: reference
+  - size_bytes: 1073
+  - modified: 2026-03-27T09:38:11.784Z
+- ref_spring_security_oauth2_code_param.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/ref_spring_security_oauth2_code_param.md
+  - category: reference
+  - size_bytes: 1718
+  - modified: 2026-03-27T05:19:05.123Z
+- ref_tokyo_shinjuku_restaurants.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/ref_tokyo_shinjuku_restaurants.md
+  - category: reference
+  - size_bytes: 1651
+  - modified: 2026-04-01T13:52:10.399Z
+- ref_tv_control.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/ref_tv_control.md
+  - category: reference
+  - size_bytes: 1049
+  - modified: 2026-03-23T09:23:12.783Z
+- ref_video_transparency_tools.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/ref_video_transparency_tools.md
+  - category: reference
+  - size_bytes: 3786
+  - modified: 2026-04-09T09:25:57.839Z
+- ref_wiki_2026-AI-코딩-도구-트렌드.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/ref_wiki_2026-AI-코딩-도구-트렌드.md
+  - category: reference
+  - size_bytes: 421
+  - modified: 2026-04-16T03:20:07.159Z
+- ref_wiki_2026-mcp-protocol.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/ref_wiki_2026-mcp-protocol.md
+  - category: reference
+  - size_bytes: 4101
+  - modified: 2026-04-22T00:06:32.576Z
+- ref_wiki_2026-naver-kakao-ai.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/ref_wiki_2026-naver-kakao-ai.md
+  - category: reference
+  - size_bytes: 1926
+  - modified: 2026-04-21T23:50:58.481Z
+- ref_wiki_나리타-신주쿠-교통.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/ref_wiki_나리타-신주쿠-교통.md
+  - category: reference
+  - size_bytes: 449
+  - modified: 2026-04-16T03:22:49.779Z
+- ref_wiki_도쿄-여행.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/ref_wiki_도쿄-여행.md
+  - category: reference
+  - size_bytes: 383
+  - modified: 2026-04-16T03:20:01.262Z
+- ref_wiki_도쿄-편의점-음식-2026.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/ref_wiki_도쿄-편의점-음식-2026.md
+  - category: reference
+  - size_bytes: 466
+  - modified: 2026-04-16T03:20:07.174Z
+- reference_voice_chat.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/reference_voice_chat.md
+  - category: reference
+  - size_bytes: 1741
+  - modified: 2026-03-23T09:23:12.783Z
+- reference_wake_word_setup.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/reference_wake_word_setup.md
+  - category: reference
+  - size_bytes: 2157
+  - modified: 2026-03-23T09:23:12.783Z
+- research_singing_technique_analysis.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/research_singing_technique_analysis.md
+  - category: memory
+  - size_bytes: 2839
+  - modified: 2026-04-01T08:13:12.699Z
+- research-topics.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/research-topics.md
+  - category: memory
+  - size_bytes: 4173
+  - modified: 2026-04-10T01:07:39.908Z
+- research/figma_mcp_react_2026.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/research/figma_mcp_react_2026.md
+  - category: research
+  - size_bytes: 60494
+  - modified: 2026-04-09T09:44:27.438Z
+- research/lol_rp_discount_2026.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/research/lol_rp_discount_2026.md
+  - category: research
+  - size_bytes: 3225
+  - modified: 2026-03-29T02:30:01.313Z
+- research/side_jobs_nino_2026.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/research/side_jobs_nino_2026.md
+  - category: research
+  - size_bytes: 3951
+  - modified: 2026-03-31T06:12:23.751Z
+- self_review_20260314.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/self_review_20260314.md
+  - category: memory
+  - size_bytes: 2563
+  - modified: 2026-03-23T09:23:12.783Z
+- session-context-snapshot.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/session-context-snapshot.md
+  - category: memory
+  - size_bytes: 13789
+  - modified: 2026-04-27T23:59:46.457Z
+- skill_notion_pcb.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/skill_notion_pcb.md
+  - category: memory
+  - size_bytes: 920
+  - modified: 2026-03-23T09:23:12.783Z
+- tv-lounge-api.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/tv-lounge-api.md
+  - category: memory
+  - size_bytes: 2223
+  - modified: 2026-03-23T09:23:12.783Z
+- user_darren_career.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/user_darren_career.md
+  - category: user-memory
+  - size_bytes: 543
+  - modified: 2026-03-23T09:23:12.783Z
+- user_darren_company.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/user_darren_company.md
+  - category: user-memory
+  - size_bytes: 352
+  - modified: 2026-04-09T00:30:04.086Z
+- user_darren_goals_2026.md
+  - path: /home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/user_darren_goals_2026.md
+  - category: user-memory
+  - size_bytes: 723
+  - modified: 2026-04-22T00:48:13.192Z
+
