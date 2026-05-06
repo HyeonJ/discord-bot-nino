@@ -41,6 +41,8 @@ describe('operational backend scripts', () => {
     expect(watchdog).toContain('check_backend "claude" "$CLAUDE_SESSION"');
     expect(watchdog).toContain('check_backend "codex" "$CODEX_SESSION"');
     expect(watchdog).toContain('check_claude_d_state "$CLAUDE_SESSION"');
+    expect(watchdog).toContain('"$SCRIPT_DIR/restart-nino.sh"');
+    expect(watchdog).toContain('"$SCRIPT_DIR/restart-backend.sh" "$backend"');
     expect(watchdog).not.toContain('pgrep -P "$PANE_PID" -f "codex"');
   });
 });

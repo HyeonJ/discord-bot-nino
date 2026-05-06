@@ -14,6 +14,7 @@ CLAUDE_ENABLED="${CLAUDE_ENABLED:-true}"
 CODEX_ENABLED="${CODEX_ENABLED:-false}"
 CLAUDE_SESSION="${CLAUDE_TMUX_SESSION:-${TMUX_SESSION:-nino}}"
 CODEX_SESSION="${CODEX_TMUX_SESSION:-nino-codex}"
+LEGACY_CLAUDE_SESSION="${TMUX_SESSION:-nino}"
 
 log() {
   mkdir -p "$(dirname "$LOG")"
@@ -32,13 +33,23 @@ alert() {
   $DISCORD_SEND -c "$ALERT_CHANNEL" "$message" 2>/dev/null || true
 }
 
+restart_backend() {
+  local backend="$1"
+
+  if [ "$backend" = "claude" ] && [ "$CLAUDE_SESSION" = "$LEGACY_CLAUDE_SESSION" ]; then
+    "$SCRIPT_DIR/restart-nino.sh" >> "$LOG" 2>&1
+  else
+    "$SCRIPT_DIR/restart-backend.sh" "$backend" >> "$LOG" 2>&1
+  fi
+}
+
 check_backend() {
   local backend="$1"
   local session="$2"
 
   if ! tmux has-session -t "$session" 2>/dev/null; then
     log "DEAD: $backend tmux session '$session' not found. Restarting..."
-    "$SCRIPT_DIR/restart-backend.sh" "$backend" >> "$LOG" 2>&1
+    restart_backend "$backend"
     alert "$backend backend restarted automatically (tmux session missing)"
     return 1
   fi
@@ -47,7 +58,7 @@ check_backend() {
   pane_pid=$(tmux list-panes -t "$session" -F '#{pane_pid}' 2>/dev/null | head -1)
   if [ -z "$pane_pid" ] || ! kill -0 "$pane_pid" 2>/dev/null; then
     log "DEAD: $backend pane process gone (PID: $pane_pid). Respawning..."
-    "$SCRIPT_DIR/restart-backend.sh" "$backend" >> "$LOG" 2>&1
+    restart_backend "$backend"
     alert "$backend backend restarted automatically (pane process missing)"
     return 1
   fi
@@ -70,7 +81,7 @@ check_claude_d_state() {
     state=$(awk '/^State:/{print $2}' /proc/$claude_pid/status 2>/dev/null || echo "?")
     if [ "$state" = "D" ]; then
       log "FROZEN: Claude PID $claude_pid in D state. Restarting..."
-      "$SCRIPT_DIR/restart-backend.sh" "claude" >> "$LOG" 2>&1
+      restart_backend "claude"
       alert "claude backend restarted automatically (process D state)"
       return 1
     fi
