@@ -28,17 +28,31 @@ Make Claude and Codex optional AI backends for Nino while preserving WSL/tmux op
 
 ## Current Phase
 
-Phase 0: Documentation and planning.
+Phase 1 implementation complete in branch `feat/optional-ai-backends`.
+
+## Completed Tasks
+
+1. Added `package.json`, lockfile, and restored the Jest test baseline.
+2. Added backend config schema with optional Claude/Codex enablement.
+3. Wrapped Claude tmux behavior in a Claude backend adapter.
+4. Added backend router, request ownership state, fallback handling, and relay integration.
+5. Generalized health output around provider-neutral backend status while keeping legacy Claude fields.
+6. Added Codex tmux backend routing for configured test channels.
+7. Added backend-aware operating scripts while preserving the default Claude production restart flow.
+8. Fixed review findings for Claude-disabled/Codex-enabled operation and relay-level ownership completion.
+
+## Verification
+
+- `npm test`: 10 suites / 94 tests passed.
+- `bash -n scripts/start-backend.sh scripts/restart-backend.sh scripts/nino-watchdog.sh scripts/start-nino.sh scripts/restart-nino.sh`: passed.
+- Final code review: approved with residual risks around script tests being mostly static and Codex-only mode routing regular channels when Codex is the only enabled backend.
 
 ## Next Tasks
 
-1. Add `package.json` and fix test require paths.
-2. Add backend config schema tests.
-3. Add backend router contract tests.
-4. Wrap current Claude tmux behavior in a Claude adapter without changing production behavior.
-5. Add durable request state for backend ownership.
-6. Generalize health output around backend status.
-7. Add Codex backend after Claude adapter is covered by tests.
+1. Run a WSL tmux smoke test with real Claude/Codex sessions.
+2. Configure `CODEX_TEST_CHANNELS` and verify Discord test-channel routing end to end.
+3. Decide whether Codex-only mode should route all channels or require an explicit `PRIMARY_BACKEND=codex` for production.
+4. Decide where shared memory should ultimately live and how Codex should ingest it.
 
 ## Open Questions
 
