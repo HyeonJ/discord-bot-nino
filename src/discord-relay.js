@@ -7,6 +7,9 @@ require('dotenv').config();
 const { shouldAutoPull, runAutoPull } = require('./auto-pull');
 const health = require('./health');
 const { startChecking } = require('./health-checker');
+const { loadBackendConfig } = require('./backends/config');
+const { createRouter } = require('./backends/router');
+const claudeBackend = require('./backends/claude');
 
 const ATTACHMENT_DIR = '/tmp/discord-attachments';
 const HISTORY_DIR = path.join(__dirname, '..', 'memory', 'discord-history');
@@ -21,6 +24,24 @@ const RESPONSE_TIMEOUT_MS = 3 * 60 * 1000; // 3분
 
 // 응답 대기 중인 메시지 추적
 const pendingResponses = new Map(); // msgId → { channelId, timestamp, preview }
+let backendRouter;
+
+try {
+  backendRouter = createRouter({
+    config: loadBackendConfig(process.env),
+    adapters: {
+      claude: claudeBackend,
+    },
+  });
+} catch (e) {
+  console.error('[relay] backend router config failed:', e.message);
+  backendRouter = createRouter({
+    config: { primary: null, fallback: [], backends: {} },
+    adapters: {
+      claude: claudeBackend,
+    },
+  });
+}
 
 // 주기적으로 타임아웃 체크 (10초마다) → 3분 지나면 tmux로 알림
 setInterval(() => {
@@ -167,6 +188,7 @@ function preprocessPayload(payload) {
 
 function sendToTmux(payload, msgId = null, channelId = null) {
   const processed = preprocessPayload(payload);
+  const preview = payload.substring(0, 80).replace(/\n/g, ' ');
   console.log(`[relay] ${payload.substring(0, 200)}${payload.length > 200 ? '...' : ''}`);
 
   // 응답 대기 등록 (봇 메시지, Klaude 메시지 제외 — 사람 메시지만)
@@ -174,17 +196,23 @@ function sendToTmux(payload, msgId = null, channelId = null) {
     pendingResponses.set(msgId, {
       channelId,
       timestamp: Date.now(),
-      preview: payload.substring(0, 80).replace(/\n/g, ' '),
+      preview,
     });
   }
 
   try {
-    const escaped = processed.replace(/'/g, "'\\''");
-    execSync(`tmux send-keys -t '${TMUX_SESSION}' -- '${escaped}' C-m`);
-  } catch (e) {
-    if (!e.message.includes('no server running') && !e.message.includes("can't find")) {
-      console.error(`[relay] tmux send-keys failed:`, e.message);
+    const result = backendRouter.routeRequest({
+      requestId: msgId || undefined,
+      payload: processed,
+      messageId: msgId,
+      channelId,
+      preview,
+    });
+    if (!result.ok) {
+      console.error(`[relay] backend route failed: ${result.reason}${result.backendId ? ` (${result.backendId})` : ''}`);
     }
+  } catch (e) {
+    console.error('[relay] backend route error:', e.message);
   }
 }
 
