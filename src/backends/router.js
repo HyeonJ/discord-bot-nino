@@ -54,14 +54,12 @@ function createRouter({ config, adapters, state } = {}) {
       return { ok: false, reason: 'no_primary', requestId };
     }
 
-    if (!isBackendEnabled(backendConfig, primary)) {
-      return { ok: false, reason: 'primary_disabled', backendId: primary, requestId };
-    }
-
-    const primaryAdapter = backendAdapters[primary];
-    const primaryConfig = getBackendConfig(backendConfig, primary);
-    if (isHealthy(primaryAdapter, primaryConfig)) {
-      return { ok: true, backendId: primary, adapter: primaryAdapter, config: primaryConfig };
+    if (isBackendEnabled(backendConfig, primary)) {
+      const primaryAdapter = backendAdapters[primary];
+      const primaryConfig = getBackendConfig(backendConfig, primary);
+      if (isHealthy(primaryAdapter, primaryConfig)) {
+        return { ok: true, backendId: primary, adapter: primaryAdapter, config: primaryConfig };
+      }
     }
 
     for (const backendId of backendConfig.fallback || []) {

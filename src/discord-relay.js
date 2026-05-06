@@ -434,4 +434,10 @@ process.on('unhandledRejection', (err) => {
   console.error('[relay] unhandled rejection:', err);
 });
 
-client.login(process.env.DISCORD_BOT_TOKEN);
+module.exports = {
+  sendToTmux,
+};
+
+if (require.main === module) {
+  client.login(process.env.DISCORD_BOT_TOKEN);
+}

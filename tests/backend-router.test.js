@@ -43,29 +43,28 @@ describe('backend router', () => {
     expect(codex.send).not.toHaveBeenCalled();
   });
 
-  test('returns unavailable without sending when the primary is disabled', () => {
+  test('routes to healthy fallback when the primary is disabled', () => {
     const claude = makeAdapter('claude');
+    const fallback = makeAdapter('fallback');
     const router = createRouter({
       config: {
         primary: 'claude',
-        fallback: [],
+        fallback: ['fallback'],
         backends: {
           claude: { enabled: false, session: 'nino' },
+          fallback: { enabled: true, session: 'nino-fallback' },
         },
       },
-      adapters: { claude },
+      adapters: { claude, fallback },
     });
 
-    const result = router.routeRequest(makeRequest());
+    const request = makeRequest();
+    const result = router.routeRequest(request);
 
-    expect(result).toEqual({
-      ok: false,
-      reason: 'primary_disabled',
-      backendId: 'claude',
-      requestId: 'req-1',
-    });
+    expect(result).toEqual({ ok: true, backendId: 'fallback', requestId: 'req-1' });
     expect(claude.health).not.toHaveBeenCalled();
     expect(claude.send).not.toHaveBeenCalled();
+    expect(fallback.send).toHaveBeenCalledWith(request, { enabled: true, session: 'nino-fallback' });
   });
 
   test('routes to first healthy fallback when primary is unhealthy', () => {
@@ -93,6 +92,30 @@ describe('backend router', () => {
       backendId: 'fallback',
       status: 'sent',
     });
+  });
+
+  test('returns unavailable without sending when primary is unhealthy and no fallback is usable', () => {
+    const claude = makeAdapter('claude', { healthy: false });
+    const router = createRouter({
+      config: {
+        primary: 'claude',
+        fallback: [],
+        backends: {
+          claude: { enabled: true, session: 'nino' },
+        },
+      },
+      adapters: { claude },
+    });
+
+    const result = router.routeRequest(makeRequest());
+
+    expect(result).toEqual({
+      ok: false,
+      reason: 'backend_unavailable',
+      backendId: 'claude',
+      requestId: 'req-1',
+    });
+    expect(claude.send).not.toHaveBeenCalled();
   });
 
   test('ignores later completion when request is already completed', () => {
