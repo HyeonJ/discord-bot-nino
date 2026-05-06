@@ -133,13 +133,11 @@ systemctl --user restart nino-relay.service
 
 Current status on 2026-05-06:
 
-- `PRIMARY_BACKEND=codex`
-- `CLAUDE_ENABLED=false`
-- `CODEX_ENABLED=true`
-- `CODEX_TEST_CHANNELS=`
-- `/health` reports `primary_backend=codex`.
-- `/health` reports `backends.claude.enabled=false`.
-- `/health` reports `backends.codex.alive=true`.
+- Codex-only smoke from a non-test channel passed.
+- The runtime was restored to mixed-test mode afterward.
+- Restored `/health` reports `primary_backend=claude`.
+- Restored `/health` reports `backends.claude.alive=true`.
+- Restored `/health` reports `backends.codex.alive=true`.
 - Watchdog was run with `CLAUDE_ENABLED=false CODEX_ENABLED=true CODEX_TMUX_SESSION=nino-codex`; it exited 0 and kept `nino-codex` alive.
 
 While this mode is active, send one Discord test message:
@@ -150,7 +148,7 @@ While this mode is active, send one Discord test message:
 
 Expected: the message appears in `nino-codex`, and the Discord reply is sent by Codex.
 
-Restore mixed test mode after the smoke test unless Codex-only operation should continue:
+Restored mixed test mode after the smoke test:
 
 ```env
 PRIMARY_BACKEND=

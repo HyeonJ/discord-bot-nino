@@ -48,10 +48,11 @@ Phase 2 shared Codex context implementation is in progress.
 13. Added metadata-only memory index generation and shared-data git workflow wrapper.
 14. Verified shared-context Discord smoke tests in the Codex test channel.
 15. Started Codex-only runtime test and fixed watchdog provider-process detection for pane-owned backend processes.
+16. Verified Codex-only Discord routing from a non-test channel, then restored mixed-test mode.
 
 ## Current Temporary Runtime State
 
-As of 2026-05-06 20:48 KST this PC is intentionally running a temporary feature-branch Codex-only test setup:
+As of 2026-05-06 20:51 KST this PC is intentionally running a temporary feature-branch mixed-test setup:
 
 - `nino-relay.service` has a systemd user drop-in:
   - `/home/bpx27/.config/systemd/user/nino-relay.service.d/feature-worktree.conf`
@@ -60,20 +61,22 @@ As of 2026-05-06 20:48 KST this PC is intentionally running a temporary feature-
   - `/home/bpx27/discord-bot-nino/.env`
 - Backend env in that file:
   - `TMUX_SESSION=nino`
-  - `PRIMARY_BACKEND=codex`
-  - `CLAUDE_ENABLED=false`
+  - `PRIMARY_BACKEND=`
+  - `CLAUDE_ENABLED=true`
   - `CODEX_ENABLED=true`
-  - `CODEX_TEST_CHANNELS=`
+  - `CODEX_TEST_CHANNELS=1480593132511826092`
 - tmux sessions:
-  - `nino` is the existing Claude session, but Claude backend routing is disabled by env.
-  - `nino-codex` is the active Codex session.
+  - `nino` is the existing Claude session.
+  - `nino-codex` is the Codex test session.
 - Health at the time of writing:
-  - `primary_backend=codex`
-  - `backends.claude.enabled=false`
+  - `primary_backend=claude`
+  - `backends.claude.enabled=true`
+  - `backends.claude.alive=true`
   - `backends.codex.enabled=true`
   - `backends.codex.alive=true`
 - Routing behavior:
-  - All agent-routed Discord messages should route to Codex while this temporary Codex-only env remains active.
+  - Only channel `1480593132511826092` routes to Codex.
+  - Other 약수하우스 channels route to Claude.
 
 ## Rollback Commands
 
@@ -135,6 +138,11 @@ After restarting `nino-codex`, test shared context with:
   - `backends.codex.alive=true`, `pid=3209`
   - `watcher_alive=null`
 - Codex-only watchdog script run with `CLAUDE_ENABLED=false CODEX_ENABLED=true CODEX_TMUX_SESSION=nino-codex`: exit 0 and kept `nino-codex` session alive.
+- Codex-only Discord smoke test from a non-test channel: passed; reply returned from Codex.
+- Restored mixed-test env after Codex-only smoke:
+  - `primary_backend=claude`
+  - `backends.claude.alive=true`, `pid=4534`
+  - `backends.codex.alive=true`, `pid=3209`
 - Earlier mixed-mode `/health` after relay restart was also verified before the temporary Codex-only switch.
 - Final code review: approved.
 - Real smoke tests passed:
@@ -145,11 +153,10 @@ After restarting `nino-codex`, test shared context with:
 
 ## Next Tasks
 
-1. Send one Discord message while temporary Codex-only mode is active and confirm it reaches `nino-codex`.
-2. Restore mixed-test env after Codex-only Discord smoke test unless continuing Codex-only operation is intentional.
-3. Decide whether to keep the feature worktree override until merge or switch back to main before merge.
-4. Decide whether Codex-only mode should route all channels or require an explicit `PRIMARY_BACKEND=codex` for production.
-5. Prepare PR/merge only after the test-channel run is considered stable.
+1. Decide whether to keep the feature worktree override until merge or switch back to main before merge.
+2. Decide whether Codex-only mode should route all channels or require an explicit `PRIMARY_BACKEND=codex` for production.
+3. Prepare final review covering optional backends, Codex shared context, memory index, shared-data wrapper, and Codex-only smoke.
+4. Prepare PR/merge only after final review is clean.
 
 ## Open Questions
 
