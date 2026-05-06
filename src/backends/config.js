@@ -58,6 +58,18 @@ function parseFallbacks(value, primary) {
   return fallback;
 }
 
+function choosePrimary(env, backends) {
+  if (env.PRIMARY_BACKEND !== undefined && env.PRIMARY_BACKEND !== null && String(env.PRIMARY_BACKEND).trim() !== '') {
+    return parseBackendId(env.PRIMARY_BACKEND, 'primary');
+  }
+
+  if (backends.claude.enabled) {
+    return 'claude';
+  }
+
+  return SUPPORTED_BACKENDS.find((backend) => backends[backend].enabled);
+}
+
 function loadBackendConfig(env = {}) {
   const backends = {
     claude: {
@@ -80,7 +92,7 @@ function loadBackendConfig(env = {}) {
     };
   }
 
-  const primary = parseBackendId(env.PRIMARY_BACKEND || 'claude', 'primary');
+  const primary = choosePrimary(env, backends);
   if (!backends[primary].enabled) {
     throw new Error(`Primary backend ${primary} is disabled`);
   }

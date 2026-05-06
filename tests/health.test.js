@@ -143,4 +143,29 @@ describe('health endpoint', () => {
     delete process.env.CODEX_ENABLED;
     delete process.env.CODEX_TMUX_SESSION;
   });
+
+  test('/health reports Codex primary when Claude is disabled and Codex is enabled', () => {
+    process.env.CLAUDE_ENABLED = 'false';
+    process.env.CODEX_ENABLED = 'true';
+    codex.health.mockReturnValueOnce({
+      enabled: true,
+      sessionAlive: true,
+      alive: true,
+      pid: 789,
+    });
+
+    const data = healthModule.getHealthData();
+
+    expect(data.primary_backend).toBe('codex');
+    expect(data.backends.codex).toEqual({
+      enabled: true,
+      sessionAlive: true,
+      alive: true,
+      pid: 789,
+    });
+    expect(data.error).toBeUndefined();
+
+    delete process.env.CLAUDE_ENABLED;
+    delete process.env.CODEX_ENABLED;
+  });
 });

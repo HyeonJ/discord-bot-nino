@@ -33,6 +33,22 @@ describe('loadBackendConfig', () => {
     });
   });
 
+  test('uses Codex as primary when Claude is disabled and no primary is specified', () => {
+    expect(loadBackendConfig({
+      CLAUDE_ENABLED: 'false',
+      CODEX_ENABLED: 'true',
+      CODEX_TMUX_SESSION: 'nino-codex-only',
+    })).toEqual({
+      primary: 'codex',
+      fallback: [],
+      backends: {
+        claude: { enabled: false, session: 'nino' },
+        codex: { enabled: true, session: 'nino-codex-only' },
+      },
+      degraded: false,
+    });
+  });
+
   test('primary backend disabled rejects startup', () => {
     expect(() => loadBackendConfig({
       PRIMARY_BACKEND: 'codex',

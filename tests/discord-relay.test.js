@@ -67,6 +67,7 @@ describe('discord relay module', () => {
     delete process.env.CODEX_ENABLED;
     delete process.env.CODEX_TEST_CHANNELS;
     delete process.env.CODEX_TMUX_SESSION;
+    delete process.env.NINO_BOT_ID;
   });
 
   afterEach(() => {
@@ -109,6 +110,102 @@ describe('discord relay module', () => {
     relay.sendToTmux('[D][Tim] hello', 'msg-1', 'test-channel');
 
     expect(mockTmuxSendKeys).toHaveBeenCalledWith('nino-codex-test', '[D][Tim] hello');
+  });
+
+  test('sendToTmux can route to Codex when Claude is disabled and no primary is specified', () => {
+    process.env.CLAUDE_ENABLED = 'false';
+    process.env.CODEX_ENABLED = 'true';
+    process.env.CODEX_TEST_CHANNELS = 'test-channel';
+    process.env.CODEX_TMUX_SESSION = 'nino-codex-test';
+    mockTmuxCheckSession.mockReturnValue(true);
+    mockTmuxGetChildPid.mockReturnValue(456);
+    const relay = require('../src/discord-relay');
+
+    relay.sendToTmux('[D][Tim] hello', 'msg-1', 'test-channel');
+
+    expect(mockTmuxSendKeys).toHaveBeenCalledWith('nino-codex-test', '[D][Tim] hello');
+    expect(relay.__test.pendingResponses.get('msg-1')).toMatchObject({
+      backendId: 'codex',
+    });
+  });
+
+  test('own bot messages complete pending responses through the owning backend', async () => {
+    process.env.NINO_BOT_ID = 'nino-bot';
+    const claudeBackend = require('../src/backends/claude');
+    claudeBackend.health.mockReturnValue({ sessionAlive: true, alive: false });
+    const relay = require('../src/discord-relay');
+
+    relay.sendToTmux('[D][Tim] hello', 'msg-1', 'chan-1');
+    expect(relay.__test.pendingResponses.get('msg-1')).toMatchObject({
+      backendId: 'claude',
+    });
+
+    const messageHandler = mockClientOn.mock.calls.find(([event]) => event === 'messageCreate')?.[1];
+    const attachments = [];
+    attachments.size = 0;
+    await messageHandler({
+      id: 'nino-reply-1',
+      guildId: '1479813608023134342',
+      channelId: 'chan-1',
+      channel: {
+        id: 'chan-1',
+        name: 'general',
+        isThread: () => false,
+      },
+      author: {
+        id: 'nino-bot',
+        bot: true,
+      },
+      content: 'reply',
+      attachments,
+      guild: {
+        members: { cache: new Map() },
+        roles: { cache: new Map() },
+        channels: { cache: new Map() },
+      },
+    });
+
+    expect(relay.__test.pendingResponses.has('msg-1')).toBe(false);
+  });
+
+  test('other bot messages do not clear pending responses owned by another backend', async () => {
+    const claudeBackend = require('../src/backends/claude');
+    claudeBackend.health.mockReturnValue({ sessionAlive: true, alive: false });
+    const relay = require('../src/discord-relay');
+
+    relay.sendToTmux('[D][Tim] hello', 'msg-1', 'chan-1');
+    expect(relay.__test.pendingResponses.get('msg-1')).toMatchObject({
+      backendId: 'claude',
+    });
+
+    const messageHandler = mockClientOn.mock.calls.find(([event]) => event === 'messageCreate')?.[1];
+    const attachments = [];
+    attachments.size = 0;
+    await messageHandler({
+      id: 'bot-msg-1',
+      guildId: '1479813608023134342',
+      channelId: 'chan-1',
+      channel: {
+        id: 'chan-1',
+        name: 'general',
+        isThread: () => false,
+      },
+      author: {
+        id: 'other-bot',
+        bot: true,
+        username: 'Klaude',
+      },
+      content: 'message from another bot',
+      attachments,
+      embeds: [],
+      guild: {
+        members: { cache: new Map() },
+        roles: { cache: new Map() },
+        channels: { cache: new Map() },
+      },
+    });
+
+    expect(relay.__test.pendingResponses.has('msg-1')).toBe(true);
   });
 
   test('other-bot guild messages in configured test channels route to Codex tmux session', async () => {

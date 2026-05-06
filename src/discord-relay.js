@@ -212,12 +212,35 @@ function sendToTmux(payload, msgId = null, channelId = null) {
         pendingResponses.delete(msgId);
       }
       console.error(`[relay] backend route failed: ${result.reason}${result.backendId ? ` (${result.backendId})` : ''}`);
+    } else if (msgId && pendingResponses.has(msgId)) {
+      pendingResponses.set(msgId, {
+        ...pendingResponses.get(msgId),
+        backendId: result.backendId,
+      });
     }
   } catch (e) {
     if (msgId) {
       pendingResponses.delete(msgId);
     }
     console.error('[relay] backend route error:', e.message);
+  }
+}
+
+function completePendingInChannel(channelId, backendId) {
+  for (const [pendingId, info] of pendingResponses) {
+    if (info.channelId !== channelId) {
+      continue;
+    }
+
+    const completionBackend = backendId || info.backendId;
+    if (!completionBackend) {
+      continue;
+    }
+
+    const result = backendRouter.markCompleted(pendingId, completionBackend);
+    if (result.ok || result.reason === 'already_completed') {
+      pendingResponses.delete(pendingId);
+    }
   }
 }
 
@@ -265,9 +288,7 @@ client.on('messageCreate', async (msg) => {
         attachments: msg.attachments.map(a => ({ name: a.name, url: a.url, contentType: a.contentType })),
       });
       // DM 응답 시 해당 채널 pending 제거
-      for (const [pendingId, info] of pendingResponses) {
-        if (info.channelId === msg.channelId) pendingResponses.delete(pendingId);
-      }
+      completePendingInChannel(msg.channelId);
       return;
     }
     if (msg.author.bot) return;
@@ -297,9 +318,6 @@ client.on('messageCreate', async (msg) => {
     // GitHub auto-pull
     if (shouldAutoPull(msg)) runAutoPull(msg);
     const chId = msg.channel.isThread() ? msg.channel.id : msg.channelId;
-    for (const [pendingId, info] of pendingResponses) {
-      if (info.channelId === chId) pendingResponses.delete(pendingId);
-    }
     const botName = msg.author.username || msg.author.globalName || 'Bot';
     const content = resolveMentions(msg);
     const channelTag = chId !== DEFAULT_CHANNEL ? `[C:${chId}]` : '';
@@ -342,11 +360,7 @@ client.on('messageCreate', async (msg) => {
     });
     // 봇이 응답했으면 해당 채널의 pending 제거
     const chId = msg.channel.isThread() ? msg.channel.id : msg.channelId;
-    for (const [pendingId, info] of pendingResponses) {
-      if (info.channelId === chId) {
-        pendingResponses.delete(pendingId);
-      }
-    }
+    completePendingInChannel(chId);
     return;
   }
 
@@ -456,6 +470,7 @@ module.exports = {
   startRelay,
   __test: {
     pendingResponses,
+    completePendingInChannel,
   },
 };
 
