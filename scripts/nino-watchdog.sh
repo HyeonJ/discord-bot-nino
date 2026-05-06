@@ -46,6 +46,7 @@ restart_backend() {
 check_backend() {
   local backend="$1"
   local session="$2"
+  local process_pattern="${3:-}"
 
   if ! tmux has-session -t "$session" 2>/dev/null; then
     log "DEAD: $backend tmux session '$session' not found. Restarting..."
@@ -61,6 +62,17 @@ check_backend() {
     restart_backend "$backend"
     alert "$backend backend restarted automatically (pane process missing)"
     return 1
+  fi
+
+  if [ -n "$process_pattern" ]; then
+    local backend_pid
+    backend_pid=$(pgrep -P "$pane_pid" -f "$process_pattern" 2>/dev/null | head -1 || true)
+    if [ -z "$backend_pid" ]; then
+      log "DEAD: $backend process '$process_pattern' not found under pane PID $pane_pid. Respawning..."
+      restart_backend "$backend"
+      alert "$backend backend restarted automatically (backend process missing)"
+      return 1
+    fi
   fi
 
   return 0
@@ -91,12 +103,12 @@ check_claude_d_state() {
 }
 
 if is_enabled "$CLAUDE_ENABLED"; then
-  check_backend "claude" "$CLAUDE_SESSION" || exit 0
+  check_backend "claude" "$CLAUDE_SESSION" "claude" || exit 0
   check_claude_d_state "$CLAUDE_SESSION" || exit 0
 fi
 
 if is_enabled "$CODEX_ENABLED"; then
-  check_backend "codex" "$CODEX_SESSION" || exit 0
+  check_backend "codex" "$CODEX_SESSION" "codex" || exit 0
 fi
 
 exit 0

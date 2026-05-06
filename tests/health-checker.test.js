@@ -166,6 +166,21 @@ describe('health-checker', () => {
       expect(issues.some(i => i.includes('watcher'))).toBe(true);
     });
 
+    test('watcher_alive=null is treated as not applicable', () => {
+      const data = {
+        timestamp: new Date().toISOString(),
+        primary_backend: 'codex',
+        backends: {
+          claude: { enabled: false, alive: false, pid: null },
+          codex: { enabled: true, alive: true, pid: 67890 },
+        },
+        watcher_alive: null,
+      };
+
+      const issues = analyzeHealth('haru', data);
+      expect(issues.some(i => i.includes('watcher'))).toBe(false);
+    });
+
     test('legacy claude_pid=null is detected', () => {
       const data = {
         timestamp: new Date().toISOString(),

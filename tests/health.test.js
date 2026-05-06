@@ -147,6 +147,12 @@ describe('health endpoint', () => {
   test('/health reports Codex primary when Claude is disabled and Codex is enabled', () => {
     process.env.CLAUDE_ENABLED = 'false';
     process.env.CODEX_ENABLED = 'true';
+    claude.health.mockReturnValueOnce({
+      enabled: false,
+      sessionAlive: false,
+      alive: false,
+      pid: null,
+    });
     codex.health.mockReturnValueOnce({
       enabled: true,
       sessionAlive: true,
@@ -164,6 +170,7 @@ describe('health endpoint', () => {
       pid: 789,
     });
     expect(data.error).toBeUndefined();
+    expect(data.watcher_alive).toBeNull();
 
     delete process.env.CLAUDE_ENABLED;
     delete process.env.CODEX_ENABLED;

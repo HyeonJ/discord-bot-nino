@@ -41,10 +41,11 @@ describe('operational backend scripts', () => {
     expect(watchdog).toContain('is_enabled "$CODEX_ENABLED"');
     expect(watchdog).toContain('check_backend "claude" "$CLAUDE_SESSION"');
     expect(watchdog).toContain('check_backend "codex" "$CODEX_SESSION"');
+    expect(watchdog).toContain('pgrep -P "$pane_pid" -f "$process_pattern"');
     expect(watchdog).toContain('check_claude_d_state "$CLAUDE_SESSION"');
     expect(watchdog).toContain('"$SCRIPT_DIR/restart-nino.sh"');
     expect(watchdog).toContain('"$SCRIPT_DIR/restart-backend.sh" "$backend"');
-    expect(watchdog).not.toContain('pgrep -P "$PANE_PID" -f "codex"');
+    expect(watchdog).toContain('check_backend "codex" "$CODEX_SESSION" "codex"');
   });
 
   test('start-codex-nino launches Codex with Nino instructions as the initial prompt', () => {

@@ -53,6 +53,7 @@ function getHealthData() {
   const kstOffset = 9 * 60 * 60 * 1000;
   const kstNow = new Date(now.getTime() + kstOffset);
   const backendHealth = getBackendHealth();
+  const claudeEnabled = Boolean(backendHealth.backends.claude && backendHealth.backends.claude.enabled);
 
   const data = {
     bot: BOT_NAME,
@@ -64,7 +65,7 @@ function getHealthData() {
     // Legacy field for existing external health consumers. Use backends.claude.sessionAlive instead.
     tmux_alive: backendHealth.backends.claude.sessionAlive,
     relay_alive: true,
-    watcher_alive: checkWatcherAlive(),
+    watcher_alive: claudeEnabled ? checkWatcherAlive() : null,
     last_message_at: lastMessageAt,
     uptime: Math.floor((Date.now() - startTime) / 1000),
   };
