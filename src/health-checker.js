@@ -59,32 +59,56 @@ function sendAlert(message, dmChannel) {
   }
 }
 
+function analyzeBackendHealth(data, issues) {
+  const backendEntries = Object.entries(data.backends);
+  const enabledBackends = backendEntries.filter(([, backend]) => backend && backend.enabled === true);
+  const enabledBackendAlive = enabledBackends.some(([, backend]) => backend.alive === true);
+
+  if (!enabledBackendAlive) {
+    issues.push('No enabled backend alive');
+  }
+
+  const primaryBackend = data.primary_backend;
+  const primaryHealth = primaryBackend ? data.backends[primaryBackend] : null;
+  if (primaryHealth && primaryHealth.enabled === true && primaryHealth.alive !== true) {
+    issues.push(`Primary backend ${primaryBackend} unhealthy`);
+  }
+}
+
+function analyzeLegacyHealth(data, issues) {
+  if (data.tmux_alive === false) {
+    issues.push('tmux session dead');
+  }
+
+  if (data.claude_pid === null) {
+    issues.push('Claude PID missing');
+  }
+}
+
 function analyzeHealth(botName, data) {
   const issues = [];
   const now = Date.now();
 
   if (data === null) {
-    issues.push('relay 응답 없음 (연결 실패 또는 타임아웃)');
+    issues.push('relay response missing (connection failed or timeout)');
     return issues;
   }
 
   if (data.timestamp) {
     const ts = new Date(data.timestamp).getTime();
     if (now - ts > STALE_THRESHOLD_MS) {
-      issues.push(`timestamp ${Math.floor((now - ts) / 1000)}초 경과 (stale)`);
+      issues.push(`timestamp ${Math.floor((now - ts) / 1000)} seconds old (stale)`);
     }
   }
 
-  if (data.tmux_alive === false) {
-    issues.push('tmux 세션 죽음');
+  if (data.backends && typeof data.backends === 'object') {
+    analyzeBackendHealth(data, issues);
+  } else {
+    analyzeLegacyHealth(data, issues);
   }
 
   if (data.watcher_alive === false) {
-    issues.push('watcher 미실행 (프롬프트 얼림 위험)');
-  }
-
-  if (data.claude_pid === null) {
-    issues.push('Claude PID 없음');
+    issues.push('watcher dead');
   }
 
   return issues;
@@ -100,15 +124,15 @@ async function checkBot(target) {
   try {
     data = await fetchHealth(target.url);
   } catch (e) {
-    // 연결 실패
+    // Connection failed.
   }
 
   const issues = analyzeHealth(target.name, data);
 
   if (issues.length > 0 && shouldAlert(target.name)) {
     const dmChannel = OWNER_MAP[target.name] || DM_DARREN;
-    const issueList = issues.map(i => `• ${i}`).join('\n');
-    const alert = `⚠️ **${target.name} 이상 감지**\n${issueList}\n확인 필요`;
+    const issueList = issues.map(i => `- ${i}`).join('\n');
+    const alert = `Health issue detected for ${target.name}\n${issueList}\nPlease check.`;
     sendAlert(alert, dmChannel);
     lastAlertTime.set(target.name, Date.now());
     console.log(`[health-checker] alert sent for ${target.name} via ${dmChannel}: ${issues.join(', ')}`);

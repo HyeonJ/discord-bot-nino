@@ -1,5 +1,11 @@
 const http = require('http');
 
+jest.mock('../src/backends/claude', () => ({
+  health: jest.fn(),
+}));
+
+const claude = require('../src/backends/claude');
+
 describe('health endpoint', () => {
   let healthModule;
   const TEST_PORT = 58190;
@@ -7,6 +13,15 @@ describe('health endpoint', () => {
   beforeAll(() => {
     process.env.HEALTH_PORT = String(TEST_PORT);
     process.env.TMUX_SESSION = 'nino';
+    delete process.env.PRIMARY_BACKEND;
+    delete process.env.CLAUDE_ENABLED;
+    delete process.env.CODEX_ENABLED;
+    claude.health.mockReturnValue({
+      enabled: true,
+      sessionAlive: true,
+      alive: true,
+      pid: 123,
+    });
     healthModule = require('../src/health');
     healthModule.start();
   });
@@ -27,6 +42,7 @@ describe('health endpoint', () => {
         expect(data.bot).toBe('nino');
         expect(data).toHaveProperty('timestamp');
         expect(data).toHaveProperty('tmux_alive');
+        expect(data).toHaveProperty('claude_pid');
         expect(data).toHaveProperty('relay_alive', true);
         expect(data).toHaveProperty('watcher_alive');
         expect(data).toHaveProperty('uptime');
@@ -53,6 +69,35 @@ describe('health endpoint', () => {
         const data = JSON.parse(body);
         expect(data).toHaveProperty('last_message_at');
         expect(data.last_message_at).not.toBeNull();
+        done();
+      });
+    });
+  });
+
+  test('/health reports provider-neutral backend health with legacy fields', (done) => {
+    http.get(`http://localhost:${TEST_PORT}/health`, (res) => {
+      let body = '';
+      res.on('data', (chunk) => { body += chunk; });
+      res.on('end', () => {
+        const data = JSON.parse(body);
+
+        expect(data.primary_backend).toBe('claude');
+        expect(data.backends).toEqual({
+          claude: {
+            enabled: true,
+            sessionAlive: true,
+            alive: true,
+            pid: 123,
+          },
+          codex: {
+            enabled: false,
+            sessionAlive: false,
+            alive: false,
+            pid: null,
+          },
+        });
+        expect(data.claude_pid).toBe(123);
+        expect(data.tmux_alive).toBe(true);
         done();
       });
     });

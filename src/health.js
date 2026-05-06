@@ -1,37 +1,14 @@
 const http = require('http');
 const { execSync } = require('child_process');
+const { loadBackendConfig } = require('./backends/config');
+const claude = require('./backends/claude');
 
 const BOT_NAME = 'nino';
-const TMUX_SESSION = process.env.TMUX_SESSION || 'nino';
 const HEALTH_PORT = parseInt(process.env.HEALTH_PORT || '58090', 10);
 
 const startTime = Date.now();
 let lastMessageAt = null;
 let server = null;
-
-function checkTmuxAlive() {
-  try {
-    execSync(`tmux has-session -t '${TMUX_SESSION}' 2>/dev/null`);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function getClaudePid() {
-  try {
-    const result = execSync(
-      `tmux list-panes -t '${TMUX_SESSION}' -F '#{pane_pid}' 2>/dev/null`
-    ).toString().trim();
-    const panePid = result.split('\n')[0];
-    const children = execSync(
-      `pgrep -P ${panePid} -f claude 2>/dev/null || echo ""`
-    ).toString().trim();
-    return children ? parseInt(children.split('\n')[0], 10) : null;
-  } catch {
-    return null;
-  }
-}
 
 function checkWatcherAlive() {
   try {
@@ -43,21 +20,59 @@ function checkWatcherAlive() {
   }
 }
 
+function disabledBackend(enabled = false) {
+  return { enabled, sessionAlive: false, alive: false, pid: null };
+}
+
+function getBackendHealth() {
+  try {
+    const config = loadBackendConfig(process.env);
+    return {
+      primaryBackend: config.primary,
+      backends: {
+        claude: claude.health(config.backends.claude),
+        codex: disabledBackend(config.backends.codex.enabled),
+      },
+      error: null,
+    };
+  } catch (error) {
+    return {
+      primaryBackend: null,
+      backends: {
+        claude: disabledBackend(false),
+        codex: disabledBackend(false),
+      },
+      error: error.message,
+    };
+  }
+}
+
 function getHealthData() {
   const now = new Date();
   const kstOffset = 9 * 60 * 60 * 1000;
   const kstNow = new Date(now.getTime() + kstOffset);
+  const backendHealth = getBackendHealth();
 
-  return {
+  const data = {
     bot: BOT_NAME,
     timestamp: kstNow.toISOString().replace('Z', '+09:00'),
-    claude_pid: getClaudePid(),
-    tmux_alive: checkTmuxAlive(),
+    primary_backend: backendHealth.primaryBackend,
+    backends: backendHealth.backends,
+    // Legacy field for existing external health consumers. Use backends.claude.pid instead.
+    claude_pid: backendHealth.backends.claude.pid,
+    // Legacy field for existing external health consumers. Use backends.claude.sessionAlive instead.
+    tmux_alive: backendHealth.backends.claude.sessionAlive,
     relay_alive: true,
     watcher_alive: checkWatcherAlive(),
     last_message_at: lastMessageAt,
     uptime: Math.floor((Date.now() - startTime) / 1000),
   };
+
+  if (backendHealth.error) {
+    data.error = backendHealth.error;
+  }
+
+  return data;
 }
 
 function start() {
