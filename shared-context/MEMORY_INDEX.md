@@ -2,8 +2,6 @@
 
 This is a generated metadata-only index. private memory contents are intentionally omitted.
 
-Generated: 2026-05-06T11:34:32.614Z
-
 ## Roots
 
 - /home/bpx27/discord-bot-nino/memory

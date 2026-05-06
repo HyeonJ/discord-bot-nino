@@ -41,6 +41,8 @@ describe('operational backend scripts', () => {
     expect(watchdog).toContain('is_enabled "$CODEX_ENABLED"');
     expect(watchdog).toContain('check_backend "claude" "$CLAUDE_SESSION"');
     expect(watchdog).toContain('check_backend "codex" "$CODEX_SESSION"');
+    expect(watchdog).toContain('ps -p "$pane_pid" -o args=');
+    expect(watchdog).toContain('if [[ "$pane_command" == *"$process_pattern"* ]]');
     expect(watchdog).toContain('pgrep -P "$pane_pid" -f "$process_pattern"');
     expect(watchdog).toContain('check_claude_d_state "$CLAUDE_SESSION"');
     expect(watchdog).toContain('"$SCRIPT_DIR/restart-nino.sh"');

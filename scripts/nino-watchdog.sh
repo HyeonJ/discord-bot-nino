@@ -65,6 +65,12 @@ check_backend() {
   fi
 
   if [ -n "$process_pattern" ]; then
+    local pane_command
+    pane_command=$(ps -p "$pane_pid" -o args= 2>/dev/null || echo "")
+    if [[ "$pane_command" == *"$process_pattern"* ]]; then
+      return 0
+    fi
+
     local backend_pid
     backend_pid=$(pgrep -P "$pane_pid" -f "$process_pattern" 2>/dev/null | head -1 || true)
     if [ -z "$backend_pid" ]; then

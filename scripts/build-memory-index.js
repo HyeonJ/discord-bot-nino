@@ -75,8 +75,6 @@ function renderIndex(roots) {
     '',
     'This is a generated metadata-only index. private memory contents are intentionally omitted.',
     '',
-    `Generated: ${new Date().toISOString()}`,
-    '',
     '## Roots',
     '',
   ];

@@ -85,6 +85,8 @@ node scripts/build-memory-index.js
 
 Send these in the Codex test channel after restarting `nino-codex`:
 
+Status on 2026-05-06: passed in Discord test channel.
+
 ```text
 니노야 /home/bpx27/discord-bot-nino/memory/current-tasks.md 읽고 지금 진행중인 작업 한 줄로 말해줘.
 ```
@@ -125,6 +127,36 @@ Expected: Codex names `bash scripts/shared-data.sh read todo-list.md`.
 
 ```bash
 systemctl --user restart nino-relay.service
+```
+
+## Temporary Codex-Only Test
+
+Current status on 2026-05-06:
+
+- `PRIMARY_BACKEND=codex`
+- `CLAUDE_ENABLED=false`
+- `CODEX_ENABLED=true`
+- `CODEX_TEST_CHANNELS=`
+- `/health` reports `primary_backend=codex`.
+- `/health` reports `backends.claude.enabled=false`.
+- `/health` reports `backends.codex.alive=true`.
+- Watchdog was run with `CLAUDE_ENABLED=false CODEX_ENABLED=true CODEX_TMUX_SESSION=nino-codex`; it exited 0 and kept `nino-codex` alive.
+
+While this mode is active, send one Discord test message:
+
+```text
+니노야 codex-only 라우팅 테스트야. 이 메시지가 보이면 codex only ok 라고만 답해줘.
+```
+
+Expected: the message appears in `nino-codex`, and the Discord reply is sent by Codex.
+
+Restore mixed test mode after the smoke test unless Codex-only operation should continue:
+
+```env
+PRIMARY_BACKEND=
+CLAUDE_ENABLED=true
+CODEX_ENABLED=true
+CODEX_TEST_CHANNELS=1480593132511826092
 ```
 
 ## Roll Back To Main Runtime
