@@ -15,6 +15,11 @@ const codex = {
     return { enabled, sessionAlive, alive: sessionAlive && pid !== null, pid };
   },
 
+  canRoute(config) {
+    const result = this.health(config);
+    return Boolean(result && result.alive === true);
+  },
+
   send(request, config) {
     const payload = request && request.payload;
     if (payload === undefined || payload === null) {

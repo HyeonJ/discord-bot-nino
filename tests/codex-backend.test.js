@@ -49,6 +49,23 @@ describe('codex backend adapter', () => {
     expect(tmux.getChildPid).toHaveBeenCalledWith('nino-codex', 'codex');
   });
 
+  test('canRoute requires alive Codex process, not only a live tmux session', () => {
+    tmux.checkSession.mockReturnValue(true);
+    tmux.getChildPid.mockReturnValue(null);
+
+    expect(codex.canRoute({ enabled: true, session: 'nino-codex' })).toBe(false);
+
+    expect(tmux.checkSession).toHaveBeenCalledWith('nino-codex');
+    expect(tmux.getChildPid).toHaveBeenCalledWith('nino-codex', 'codex');
+  });
+
+  test('canRoute allows Codex when process is alive', () => {
+    tmux.checkSession.mockReturnValue(true);
+    tmux.getChildPid.mockReturnValue(23456);
+
+    expect(codex.canRoute({ enabled: true, session: 'nino-codex' })).toBe(true);
+  });
+
   test('send uses tmux transport with explicit payload', () => {
     tmux.sendKeys.mockReturnValue(true);
 

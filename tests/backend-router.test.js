@@ -147,6 +147,32 @@ describe('backend router', () => {
     expect(claude.send).toHaveBeenCalledWith(request, { enabled: true, session: 'nino' });
   });
 
+  test('falls back to Claude primary for test channel when Codex session is alive but process is missing', () => {
+    const claude = makeAdapter('claude');
+    const codex = makeAdapter('codex', {
+      healthResult: { enabled: true, sessionAlive: true, alive: false, pid: null },
+    });
+    const router = createRouter({
+      config: {
+        primary: 'claude',
+        fallback: [],
+        codexTestChannels: ['test-channel'],
+        backends: {
+          claude: { enabled: true, session: 'nino' },
+          codex: { enabled: true, session: 'nino-codex' },
+        },
+      },
+      adapters: { claude, codex },
+    });
+
+    const request = makeRequest({ channelId: 'test-channel' });
+    const result = router.routeRequest(request);
+
+    expect(result).toEqual({ ok: true, backendId: 'claude', requestId: 'req-1' });
+    expect(codex.send).not.toHaveBeenCalled();
+    expect(claude.send).toHaveBeenCalledWith(request, { enabled: true, session: 'nino' });
+  });
+
   test('supports CODEX_TEST_CHANNELS from router env input', () => {
     const claude = makeAdapter('claude');
     const codex = makeAdapter('codex');

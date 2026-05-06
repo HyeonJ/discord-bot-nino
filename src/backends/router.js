@@ -54,6 +54,9 @@ function canRoute(adapter, backendConfig) {
     }
 
     const result = adapter.health(backendConfig);
+    if (adapter.id === 'codex') {
+      return Boolean(result && result.alive === true);
+    }
     return Boolean(result === true || (result && (result.sessionAlive || result.alive)));
   } catch {
     return false;
