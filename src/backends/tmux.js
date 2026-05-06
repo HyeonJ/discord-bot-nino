@@ -44,6 +44,13 @@ function getChildPid(sessionName, processPattern) {
       return null;
     }
 
+    const paneCommand = childProcess.execSync(
+      `ps -p ${panePid} -o args= 2>/dev/null || echo ""`
+    ).toString().trim();
+    if (paneCommand.includes(processPattern)) {
+      return parseInt(panePid, 10);
+    }
+
     const childResult = childProcess.execSync(
       `pgrep -P ${panePid} -f ${shellSingleQuote(processPattern)} 2>/dev/null || echo ""`
     ).toString().trim();

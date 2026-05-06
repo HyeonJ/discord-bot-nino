@@ -71,6 +71,7 @@ describe('tmux backend transport', () => {
   test('getChildPid looks up child process using the provider process pattern', () => {
     childProcess.execSync
       .mockReturnValueOnce(Buffer.from('1234\n'))
+      .mockReturnValueOnce(Buffer.from('bash\n'))
       .mockReturnValueOnce(Buffer.from('5678\n'));
 
     expect(tmux.getChildPid('nino', 'claude')).toBe(5678);
@@ -81,13 +82,36 @@ describe('tmux backend transport', () => {
     );
     expect(childProcess.execSync).toHaveBeenNthCalledWith(
       2,
+      "ps -p 1234 -o args= 2>/dev/null || echo \"\""
+    );
+    expect(childProcess.execSync).toHaveBeenNthCalledWith(
+      3,
       "pgrep -P 1234 -f 'claude' 2>/dev/null || echo \"\""
     );
+  });
+
+  test('getChildPid returns pane pid when the pane itself is the provider process', () => {
+    childProcess.execSync
+      .mockReturnValueOnce(Buffer.from('48284\n'))
+      .mockReturnValueOnce(Buffer.from('claude --model claude-opus-4-6 --continue\n'));
+
+    expect(tmux.getChildPid('nino', 'claude')).toBe(48284);
+
+    expect(childProcess.execSync).toHaveBeenNthCalledWith(
+      1,
+      "tmux list-panes -t 'nino' -F '#{pane_pid}' 2>/dev/null"
+    );
+    expect(childProcess.execSync).toHaveBeenNthCalledWith(
+      2,
+      "ps -p 48284 -o args= 2>/dev/null || echo \"\""
+    );
+    expect(childProcess.execSync).toHaveBeenCalledTimes(2);
   });
 
   test('getChildPid returns null when no provider process is found', () => {
     childProcess.execSync
       .mockReturnValueOnce(Buffer.from('1234\n'))
+      .mockReturnValueOnce(Buffer.from('bash\n'))
       .mockReturnValueOnce(Buffer.from('\n'));
 
     expect(tmux.getChildPid('nino', 'claude')).toBeNull();
@@ -107,6 +131,7 @@ describe('tmux backend transport', () => {
   test('getChildPid returns null for non-numeric provider pid output', () => {
     childProcess.execSync
       .mockReturnValueOnce(Buffer.from('1234\n'))
+      .mockReturnValueOnce(Buffer.from('bash\n'))
       .mockReturnValueOnce(Buffer.from('not-a-pid\n'));
 
     expect(tmux.getChildPid('nino', 'claude')).toBeNull();

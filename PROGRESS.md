@@ -44,6 +44,7 @@ Phase 2 shared Codex context implementation is in progress.
 9. Added Codex Discord output bridge, reliable tmux submit handling, and Nino persona bootstrap.
 10. Hardened backend watchdog and health semantics after final review.
 11. Added provider-neutral shared context for Codex to find Claude-era memory, hook rules, shared-data rules, and legacy skills.
+12. Fixed tmux backend pid detection when the provider process is the tmux pane process itself.
 
 ## Current Temporary Runtime State
 
@@ -115,8 +116,11 @@ After restarting `nino-codex`, test shared context with:
 
 ## Verification
 
-- `npm test`: 11 suites / 99 tests passed.
+- `npm test`: 11 suites / 100 tests passed.
 - `bash -n scripts/start-backend.sh scripts/start-codex-nino.sh scripts/restart-backend.sh scripts/nino-watchdog.sh scripts/start-nino.sh scripts/restart-nino.sh`: passed.
+- Live `/health` after relay restart:
+  - `backends.claude.alive=true`, `pid=48284`
+  - `backends.codex.alive=true`, `pid=87155`
 - Final code review: approved.
 - Real smoke tests passed:
   - Discord test channel routed to `nino-codex`.

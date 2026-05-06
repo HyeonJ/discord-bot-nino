@@ -45,4 +45,4 @@
 - [x] Update `docs/codex-test-operations.md` with memory/hook/skill smoke test prompts.
 - [x] Update `PROGRESS.md` with this phase's status.
 - [x] Run `npm test` and bash syntax checks.
-- [ ] Commit the changes.
+- [x] Commit the changes.
