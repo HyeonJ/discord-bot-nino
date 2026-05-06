@@ -29,7 +29,7 @@ const codex = {
       throw new Error('Codex backend send requires a tmux session');
     }
 
-    return tmux.sendKeys(config.session, payload);
+    return tmux.sendKeys(config.session, payload, { submitDelaySeconds: 1 });
   },
 
   restart() {

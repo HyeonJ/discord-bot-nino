@@ -13,12 +13,21 @@ function checkSession(sessionName) {
   }
 }
 
-function sendKeys(sessionName, payload) {
+function parseSubmitDelaySeconds(value) {
+  const delay = Number(value || 0);
+  return Number.isFinite(delay) && delay > 0 ? delay : 0;
+}
+
+function sendKeys(sessionName, payload, options = {}) {
   try {
     childProcess.execSync(
       `tmux send-keys -t ${shellSingleQuote(sessionName)} -- ${shellSingleQuote(payload)}`
     );
-    childProcess.execSync(`tmux send-keys -t ${shellSingleQuote(sessionName)} C-m`);
+    const submitDelaySeconds = parseSubmitDelaySeconds(options.submitDelaySeconds);
+    if (submitDelaySeconds > 0) {
+      childProcess.execSync(`sleep ${submitDelaySeconds}`);
+    }
+    childProcess.execSync(`tmux send-keys -t ${shellSingleQuote(sessionName)} Enter`);
     return true;
   } catch {
     return false;

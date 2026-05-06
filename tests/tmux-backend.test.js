@@ -32,7 +32,23 @@ describe('tmux backend transport', () => {
     );
     expect(childProcess.execSync).toHaveBeenNthCalledWith(
       2,
-      "tmux send-keys -t 'nino' C-m"
+      "tmux send-keys -t 'nino' Enter"
+    );
+  });
+
+  test('sendKeys can wait before submitting for TUI backends', () => {
+    childProcess.execSync.mockReturnValue(Buffer.from(''));
+
+    expect(tmux.sendKeys('nino-codex', 'hello', { submitDelaySeconds: 1 })).toBe(true);
+
+    expect(childProcess.execSync).toHaveBeenNthCalledWith(
+      1,
+      "tmux send-keys -t 'nino-codex' -- 'hello'"
+    );
+    expect(childProcess.execSync).toHaveBeenNthCalledWith(2, 'sleep 1');
+    expect(childProcess.execSync).toHaveBeenNthCalledWith(
+      3,
+      "tmux send-keys -t 'nino-codex' Enter"
     );
   });
 

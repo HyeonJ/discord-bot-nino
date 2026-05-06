@@ -109,7 +109,11 @@ describe('discord relay module', () => {
 
     relay.sendToTmux('[D][Tim] hello', 'msg-1', 'test-channel');
 
-    expect(mockTmuxSendKeys).toHaveBeenCalledWith('nino-codex-test', '[D][Tim] hello');
+    expect(mockTmuxSendKeys).toHaveBeenCalledWith(
+      'nino-codex-test',
+      '[D][Tim] hello',
+      { submitDelaySeconds: 1 }
+    );
   });
 
   test('sendToTmux can route to Codex when Claude is disabled and no primary is specified', () => {
@@ -123,7 +127,11 @@ describe('discord relay module', () => {
 
     relay.sendToTmux('[D][Tim] hello', 'msg-1', 'test-channel');
 
-    expect(mockTmuxSendKeys).toHaveBeenCalledWith('nino-codex-test', '[D][Tim] hello');
+    expect(mockTmuxSendKeys).toHaveBeenCalledWith(
+      'nino-codex-test',
+      '[D][Tim] hello',
+      { submitDelaySeconds: 1 }
+    );
     expect(relay.__test.pendingResponses.get('msg-1')).toMatchObject({
       backendId: 'codex',
     });
@@ -249,7 +257,8 @@ describe('discord relay module', () => {
     expect(mockLogin).not.toHaveBeenCalled();
     expect(mockTmuxSendKeys).toHaveBeenCalledWith(
       'nino-codex-test',
-      '[D][Klaude][C:test-channel][M:bot-msg-1] hello from another bot'
+      '[D][Klaude][C:test-channel][M:bot-msg-1] hello from another bot',
+      { submitDelaySeconds: 1 }
     );
   });
 });

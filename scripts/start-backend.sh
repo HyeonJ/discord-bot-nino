@@ -23,7 +23,7 @@ You are Nino's Codex backend inside a tmux session.
 Discord relay messages arrive as payloads that may include [C:CHANNEL_ID] and [M:MESSAGE_ID].
 When a user asks you to respond in Discord, send the response with:
 
-src/discord-send -c CHANNEL_ID -r MESSAGE_ID "your reply"
+/home/bpx27/discord-bot-nino/src/discord-send -c CHANNEL_ID -r MESSAGE_ID "your reply"
 
 Use the CHANNEL_ID from [C:...] when present. If [C:...] is absent, use the default channel by omitting -c.
 Use the MESSAGE_ID from [M:...] with -r so the Discord reply threads correctly.
@@ -33,7 +33,7 @@ EOF
   sleep "${CODEX_BOOTSTRAP_DELAY_SECONDS:-3}"
   tmux send-keys -t "$SESSION" -- "$prompt"
   sleep "${CODEX_BOOTSTRAP_SUBMIT_DELAY_SECONDS:-5}"
-  tmux send-keys -t "$SESSION" C-m
+  tmux send-keys -t "$SESSION" Enter
 }
 
 case "$BACKEND" in

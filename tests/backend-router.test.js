@@ -217,7 +217,7 @@ describe('backend router', () => {
     const result = router.routeRequest(makeRequest({ channelId: 'test-channel' }));
 
     expect(result).toEqual({ ok: true, backendId: 'codex', requestId: 'req-1' });
-    expect(tmux.sendKeys).toHaveBeenCalledWith('nino-codex', '[D][Tim] hello');
+    expect(tmux.sendKeys).toHaveBeenCalledWith('nino-codex', '[D][Tim] hello', { submitDelaySeconds: 1 });
     expect(claude.send).not.toHaveBeenCalled();
   });
 

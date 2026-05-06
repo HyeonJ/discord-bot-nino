@@ -71,7 +71,7 @@ describe('codex backend adapter', () => {
 
     expect(codex.send({ payload: 'full message', preview: 'preview only' }, { session: 'nino-codex' })).toBe(true);
 
-    expect(tmux.sendKeys).toHaveBeenCalledWith('nino-codex', 'full message');
+    expect(tmux.sendKeys).toHaveBeenCalledWith('nino-codex', 'full message', { submitDelaySeconds: 1 });
   });
 
   test('send throws when payload is missing', () => {
