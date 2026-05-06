@@ -14,9 +14,13 @@ describe('operational backend scripts', () => {
     expect(startBackend).toContain('CODEX_TMUX_SESSION:-nino-codex');
     expect(startBackend).toContain('claude --model claude-opus-4-6 --dangerously-skip-permissions');
     expect(startBackend).toContain('COMMAND="\\"$SCRIPT_DIR/start-codex-nino.sh\\""');
+    expect(startBackend).toContain('TMUX_TARGET="=$SESSION"');
+    expect(startBackend).toContain('TMUX_PANE_TARGET="=$SESSION:"');
+    expect(startBackend).toContain('tmux has-session -t "$TMUX_TARGET"');
 
     expect(startNino).toContain('git reset --hard origin/main');
     expect(startNino).toContain('claude --model claude-opus-4-6 --dangerously-skip-permissions');
+    expect(startNino).toContain('TMUX_TARGET="=$SESSION_NAME"');
     expect(startNino).toContain('systemctl --user restart nino-relay.service');
   });
 
@@ -24,8 +28,10 @@ describe('operational backend scripts', () => {
     const restartBackend = script('restart-backend.sh');
 
     expect(restartBackend).toContain('case "$BACKEND" in');
-    expect(restartBackend).toContain('tmux has-session -t "$SESSION"');
-    expect(restartBackend).toContain('tmux respawn-pane -k -t "$SESSION"');
+    expect(restartBackend).toContain('TMUX_TARGET="=$SESSION"');
+    expect(restartBackend).toContain('TMUX_PANE_TARGET="=$SESSION:"');
+    expect(restartBackend).toContain('tmux has-session -t "$TMUX_TARGET"');
+    expect(restartBackend).toContain('tmux respawn-pane -k -t "$TMUX_PANE_TARGET"');
     expect(restartBackend).toContain('claude --model claude-opus-4-6 --dangerously-skip-permissions --continue');
     expect(restartBackend).toContain('COMMAND="\\"$SCRIPT_DIR/start-codex-nino.sh\\""');
     expect(restartBackend).toContain('"$SCRIPT_DIR/start-backend.sh" "$BACKEND"');
@@ -41,6 +47,7 @@ describe('operational backend scripts', () => {
     expect(watchdog).toContain('is_enabled "$CODEX_ENABLED"');
     expect(watchdog).toContain('check_backend "claude" "$CLAUDE_SESSION"');
     expect(watchdog).toContain('check_backend "codex" "$CODEX_SESSION"');
+    expect(watchdog).toContain('local tmux_target="=$session"');
     expect(watchdog).toContain('ps -p "$pane_pid" -o args=');
     expect(watchdog).toContain('if [[ "$pane_command" == *"$process_pattern"* ]]');
     expect(watchdog).toContain('pgrep -P "$pane_pid" -f "$process_pattern"');

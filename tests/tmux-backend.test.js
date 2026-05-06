@@ -18,7 +18,7 @@ describe('tmux backend transport', () => {
 
     expect(tmux.checkSession('nino')).toBe(true);
 
-    expect(childProcess.execSync).toHaveBeenCalledWith("tmux has-session -t 'nino' 2>/dev/null");
+    expect(childProcess.execSync).toHaveBeenCalledWith("tmux has-session -t '=nino' 2>/dev/null");
   });
 
   test('sendKeys escapes single quotes safely before sending enter', () => {
@@ -28,11 +28,11 @@ describe('tmux backend transport', () => {
 
     expect(childProcess.execSync).toHaveBeenNthCalledWith(
       1,
-      "tmux send-keys -t 'nino' -- 'don'\\''t stop'"
+      "tmux send-keys -t '=nino:' -- 'don'\\''t stop'"
     );
     expect(childProcess.execSync).toHaveBeenNthCalledWith(
       2,
-      "tmux send-keys -t 'nino' Enter"
+      "tmux send-keys -t '=nino:' Enter"
     );
   });
 
@@ -43,12 +43,12 @@ describe('tmux backend transport', () => {
 
     expect(childProcess.execSync).toHaveBeenNthCalledWith(
       1,
-      "tmux send-keys -t 'nino-codex' -- 'hello'"
+      "tmux send-keys -t '=nino-codex:' -- 'hello'"
     );
     expect(childProcess.execSync).toHaveBeenNthCalledWith(2, 'sleep 1');
     expect(childProcess.execSync).toHaveBeenNthCalledWith(
       3,
-      "tmux send-keys -t 'nino-codex' Enter"
+      "tmux send-keys -t '=nino-codex:' Enter"
     );
   });
 
@@ -78,7 +78,7 @@ describe('tmux backend transport', () => {
 
     expect(childProcess.execSync).toHaveBeenNthCalledWith(
       1,
-      "tmux list-panes -t 'nino' -F '#{pane_pid}' 2>/dev/null"
+      "tmux list-panes -t '=nino' -F '#{pane_pid}' 2>/dev/null"
     );
     expect(childProcess.execSync).toHaveBeenNthCalledWith(
       2,
@@ -99,7 +99,7 @@ describe('tmux backend transport', () => {
 
     expect(childProcess.execSync).toHaveBeenNthCalledWith(
       1,
-      "tmux list-panes -t 'nino' -F '#{pane_pid}' 2>/dev/null"
+      "tmux list-panes -t '=nino' -F '#{pane_pid}' 2>/dev/null"
     );
     expect(childProcess.execSync).toHaveBeenNthCalledWith(
       2,
@@ -124,7 +124,7 @@ describe('tmux backend transport', () => {
 
     expect(childProcess.execSync).toHaveBeenCalledTimes(1);
     expect(childProcess.execSync).toHaveBeenCalledWith(
-      "tmux list-panes -t 'nino' -F '#{pane_pid}' 2>/dev/null"
+      "tmux list-panes -t '=nino' -F '#{pane_pid}' 2>/dev/null"
     );
   });
 

@@ -67,6 +67,7 @@ describe('discord relay module', () => {
     delete process.env.CODEX_ENABLED;
     delete process.env.CODEX_TEST_CHANNELS;
     delete process.env.CODEX_TMUX_SESSION;
+    delete process.env.DM_BACKEND;
     delete process.env.NINO_BOT_ID;
   });
 
@@ -259,6 +260,54 @@ describe('discord relay module', () => {
       'nino-codex-test',
       '[D][Klaude][C:test-channel][M:bot-msg-1] hello from another bot',
       { submitDelaySeconds: 1 }
+    );
+  });
+
+  test('direct messages prefer configured Claude backend even when Codex is primary', async () => {
+    process.env.PRIMARY_BACKEND = 'codex';
+    process.env.FALLBACK_BACKENDS = 'claude';
+    process.env.CODEX_ENABLED = 'true';
+    process.env.CODEX_TMUX_SESSION = 'nino-codex-test';
+    process.env.DM_BACKEND = 'claude';
+    const claudeBackend = require('../src/backends/claude');
+    claudeBackend.health.mockReturnValue({ enabled: true, sessionAlive: true, alive: true, pid: 123 });
+    claudeBackend.send.mockReturnValue(true);
+    mockTmuxCheckSession.mockReturnValue(true);
+    mockTmuxGetChildPid.mockReturnValue(456);
+    require('../src/discord-relay');
+
+    const messageHandler = mockClientOn.mock.calls.find(([event]) => event === 'messageCreate')?.[1];
+    const attachments = [];
+    attachments.size = 0;
+    await messageHandler({
+      id: 'dm-msg-1',
+      guildId: null,
+      channelId: 'dm-channel',
+      channel: { id: 'dm-channel' },
+      author: {
+        id: 'user-1',
+        bot: false,
+        username: 'Darren',
+        displayName: 'Darren',
+      },
+      content: 'dm hello',
+      attachments,
+    });
+
+    expect(claudeBackend.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: '[DM][Darren][C:dm-channel][M:dm-msg-1] dm hello',
+        messageId: 'dm-msg-1',
+        channelId: 'dm-channel',
+        requestType: 'dm',
+        preferredBackend: 'claude',
+      }),
+      expect.objectContaining({ session: 'nino' })
+    );
+    expect(mockTmuxSendKeys).not.toHaveBeenCalledWith(
+      'nino-codex-test',
+      expect.any(String),
+      expect.any(Object)
     );
   });
 

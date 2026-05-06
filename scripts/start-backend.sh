@@ -30,12 +30,15 @@ case "$BACKEND" in
     ;;
 esac
 
-if tmux has-session -t "$SESSION" 2>/dev/null; then
+TMUX_TARGET="=$SESSION"
+TMUX_PANE_TARGET="=$SESSION:"
+
+if tmux has-session -t "$TMUX_TARGET" 2>/dev/null; then
   echo "[start-backend] Existing $BACKEND session '$SESSION' found, killing..."
-  tmux kill-session -t "$SESSION"
+  tmux kill-session -t "$TMUX_TARGET"
 fi
 
 tmux new-session -d -s "$SESSION" -c "$BOT_DIR" -e "ALARM_TOOL_SESSION=$SESSION"
-tmux send-keys -t "$SESSION" "$COMMAND" C-m
+tmux send-keys -t "$TMUX_PANE_TARGET" "$COMMAND" C-m
 
 echo "[start-backend] Started $BACKEND backend in tmux session: $SESSION"

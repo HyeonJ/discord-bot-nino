@@ -16,11 +16,14 @@ if [[ -z "$backend" || -z "$session" ]]; then
   exit 2
 fi
 
-if ! tmux has-session -t "$session" 2>/dev/null; then
+tmux_target="=$session"
+tmux_pane_target="=$session:"
+
+if ! tmux has-session -t "$tmux_target" 2>/dev/null; then
   exit 0
 fi
 
-captured="$(tmux capture-pane -t "$session" -p -S -120 2>/dev/null || true)"
+captured="$(tmux capture-pane -t "$tmux_pane_target" -p -S -120 2>/dev/null || true)"
 if echo "$captured" | grep -Eiq "$patterns"; then
   "$SCRIPT_DIR/backend-status.sh" set "$backend" quota_exhausted "quota pattern detected in tmux session $session" "$until"
   exit 1

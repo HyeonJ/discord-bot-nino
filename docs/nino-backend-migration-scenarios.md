@@ -67,6 +67,14 @@ CLAUDE_ENABLED=true
 CODEX_ENABLED=true
 ```
 
+Direct messages can be pinned to a specific backend independently from the guild-channel primary:
+
+```env
+DM_BACKEND=claude
+```
+
+With this setting, DMs prefer Claude even if `PRIMARY_BACKEND=codex` or the channel is listed in `CODEX_TEST_CHANNELS`. If Claude is disabled or unhealthy, the router falls back to the normal primary/fallback policy so DMs do not silently disappear.
+
 Runtime status files live under:
 
 ```text

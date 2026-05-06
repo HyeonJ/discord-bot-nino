@@ -50,6 +50,8 @@ Phase 2 shared Codex context implementation is in progress.
 15. Started Codex-only runtime test and fixed watchdog provider-process detection for pane-owned backend processes.
 16. Verified Codex-only Discord routing from a non-test channel, then restored mixed-test mode.
 17. Added provider-neutral runtime backend status, timeout fallback routing, and quota scanner hooks for true hybrid operation.
+18. Added DM-specific backend preference so direct messages can stay on Claude while guild channels test Codex.
+19. Fixed exact tmux session targeting so `nino` is never mistaken for `nino-codex`.
 
 ## Current Temporary Runtime State
 
@@ -63,6 +65,7 @@ As of 2026-05-06 20:51 KST this PC is intentionally running a temporary feature-
 - Backend env in that file:
   - `TMUX_SESSION=nino`
   - `PRIMARY_BACKEND=`
+  - `DM_BACKEND=claude`
   - `CLAUDE_ENABLED=true`
   - `CODEX_ENABLED=true`
   - `CODEX_TEST_CHANNELS=1480593132511826092`
@@ -78,6 +81,8 @@ As of 2026-05-06 20:51 KST this PC is intentionally running a temporary feature-
 - Routing behavior:
   - Only channel `1480593132511826092` routes to Codex.
   - Other 약수하우스 channels route to Claude.
+  - Direct messages prefer Claude via `DM_BACKEND=claude`.
+  - tmux health, send, watchdog, restart, and quota scans use exact session targets.
 
 ## Rollback Commands
 
@@ -130,6 +135,7 @@ After restarting `nino-codex`, test shared context with:
 ## Verification
 
 - `npm test`: 13 suites / 113 tests passed.
+- Latest `npm test`: 13 suites / 116 tests passed after DM routing and exact tmux target fixes.
 - `bash -n scripts/backend-status.sh scripts/scan-backend-quota.sh scripts/shared-data.sh scripts/start-backend.sh scripts/start-codex-nino.sh scripts/restart-backend.sh scripts/nino-watchdog.sh scripts/start-nino.sh scripts/restart-nino.sh`: passed.
 - `BACKEND_STATUS_DIR=<tmp> bash scripts/backend-status.sh set/clear codex quota_exhausted`: passed.
 - `node scripts/build-memory-index.js`: generated `shared-context/MEMORY_INDEX.md`.

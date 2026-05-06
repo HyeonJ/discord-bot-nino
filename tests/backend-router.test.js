@@ -95,6 +95,53 @@ describe('backend router', () => {
     expect(claude.send).not.toHaveBeenCalled();
   });
 
+  test('routes to preferred backend before test-channel routing when it is healthy', () => {
+    const claude = makeAdapter('claude');
+    const codex = makeAdapter('codex');
+    const router = createRouter({
+      config: {
+        primary: 'codex',
+        fallback: ['claude'],
+        codexTestChannels: ['test-channel'],
+        backends: {
+          claude: { enabled: true, session: 'nino' },
+          codex: { enabled: true, session: 'nino-codex' },
+        },
+      },
+      adapters: { claude, codex },
+    });
+
+    const request = makeRequest({ channelId: 'test-channel', preferredBackend: 'claude' });
+    const result = router.routeRequest(request);
+
+    expect(result).toEqual({ ok: true, backendId: 'claude', requestId: 'req-1' });
+    expect(claude.send).toHaveBeenCalledWith(request, { enabled: true, session: 'nino' });
+    expect(codex.send).not.toHaveBeenCalled();
+  });
+
+  test('falls back to normal routing when preferred backend is unavailable', () => {
+    const claude = makeAdapter('claude', { healthy: false });
+    const codex = makeAdapter('codex');
+    const router = createRouter({
+      config: {
+        primary: 'codex',
+        fallback: ['claude'],
+        backends: {
+          claude: { enabled: true, session: 'nino' },
+          codex: { enabled: true, session: 'nino-codex' },
+        },
+      },
+      adapters: { claude, codex },
+    });
+
+    const request = makeRequest({ preferredBackend: 'claude' });
+    const result = router.routeRequest(request);
+
+    expect(result).toEqual({ ok: true, backendId: 'codex', requestId: 'req-1' });
+    expect(codex.send).toHaveBeenCalledWith(request, { enabled: true, session: 'nino-codex' });
+    expect(claude.send).not.toHaveBeenCalled();
+  });
+
   test('routes non-test channel requests to Claude primary when Codex is enabled', () => {
     const claude = makeAdapter('claude');
     const codex = makeAdapter('codex');

@@ -53,8 +53,9 @@ check_backend() {
   local backend="$1"
   local session="$2"
   local process_pattern="${3:-}"
+  local tmux_target="=$session"
 
-  if ! tmux has-session -t "$session" 2>/dev/null; then
+  if ! tmux has-session -t "$tmux_target" 2>/dev/null; then
     log "DEAD: $backend tmux session '$session' not found. Restarting..."
     restart_backend "$backend"
     alert "$backend backend restarted automatically (tmux session missing)"
@@ -62,7 +63,7 @@ check_backend() {
   fi
 
   local pane_pid
-  pane_pid=$(tmux list-panes -t "$session" -F '#{pane_pid}' 2>/dev/null | head -1)
+  pane_pid=$(tmux list-panes -t "$tmux_target" -F '#{pane_pid}' 2>/dev/null | head -1)
   if [ -z "$pane_pid" ] || ! kill -0 "$pane_pid" 2>/dev/null; then
     log "DEAD: $backend pane process gone (PID: $pane_pid). Respawning..."
     restart_backend "$backend"
@@ -92,8 +93,9 @@ check_backend() {
 
 check_claude_d_state() {
   local session="$1"
+  local tmux_target="=$session"
   local pane_pid
-  pane_pid=$(tmux list-panes -t "$session" -F '#{pane_pid}' 2>/dev/null | head -1)
+  pane_pid=$(tmux list-panes -t "$tmux_target" -F '#{pane_pid}' 2>/dev/null | head -1)
   if [ -z "$pane_pid" ]; then
     return 0
   fi

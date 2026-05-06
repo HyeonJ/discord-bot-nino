@@ -30,8 +30,11 @@ case "$BACKEND" in
     ;;
 esac
 
-if tmux has-session -t "$SESSION" 2>/dev/null; then
-  tmux respawn-pane -k -t "$SESSION" "cd \"$BOT_DIR\" && $COMMAND"
+TMUX_TARGET="=$SESSION"
+TMUX_PANE_TARGET="=$SESSION:"
+
+if tmux has-session -t "$TMUX_TARGET" 2>/dev/null; then
+  tmux respawn-pane -k -t "$TMUX_PANE_TARGET" "cd \"$BOT_DIR\" && $COMMAND"
   echo "[restart-backend] Restarted $BACKEND backend in tmux session: $SESSION"
 else
   echo "[restart-backend] No $BACKEND session '$SESSION' found, starting fresh..."

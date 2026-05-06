@@ -105,6 +105,13 @@ function createRouter({ config, adapters, state, env } = {}) {
   }
 
   function chooseBackend(requestId, request) {
+    if (request && request.preferredBackend) {
+      const preferredBackend = getRoutableBackend(String(request.preferredBackend).trim().toLowerCase());
+      if (preferredBackend) {
+        return preferredBackend;
+      }
+    }
+
     if (request && request.channelId && codexTestChannels.has(String(request.channelId))) {
       const codex = getRoutableBackend('codex');
       if (codex) {

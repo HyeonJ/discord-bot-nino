@@ -4,9 +4,17 @@ function shellSingleQuote(value) {
   return `'${String(value).replace(/'/g, "'\\''")}'`;
 }
 
+function exactSessionTarget(sessionName) {
+  return `=${String(sessionName)}`;
+}
+
+function exactPaneTarget(sessionName) {
+  return `=${String(sessionName)}:`;
+}
+
 function checkSession(sessionName) {
   try {
-    childProcess.execSync(`tmux has-session -t ${shellSingleQuote(sessionName)} 2>/dev/null`);
+    childProcess.execSync(`tmux has-session -t ${shellSingleQuote(exactSessionTarget(sessionName))} 2>/dev/null`);
     return true;
   } catch {
     return false;
@@ -19,15 +27,16 @@ function parseSubmitDelaySeconds(value) {
 }
 
 function sendKeys(sessionName, payload, options = {}) {
+  const target = shellSingleQuote(exactPaneTarget(sessionName));
   try {
     childProcess.execSync(
-      `tmux send-keys -t ${shellSingleQuote(sessionName)} -- ${shellSingleQuote(payload)}`
+      `tmux send-keys -t ${target} -- ${shellSingleQuote(payload)}`
     );
     const submitDelaySeconds = parseSubmitDelaySeconds(options.submitDelaySeconds);
     if (submitDelaySeconds > 0) {
       childProcess.execSync(`sleep ${submitDelaySeconds}`);
     }
-    childProcess.execSync(`tmux send-keys -t ${shellSingleQuote(sessionName)} Enter`);
+    childProcess.execSync(`tmux send-keys -t ${target} Enter`);
     return true;
   } catch {
     return false;
@@ -35,9 +44,10 @@ function sendKeys(sessionName, payload, options = {}) {
 }
 
 function getChildPid(sessionName, processPattern) {
+  const target = shellSingleQuote(exactSessionTarget(sessionName));
   try {
     const paneResult = childProcess.execSync(
-      `tmux list-panes -t ${shellSingleQuote(sessionName)} -F '#{pane_pid}' 2>/dev/null`
+      `tmux list-panes -t ${target} -F '#{pane_pid}' 2>/dev/null`
     ).toString().trim();
     const panePid = paneResult.split('\n')[0];
     if (!/^\d+$/.test(panePid)) {

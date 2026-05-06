@@ -204,7 +204,7 @@ function preprocessPayload(payload) {
   return processed;
 }
 
-function sendToTmux(payload, msgId = null, channelId = null) {
+function sendToTmux(payload, msgId = null, channelId = null, options = {}) {
   const processed = preprocessPayload(payload);
   const preview = payload.substring(0, 80).replace(/\n/g, ' ');
   console.log(`[relay] ${payload.substring(0, 200)}${payload.length > 200 ? '...' : ''}`);
@@ -226,6 +226,8 @@ function sendToTmux(payload, msgId = null, channelId = null) {
       messageId: msgId,
       channelId,
       preview,
+      requestType: options.requestType,
+      preferredBackend: options.preferredBackend,
     });
     if (!result.ok) {
       if (msgId) {
@@ -327,7 +329,10 @@ client.on('messageCreate', async (msg) => {
       content: msg.content,
       attachments: msg.attachments.map(a => ({ name: a.name, url: a.url, contentType: a.contentType })),
     });
-    sendToTmux(payload, msg.id, dmChannelId);
+    sendToTmux(payload, msg.id, dmChannelId, {
+      requestType: 'dm',
+      preferredBackend: process.env.DM_BACKEND || 'claude',
+    });
     return;
   }
 
