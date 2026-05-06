@@ -16,8 +16,9 @@ function checkSession(sessionName) {
 function sendKeys(sessionName, payload) {
   try {
     childProcess.execSync(
-      `tmux send-keys -t ${shellSingleQuote(sessionName)} -- ${shellSingleQuote(payload)} C-m`
+      `tmux send-keys -t ${shellSingleQuote(sessionName)} -- ${shellSingleQuote(payload)}`
     );
+    childProcess.execSync(`tmux send-keys -t ${shellSingleQuote(sessionName)} C-m`);
     return true;
   } catch {
     return false;

@@ -26,8 +26,13 @@ describe('tmux backend transport', () => {
 
     expect(tmux.sendKeys('nino', "don't stop")).toBe(true);
 
-    expect(childProcess.execSync).toHaveBeenCalledWith(
-      "tmux send-keys -t 'nino' -- 'don'\\''t stop' C-m"
+    expect(childProcess.execSync).toHaveBeenNthCalledWith(
+      1,
+      "tmux send-keys -t 'nino' -- 'don'\\''t stop'"
+    );
+    expect(childProcess.execSync).toHaveBeenNthCalledWith(
+      2,
+      "tmux send-keys -t 'nino' C-m"
     );
   });
 

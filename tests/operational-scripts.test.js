@@ -14,6 +14,10 @@ describe('operational backend scripts', () => {
     expect(startBackend).toContain('CODEX_TMUX_SESSION:-nino-codex');
     expect(startBackend).toContain('claude --model claude-opus-4-6 --dangerously-skip-permissions');
     expect(startBackend).toContain('codex --no-alt-screen --dangerously-bypass-approvals-and-sandbox');
+    expect(startBackend).toContain('send_codex_bootstrap');
+    expect(startBackend).toContain('src/discord-send -c CHANNEL_ID -r MESSAGE_ID');
+    expect(startBackend).toContain('tmux send-keys -t "$SESSION" C-m');
+    expect(startBackend).toContain('sleep "${CODEX_BOOTSTRAP_SUBMIT_DELAY_SECONDS:-5}"');
 
     expect(startNino).toContain('git reset --hard origin/main');
     expect(startNino).toContain('claude --model claude-opus-4-6 --dangerously-skip-permissions');
