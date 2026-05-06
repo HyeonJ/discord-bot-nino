@@ -91,6 +91,51 @@ describe('health-checker', () => {
       expect(analyzeHealth('haru', data)).toEqual([]);
     });
 
+    test('provider-neutral health reports missing primary backend entry', () => {
+      const data = {
+        timestamp: new Date().toISOString(),
+        primary_backend: 'claude',
+        backends: {
+          codex: { enabled: false, alive: false, pid: null },
+        },
+        watcher_alive: true,
+      };
+
+      const issues = analyzeHealth('haru', data);
+      expect(issues.some(i => i.includes('Primary backend claude missing'))).toBe(true);
+    });
+
+    test('health payload error is reported before backend liveness issues', () => {
+      const data = {
+        timestamp: new Date().toISOString(),
+        error: 'Primary backend codex is disabled',
+        primary_backend: 'codex',
+        backends: {
+          claude: { enabled: false, alive: false, pid: null },
+          codex: { enabled: false, alive: false, pid: null },
+        },
+        watcher_alive: true,
+      };
+
+      const issues = analyzeHealth('haru', data);
+      expect(issues[0]).toContain('Health payload error: Primary backend codex is disabled');
+      expect(issues.some(i => i.includes('No enabled backend alive'))).toBe(true);
+    });
+
+    test('provider-neutral health reports malformed backend entries', () => {
+      const data = {
+        timestamp: new Date().toISOString(),
+        primary_backend: 'claude',
+        backends: {
+          claude: null,
+        },
+        watcher_alive: true,
+      };
+
+      const issues = analyzeHealth('haru', data);
+      expect(issues.some(i => i.includes('Backend claude health malformed'))).toBe(true);
+    });
+
     test('data null reports connection failure', () => {
       const issues = analyzeHealth('haru', null);
       expect(issues).toHaveLength(1);

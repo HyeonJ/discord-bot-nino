@@ -61,6 +61,12 @@ function sendAlert(message, dmChannel) {
 
 function analyzeBackendHealth(data, issues) {
   const backendEntries = Object.entries(data.backends);
+  backendEntries
+    .filter(([, backend]) => !backend || typeof backend !== 'object')
+    .forEach(([backendId]) => {
+      issues.push(`Backend ${backendId} health malformed`);
+    });
+
   const enabledBackends = backendEntries.filter(([, backend]) => backend && backend.enabled === true);
   const enabledBackendAlive = enabledBackends.some(([, backend]) => backend.alive === true);
 
@@ -70,7 +76,9 @@ function analyzeBackendHealth(data, issues) {
 
   const primaryBackend = data.primary_backend;
   const primaryHealth = primaryBackend ? data.backends[primaryBackend] : null;
-  if (primaryHealth && primaryHealth.enabled === true && primaryHealth.alive !== true) {
+  if (primaryBackend && !Object.prototype.hasOwnProperty.call(data.backends, primaryBackend)) {
+    issues.push(`Primary backend ${primaryBackend} missing from health payload`);
+  } else if (primaryHealth && primaryHealth.enabled === true && primaryHealth.alive !== true) {
     issues.push(`Primary backend ${primaryBackend} unhealthy`);
   }
 }
@@ -92,6 +100,10 @@ function analyzeHealth(botName, data) {
   if (data === null) {
     issues.push('relay response missing (connection failed or timeout)');
     return issues;
+  }
+
+  if (data.error) {
+    issues.push(`Health payload error: ${data.error}`);
   }
 
   if (data.timestamp) {
