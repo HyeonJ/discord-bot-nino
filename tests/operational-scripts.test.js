@@ -13,11 +13,7 @@ describe('operational backend scripts', () => {
     expect(startBackend).toContain('CLAUDE_TMUX_SESSION:-${TMUX_SESSION:-nino}');
     expect(startBackend).toContain('CODEX_TMUX_SESSION:-nino-codex');
     expect(startBackend).toContain('claude --model claude-opus-4-6 --dangerously-skip-permissions');
-    expect(startBackend).toContain('codex --no-alt-screen --dangerously-bypass-approvals-and-sandbox');
-    expect(startBackend).toContain('send_codex_bootstrap');
-    expect(startBackend).toContain('/home/bpx27/discord-bot-nino/src/discord-send -c CHANNEL_ID -r MESSAGE_ID');
-    expect(startBackend).toContain('tmux send-keys -t "$SESSION" Enter');
-    expect(startBackend).toContain('sleep "${CODEX_BOOTSTRAP_SUBMIT_DELAY_SECONDS:-5}"');
+    expect(startBackend).toContain('COMMAND="\\"$SCRIPT_DIR/start-codex-nino.sh\\""');
 
     expect(startNino).toContain('git reset --hard origin/main');
     expect(startNino).toContain('claude --model claude-opus-4-6 --dangerously-skip-permissions');
@@ -49,5 +45,14 @@ describe('operational backend scripts', () => {
     expect(watchdog).toContain('"$SCRIPT_DIR/restart-nino.sh"');
     expect(watchdog).toContain('"$SCRIPT_DIR/restart-backend.sh" "$backend"');
     expect(watchdog).not.toContain('pgrep -P "$PANE_PID" -f "codex"');
+  });
+
+  test('start-codex-nino launches Codex with Nino instructions as the initial prompt', () => {
+    const startCodex = script('start-codex-nino.sh');
+
+    expect(startCodex).toContain('codex-config/NINO_CODEX.md');
+    expect(startCodex).toContain('CODEX_INSTRUCTIONS_FILE');
+    expect(startCodex).toContain('codex --no-alt-screen --dangerously-bypass-approvals-and-sandbox "$prompt"');
+    expect(startCodex).toContain('/home/bpx27/discord-bot-nino/src/discord-send -c CHANNEL_ID -r MESSAGE_ID');
   });
 });
