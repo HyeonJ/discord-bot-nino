@@ -1,5 +1,4 @@
 const { Client, GatewayIntentBits, Partials, ActivityType } = require('discord.js');
-const { execSync } = require('child_process');
 const fs = require('fs');
 const https = require('https');
 const path = require('path');
@@ -14,7 +13,6 @@ const claudeBackend = require('./backends/claude');
 const ATTACHMENT_DIR = '/tmp/discord-attachments';
 const HISTORY_DIR = path.join(__dirname, '..', 'memory', 'discord-history');
 
-const TMUX_SESSION = process.env.TMUX_SESSION || 'nino';
 const GUILD_ID = '1479813608023134342';
 const DEFAULT_CHANNEL = '1479813609499394169';
 const ALERT_CHANNEL = '1480593132511826092'; // Darren 채널 (응답 실패 알림용)
@@ -44,6 +42,29 @@ try {
   });
 }
 
+function sendSystemNotice(payload, info = {}) {
+  const preview = payload.substring(0, 80).replace(/\n/g, ' ');
+  const requestId = `system:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+  try {
+    const result = backendRouter.routeRequest({
+      requestId,
+      payload,
+      messageId: null,
+      channelId: info.channelId || null,
+      preview,
+      requestType: 'system',
+      preferredBackend: info.backendId,
+    });
+    if (result.ok) {
+      backendRouter.markCompleted(requestId, result.backendId);
+    } else {
+      console.error(`[relay] system notice route failed: ${result.reason}${result.backendId ? ` (${result.backendId})` : ''}`);
+    }
+  } catch (e) {
+    console.error('[relay] system notice route error:', e.message);
+  }
+}
+
 function checkPendingTimeouts() {
   const now = Date.now();
   for (const [msgId, info] of pendingResponses) {
@@ -69,10 +90,7 @@ function checkPendingTimeouts() {
 
       pendingResponses.delete(msgId);
       const alert = `[SYSTEM] ⚠️ 응답 못 한 메시지 있어! 확인해줘: ${info.preview}`;
-      try {
-        const escaped = alert.replace(/'/g, "'\\''");
-        execSync(`tmux send-keys -t '${TMUX_SESSION}' -- '${escaped}' C-m`);
-      } catch (e) {}
+      sendSystemNotice(alert, info);
     }
   }
 }
@@ -82,10 +100,7 @@ function remindPendingResponses() {
   const previews = [...pendingResponses.values()].map(v => `- ${v.preview}`).join('\n');
   const reminder = `[SYSTEM] ⏰ 리마인더: 아직 응답 못 한 메시지 ${pendingResponses.size}개 있어!\n${previews}`;
   console.log(`[relay] ${reminder}`);
-  try {
-    const escaped = reminder.replace(/'/g, "'\\''");
-    execSync(`tmux send-keys -t '${TMUX_SESSION}' -- '${escaped}' C-m`);
-  } catch (e) {}
+  sendSystemNotice(reminder, [...pendingResponses.values()][0] || {});
 }
 
 // 니노 봇 ID — .env의 NINO_BOT_ID 또는 아래 기본값
@@ -496,6 +511,7 @@ module.exports = {
   __test: {
     pendingResponses,
     checkPendingTimeouts,
+    remindPendingResponses,
     completePendingInChannel,
   },
 };

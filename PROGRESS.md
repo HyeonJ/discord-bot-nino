@@ -52,6 +52,7 @@ Phase 2 shared Codex context implementation is in progress.
 17. Added provider-neutral runtime backend status, timeout fallback routing, and quota scanner hooks for true hybrid operation.
 18. Added DM-specific backend preference so direct messages can stay on Claude while guild channels test Codex.
 19. Fixed exact tmux session targeting so `nino` is never mistaken for `nino-codex`.
+20. Routed timeout and reminder system notices through backend adapters so Codex-owned pending messages submit correctly.
 
 ## Current Temporary Runtime State
 
@@ -83,6 +84,7 @@ As of 2026-05-06 20:51 KST this PC is intentionally running a temporary feature-
   - Other 약수하우스 channels route to Claude.
   - Direct messages prefer Claude via `DM_BACKEND=claude`.
   - tmux health, send, watchdog, restart, and quota scans use exact session targets.
+  - Timeout and reminder system notices use the pending request owner backend instead of raw `TMUX_SESSION`.
 
 ## Rollback Commands
 
@@ -136,6 +138,7 @@ After restarting `nino-codex`, test shared context with:
 
 - `npm test`: 13 suites / 113 tests passed.
 - Latest `npm test`: 13 suites / 116 tests passed after DM routing and exact tmux target fixes.
+- Latest `npm test`: 13 suites / 118 tests passed after backend-aware timeout/reminder notices.
 - `bash -n scripts/backend-status.sh scripts/scan-backend-quota.sh scripts/shared-data.sh scripts/start-backend.sh scripts/start-codex-nino.sh scripts/restart-backend.sh scripts/nino-watchdog.sh scripts/start-nino.sh scripts/restart-nino.sh`: passed.
 - `BACKEND_STATUS_DIR=<tmp> bash scripts/backend-status.sh set/clear codex quota_exhausted`: passed.
 - `node scripts/build-memory-index.js`: generated `shared-context/MEMORY_INDEX.md`.

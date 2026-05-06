@@ -342,4 +342,60 @@ describe('discord relay module', () => {
       fallbackAttempted: true,
     });
   });
+
+  test('timeout alert is sent through the owning Codex backend when no fallback is available', () => {
+    process.env.PRIMARY_BACKEND = 'claude';
+    process.env.CODEX_ENABLED = 'true';
+    process.env.CODEX_TMUX_SESSION = 'nino-codex-test';
+    const claudeBackend = require('../src/backends/claude');
+    claudeBackend.health.mockReturnValue({ enabled: true, sessionAlive: true, alive: true, pid: 123 });
+    mockTmuxCheckSession.mockReturnValue(true);
+    mockTmuxGetChildPid.mockReturnValue(456);
+    const relay = require('../src/discord-relay');
+
+    relay.sendToTmux('[DM][Darren][C:dm-channel][M:msg-timeout] hello', 'msg-timeout', 'dm-channel', {
+      requestType: 'dm',
+      preferredBackend: 'codex',
+    });
+    const pending = relay.__test.pendingResponses.get('msg-timeout');
+    pending.timestamp = Date.now() - (4 * 60 * 1000);
+    mockTmuxSendKeys.mockClear();
+    relay.__test.checkPendingTimeouts();
+
+    expect(mockTmuxSendKeys).toHaveBeenCalledWith(
+      'nino-codex-test',
+      expect.stringContaining('[SYSTEM]'),
+      { submitDelaySeconds: 1 }
+    );
+    expect(mockTmuxSendKeys).toHaveBeenCalledWith(
+      'nino-codex-test',
+      expect.stringContaining('[DM][Darren][C:dm-channel][M:msg-timeout] hello'),
+      { submitDelaySeconds: 1 }
+    );
+    expect(relay.__test.pendingResponses.has('msg-timeout')).toBe(false);
+  });
+
+  test('pending reminders are sent through each pending request owner backend', () => {
+    process.env.PRIMARY_BACKEND = 'claude';
+    process.env.CODEX_ENABLED = 'true';
+    process.env.CODEX_TMUX_SESSION = 'nino-codex-test';
+    const claudeBackend = require('../src/backends/claude');
+    claudeBackend.health.mockReturnValue({ enabled: true, sessionAlive: true, alive: true, pid: 123 });
+    mockTmuxCheckSession.mockReturnValue(true);
+    mockTmuxGetChildPid.mockReturnValue(456);
+    const relay = require('../src/discord-relay');
+
+    relay.sendToTmux('[DM][Darren][C:dm-channel][M:msg-reminder] hello', 'msg-reminder', 'dm-channel', {
+      requestType: 'dm',
+      preferredBackend: 'codex',
+    });
+    mockTmuxSendKeys.mockClear();
+    relay.__test.remindPendingResponses();
+
+    expect(mockTmuxSendKeys).toHaveBeenCalledWith(
+      'nino-codex-test',
+      expect.stringContaining('msg-reminder'),
+      { submitDelaySeconds: 1 }
+    );
+  });
 });
