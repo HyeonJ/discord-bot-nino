@@ -36,6 +36,7 @@ describe('operational backend scripts', () => {
 
     expect(watchdog).toContain('CLAUDE_ENABLED="${CLAUDE_ENABLED:-true}"');
     expect(watchdog).toContain('CODEX_ENABLED="${CODEX_ENABLED:-false}"');
+    expect(watchdog).toContain('LEGACY_CLAUDE_SESSION="nino"');
     expect(watchdog).toContain('is_enabled "$CLAUDE_ENABLED"');
     expect(watchdog).toContain('is_enabled "$CODEX_ENABLED"');
     expect(watchdog).toContain('check_backend "claude" "$CLAUDE_SESSION"');
