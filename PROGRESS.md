@@ -28,7 +28,7 @@ Make Claude and Codex optional AI backends for Nino while preserving WSL/tmux op
 
 ## Current Phase
 
-Phase 1 implementation complete in branch `feat/optional-ai-backends`.
+Phase 1 implementation and test-channel smoke test complete in branch `feat/optional-ai-backends`.
 
 ## Completed Tasks
 
@@ -40,19 +40,85 @@ Phase 1 implementation complete in branch `feat/optional-ai-backends`.
 6. Added Codex tmux backend routing for configured test channels.
 7. Added backend-aware operating scripts while preserving the default Claude production restart flow.
 8. Fixed review findings for Claude-disabled/Codex-enabled operation and relay-level ownership completion.
+9. Added Codex Discord output bridge, reliable tmux submit handling, and Nino persona bootstrap.
+10. Hardened backend watchdog and health semantics after final review.
+
+## Current Temporary Runtime State
+
+As of 2026-05-06 17:21 KST this PC is intentionally running a temporary feature-branch test setup:
+
+- `nino-relay.service` has a systemd user drop-in:
+  - `/home/bpx27/.config/systemd/user/nino-relay.service.d/feature-worktree.conf`
+  - It runs `/mnt/c/Dev/Workspace/discord-bot-nino/.worktrees/feat-optional-ai-backends/src/discord-relay.js`.
+- The service still uses the production env file:
+  - `/home/bpx27/discord-bot-nino/.env`
+- Backend env in that file:
+  - `TMUX_SESSION=nino`
+  - `CODEX_ENABLED=true`
+  - `CODEX_TEST_CHANNELS=1480593132511826092`
+- tmux sessions:
+  - `nino` is the existing Claude session.
+  - `nino-codex` is the Codex test session.
+- Health at the time of writing:
+  - `primary_backend=claude`
+  - `backends.codex.enabled=true`
+  - `backends.codex.alive=true`
+- Routing behavior:
+  - Only channel `1480593132511826092` routes to Codex.
+  - Other 약수하우스 channels continue to route to Claude.
+
+## Rollback Commands
+
+Use these if the feature-branch test setup should be reverted before merge:
+
+```bash
+rm -f /home/bpx27/.config/systemd/user/nino-relay.service.d/feature-worktree.conf
+systemctl --user daemon-reload
+systemctl --user restart nino-relay.service
+tmux kill-session -t nino-codex 2>/dev/null || true
+```
+
+Then remove or disable Codex test routing in `/home/bpx27/discord-bot-nino/.env`:
+
+```env
+CODEX_ENABLED=false
+CODEX_TEST_CHANNELS=
+```
+
+Restart relay after editing `.env`:
+
+```bash
+systemctl --user restart nino-relay.service
+```
+
+## Keep Testing Commands
+
+Use these while continuing test-channel operation:
+
+```bash
+cd /mnt/c/Dev/Workspace/discord-bot-nino/.worktrees/feat-optional-ai-backends
+bash scripts/start-backend.sh codex
+systemctl --user restart nino-relay.service
+curl -s http://localhost:58090/health
+```
 
 ## Verification
 
-- `npm test`: 10 suites / 94 tests passed.
-- `bash -n scripts/start-backend.sh scripts/restart-backend.sh scripts/nino-watchdog.sh scripts/start-nino.sh scripts/restart-nino.sh`: passed.
-- Final code review: approved with residual risks around script tests being mostly static and Codex-only mode routing regular channels when Codex is the only enabled backend.
+- `npm test`: 11 suites / 98 tests passed.
+- `bash -n scripts/start-backend.sh scripts/start-codex-nino.sh scripts/restart-backend.sh scripts/nino-watchdog.sh scripts/start-nino.sh scripts/restart-nino.sh`: passed.
+- Final code review: approved.
+- Real smoke tests passed:
+  - Discord test channel routed to `nino-codex`.
+  - Codex replied back to Discord through `/home/bpx27/discord-bot-nino/src/discord-send`.
+  - Codex persona bootstrap was observed and tested.
 
 ## Next Tasks
 
-1. Run a WSL tmux smoke test with real Claude/Codex sessions.
-2. Configure `CODEX_TEST_CHANNELS` and verify Discord test-channel routing end to end.
+1. Continue test-channel Codex operation for stability and behavior checks.
+2. Decide whether to keep the feature worktree override until merge or switch back to main before merge.
 3. Decide whether Codex-only mode should route all channels or require an explicit `PRIMARY_BACKEND=codex` for production.
-4. Decide where shared memory should ultimately live and how Codex should ingest it.
+4. Decide whether Codex needs a stronger memory/hook replacement beyond `codex-config/NINO_CODEX.md`.
+5. Prepare PR/merge only after the test-channel run is considered stable.
 
 ## Open Questions
 
