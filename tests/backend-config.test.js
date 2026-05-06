@@ -40,15 +40,48 @@ describe('loadBackendConfig', () => {
     })).toThrow(/primary backend codex is disabled/i);
   });
 
+  test('invalid boolean values reject startup with the variable name', () => {
+    expect(() => loadBackendConfig({
+      CLAUDE_ENABLED: 'yes',
+    })).toThrow(/CLAUDE_ENABLED.*true.*false/i);
+
+    expect(() => loadBackendConfig({
+      CODEX_ENABLED: '1',
+    })).toThrow(/CODEX_ENABLED.*true.*false/i);
+  });
+
   test('unknown fallback backend rejects startup', () => {
     expect(() => loadBackendConfig({
       FALLBACK_BACKENDS: 'claude,unknown',
     })).toThrow(/unknown fallback backend unknown/i);
   });
 
+  test('fallback list removes duplicates and the primary backend', () => {
+    expect(loadBackendConfig({
+      PRIMARY_BACKEND: 'claude',
+      CLAUDE_ENABLED: 'true',
+      CODEX_ENABLED: 'true',
+      FALLBACK_BACKENDS: ' codex,claude,codex ',
+    })).toMatchObject({
+      primary: 'claude',
+      fallback: ['codex'],
+      degraded: false,
+    });
+  });
+
+  test('session names are trimmed and empty sessions use defaults', () => {
+    expect(loadBackendConfig({
+      CLAUDE_TMUX_SESSION: '  nino-claude  ',
+      CODEX_TMUX_SESSION: '   ',
+    }).backends).toEqual({
+      claude: { enabled: true, session: 'nino-claude' },
+      codex: { enabled: false, session: 'nino-codex' },
+    });
+  });
+
   test('all backends disabled returns degraded mode, not healthy mode', () => {
     expect(loadBackendConfig({
-      CLAUDE_ENABLED: 'false',
+      CLAUDE_ENABLED: 'false ',
       CODEX_ENABLED: 'false',
       FALLBACK_BACKENDS: 'codex',
     })).toEqual({

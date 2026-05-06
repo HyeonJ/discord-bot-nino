@@ -1,11 +1,31 @@
 const SUPPORTED_BACKENDS = ['claude', 'codex'];
 
-function parseEnabled(value, defaultValue) {
-  if (value === undefined || value === null || value === '') {
+function parseEnabled(value, defaultValue, variableName) {
+  if (value === undefined || value === null) {
     return defaultValue;
   }
 
-  return String(value).toLowerCase() === 'true';
+  const normalized = String(value).trim().toLowerCase();
+  if (normalized === '') {
+    return defaultValue;
+  }
+  if (normalized === 'true') {
+    return true;
+  }
+  if (normalized === 'false') {
+    return false;
+  }
+
+  throw new Error(`${variableName} must be either true or false`);
+}
+
+function parseSession(value, defaultValue) {
+  if (value === undefined || value === null) {
+    return defaultValue;
+  }
+
+  const session = String(value).trim();
+  return session || defaultValue;
 }
 
 function parseBackendId(value, fieldName) {
@@ -16,27 +36,37 @@ function parseBackendId(value, fieldName) {
   return backend;
 }
 
-function parseFallbacks(value) {
+function parseFallbacks(value, primary) {
   if (!value) {
     return [];
   }
 
-  return String(value)
+  const seen = new Set();
+  const fallback = [];
+  String(value)
     .split(',')
     .map((backend) => backend.trim().toLowerCase())
     .filter(Boolean)
-    .map((backend) => parseBackendId(backend, 'fallback'));
+    .map((backend) => parseBackendId(backend, 'fallback'))
+    .forEach((backend) => {
+      if (backend !== primary && !seen.has(backend)) {
+        seen.add(backend);
+        fallback.push(backend);
+      }
+    });
+
+  return fallback;
 }
 
 function loadBackendConfig(env = {}) {
   const backends = {
     claude: {
-      enabled: parseEnabled(env.CLAUDE_ENABLED, true),
-      session: env.CLAUDE_TMUX_SESSION || env.TMUX_SESSION || 'nino',
+      enabled: parseEnabled(env.CLAUDE_ENABLED, true, 'CLAUDE_ENABLED'),
+      session: parseSession(env.CLAUDE_TMUX_SESSION, parseSession(env.TMUX_SESSION, 'nino')),
     },
     codex: {
-      enabled: parseEnabled(env.CODEX_ENABLED, false),
-      session: env.CODEX_TMUX_SESSION || 'nino-codex',
+      enabled: parseEnabled(env.CODEX_ENABLED, false, 'CODEX_ENABLED'),
+      session: parseSession(env.CODEX_TMUX_SESSION, 'nino-codex'),
     },
   };
 
@@ -55,7 +85,7 @@ function loadBackendConfig(env = {}) {
     throw new Error(`Primary backend ${primary} is disabled`);
   }
 
-  const fallback = parseFallbacks(env.FALLBACK_BACKENDS)
+  const fallback = parseFallbacks(env.FALLBACK_BACKENDS, primary)
     .filter((backend) => backends[backend].enabled);
 
   return {
