@@ -4,15 +4,6 @@ function shellSingleQuote(value) {
   return `'${String(value).replace(/'/g, "'\\''")}'`;
 }
 
-function isMissingTmuxSessionError(error) {
-  const message = error && error.message ? error.message : '';
-  return (
-    message.includes('no server running') ||
-    message.includes("can't find") ||
-    message.includes('not found')
-  );
-}
-
 function checkSession(sessionName) {
   try {
     childProcess.execSync(`tmux has-session -t ${shellSingleQuote(sessionName)} 2>/dev/null`);
@@ -28,11 +19,8 @@ function sendKeys(sessionName, payload) {
       `tmux send-keys -t ${shellSingleQuote(sessionName)} -- ${shellSingleQuote(payload)} C-m`
     );
     return true;
-  } catch (error) {
-    if (isMissingTmuxSessionError(error)) {
-      return false;
-    }
-    throw error;
+  } catch {
+    return false;
   }
 }
 

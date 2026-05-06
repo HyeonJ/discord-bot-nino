@@ -16,7 +16,7 @@ const claude = {
   },
 
   send(request, config) {
-    const payload = request && request.payload !== undefined ? request.payload : request && request.preview;
+    const payload = request && request.payload;
     if (payload === undefined || payload === null) {
       throw new Error('Claude backend send requires a payload');
     }

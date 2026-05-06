@@ -39,6 +39,14 @@ describe('tmux backend transport', () => {
     expect(tmux.sendKeys('nino', 'hello')).toBe(false);
   });
 
+  test('sendKeys returns false for generic execSync failures', () => {
+    childProcess.execSync.mockImplementation(() => {
+      throw new Error('permission denied');
+    });
+
+    expect(tmux.sendKeys('nino', 'hello')).toBe(false);
+  });
+
   test('getChildPid looks up child process using the provider process pattern', () => {
     childProcess.execSync
       .mockReturnValueOnce(Buffer.from('1234\n'))

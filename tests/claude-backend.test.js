@@ -50,16 +50,16 @@ describe('claude backend adapter', () => {
     expect(tmux.sendKeys).toHaveBeenCalledWith('nino', 'full message');
   });
 
-  test('send falls back to preview when payload is absent', () => {
-    tmux.sendKeys.mockReturnValue(true);
+  test('send throws when only preview is provided', () => {
+    expect(() => claude.send({ preview: 'preview only' }, { session: 'nino' })).toThrow(/payload/i);
 
-    expect(claude.send({ preview: 'preview only' }, { session: 'nino' })).toBe(true);
-
-    expect(tmux.sendKeys).toHaveBeenCalledWith('nino', 'preview only');
+    expect(tmux.sendKeys).not.toHaveBeenCalled();
   });
 
-  test('send throws when neither payload nor preview is provided', () => {
+  test('send throws when payload is missing', () => {
     expect(() => claude.send({}, { session: 'nino' })).toThrow(/payload/i);
+
+    expect(tmux.sendKeys).not.toHaveBeenCalled();
   });
 
   test('restart is explicitly not implemented yet', () => {
