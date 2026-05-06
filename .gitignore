@@ -6,8 +6,6 @@ __pycache__/
 memory/
 logs/
 node_modules/
-package-lock.json
-package.json
 .worktrees
 .worktrees/
 
