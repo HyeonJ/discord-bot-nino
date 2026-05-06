@@ -22,7 +22,7 @@ case "$BACKEND" in
     ;;
   codex)
     SESSION="${CODEX_TMUX_SESSION:-nino-codex}"
-    COMMAND="codex --no-alt-screen --dangerously-bypass-approvals-and-sandbox"
+    COMMAND="\"$SCRIPT_DIR/start-codex-nino.sh\""
     ;;
   *)
     usage

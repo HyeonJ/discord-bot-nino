@@ -27,7 +27,7 @@ describe('operational backend scripts', () => {
     expect(restartBackend).toContain('tmux has-session -t "$SESSION"');
     expect(restartBackend).toContain('tmux respawn-pane -k -t "$SESSION"');
     expect(restartBackend).toContain('claude --model claude-opus-4-6 --dangerously-skip-permissions --continue');
-    expect(restartBackend).toContain('codex --no-alt-screen --dangerously-bypass-approvals-and-sandbox');
+    expect(restartBackend).toContain('COMMAND="\\"$SCRIPT_DIR/start-codex-nino.sh\\""');
     expect(restartBackend).toContain('"$SCRIPT_DIR/start-backend.sh" "$BACKEND"');
   });
 
