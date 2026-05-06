@@ -4,7 +4,12 @@ jest.mock('../src/backends/claude', () => ({
   health: jest.fn(),
 }));
 
+jest.mock('../src/backends/codex', () => ({
+  health: jest.fn(),
+}));
+
 const claude = require('../src/backends/claude');
+const codex = require('../src/backends/codex');
 
 describe('health endpoint', () => {
   let healthModule;
@@ -21,6 +26,12 @@ describe('health endpoint', () => {
       sessionAlive: true,
       alive: true,
       pid: 123,
+    });
+    codex.health.mockReturnValue({
+      enabled: false,
+      sessionAlive: false,
+      alive: false,
+      pid: null,
     });
     healthModule = require('../src/health');
     healthModule.start();
@@ -101,5 +112,35 @@ describe('health endpoint', () => {
         done();
       });
     });
+  });
+
+  test('/health reports Codex adapter health when Codex is enabled', () => {
+    process.env.CODEX_ENABLED = 'true';
+    process.env.CODEX_TMUX_SESSION = 'nino-codex-test';
+    codex.health.mockReturnValueOnce({
+      enabled: true,
+      sessionAlive: true,
+      alive: true,
+      pid: 456,
+    });
+
+    const data = healthModule.getHealthData();
+
+    expect(codex.health).toHaveBeenCalledWith({
+      enabled: true,
+      session: 'nino-codex-test',
+    });
+    expect(data.backends.codex).toEqual({
+      enabled: true,
+      sessionAlive: true,
+      alive: true,
+      pid: 456,
+    });
+    expect(data.primary_backend).toBe('claude');
+    expect(data.claude_pid).toBe(123);
+    expect(data.tmux_alive).toBe(true);
+
+    delete process.env.CODEX_ENABLED;
+    delete process.env.CODEX_TMUX_SESSION;
   });
 });

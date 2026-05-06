@@ -322,7 +322,7 @@ client.on('messageCreate', async (msg) => {
       content: msg.content,
       attachments: msg.attachments.map(a => ({ name: a.name, url: a.url, contentType: a.contentType })),
     });
-    sendToTmux(payload);
+    sendToTmux(payload, null, chId);
     return;
   }
 

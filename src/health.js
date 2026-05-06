@@ -2,6 +2,7 @@ const http = require('http');
 const { execSync } = require('child_process');
 const { loadBackendConfig } = require('./backends/config');
 const claude = require('./backends/claude');
+const codex = require('./backends/codex');
 
 const BOT_NAME = 'nino';
 const HEALTH_PORT = parseInt(process.env.HEALTH_PORT || '58090', 10);
@@ -31,7 +32,7 @@ function getBackendHealth() {
       primaryBackend: config.primary,
       backends: {
         claude: claude.health(config.backends.claude),
-        codex: disabledBackend(config.backends.codex.enabled),
+        codex: codex.health(config.backends.codex),
       },
       error: null,
     };
