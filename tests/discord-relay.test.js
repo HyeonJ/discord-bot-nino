@@ -1,4 +1,6 @@
 const mockLogin = jest.fn();
+const mockClientOnce = jest.fn();
+const mockClientOn = jest.fn();
 const mockTmuxSendKeys = jest.fn();
 const mockTmuxCheckSession = jest.fn();
 const mockTmuxGetChildPid = jest.fn();
@@ -7,8 +9,8 @@ jest.useFakeTimers();
 
 jest.mock('discord.js', () => ({
   Client: jest.fn(() => ({
-    once: jest.fn(),
-    on: jest.fn(),
+    once: mockClientOnce,
+    on: mockClientOn,
     login: mockLogin,
   })),
   GatewayIntentBits: {
@@ -48,11 +50,15 @@ describe('discord relay module', () => {
   let fs;
   let processOn;
   let intervalSpy;
+  let appendFileSpy;
+  let mkdirSpy;
 
   beforeEach(() => {
     fs = require('fs');
     processOn = jest.spyOn(process, 'on').mockImplementation(() => process);
     intervalSpy = jest.spyOn(global, 'setInterval');
+    appendFileSpy = jest.spyOn(fs, 'appendFileSync').mockImplementation(() => {});
+    mkdirSpy = jest.spyOn(fs, 'mkdirSync').mockImplementation(() => {});
     mockTmuxCheckSession.mockReturnValue(false);
     mockTmuxGetChildPid.mockReturnValue(null);
     mockTmuxSendKeys.mockReturnValue(true);
@@ -65,6 +71,8 @@ describe('discord relay module', () => {
 
   afterEach(() => {
     jest.clearAllMocks();
+    appendFileSpy.mockRestore();
+    mkdirSpy.mockRestore();
     processOn.mockRestore();
     intervalSpy.mockRestore();
     jest.resetModules();
@@ -101,5 +109,50 @@ describe('discord relay module', () => {
     relay.sendToTmux('[D][Tim] hello', 'msg-1', 'test-channel');
 
     expect(mockTmuxSendKeys).toHaveBeenCalledWith('nino-codex-test', '[D][Tim] hello');
+  });
+
+  test('other-bot guild messages in configured test channels route to Codex tmux session', async () => {
+    process.env.CODEX_ENABLED = 'true';
+    process.env.CODEX_TEST_CHANNELS = 'test-channel';
+    process.env.CODEX_TMUX_SESSION = 'nino-codex-test';
+    mockTmuxCheckSession.mockReturnValue(true);
+    mockTmuxGetChildPid.mockReturnValue(456);
+    require('../src/discord-relay');
+
+    const messageHandler = mockClientOn.mock.calls.find(([event]) => event === 'messageCreate')?.[1];
+    expect(typeof messageHandler).toBe('function');
+    const attachments = [];
+    attachments.size = 0;
+    const msg = {
+      id: 'bot-msg-1',
+      guildId: '1479813608023134342',
+      channelId: 'test-channel',
+      channel: {
+        id: 'test-channel',
+        name: 'codex-test',
+        isThread: () => false,
+      },
+      author: {
+        id: 'other-bot',
+        bot: true,
+        username: 'Klaude',
+      },
+      content: 'hello from another bot',
+      attachments,
+      embeds: [],
+      guild: {
+        members: { cache: new Map() },
+        roles: { cache: new Map() },
+        channels: { cache: new Map() },
+      },
+    };
+
+    await messageHandler(msg);
+
+    expect(mockLogin).not.toHaveBeenCalled();
+    expect(mockTmuxSendKeys).toHaveBeenCalledWith(
+      'nino-codex-test',
+      '[D][Klaude][C:test-channel][M:bot-msg-1] hello from another bot'
+    );
   });
 });
