@@ -69,7 +69,38 @@ This starts `nino-codex` through:
 ```text
 scripts/start-codex-nino.sh
 codex-config/NINO_CODEX.md
+shared-context/NINO_SHARED_CONTEXT.md
 ```
+
+The shared context file is appended to the Codex startup prompt. It contains only paths and operating rules, not private memory contents.
+
+## Shared Context Smoke Tests
+
+Send these in the Codex test channel after restarting `nino-codex`:
+
+```text
+니노야 /home/bpx27/discord-bot-nino/memory/current-tasks.md 읽고 지금 진행중인 작업 한 줄로 말해줘.
+```
+
+Expected: Codex reads the live current-tasks file or clearly says it is missing.
+
+```text
+니노야 Claude 프로젝트 MEMORY.md 경로 알고 있어? 파일 내용은 길게 말하지 말고 어떤 경로를 봐야하는지만 말해줘.
+```
+
+Expected: Codex references `/home/bpx27/.claude/projects/-home-bpx27-discord-bot-nino/memory/MEMORY.md`.
+
+```text
+니노야 shared-data todo-list 수정할 때 어떤 git 절차 따라야 해?
+```
+
+Expected: Codex says to use `git pull --rebase`, edit, commit, and `git push` in `/home/bpx27/yaksu-shared-data`.
+
+```text
+니노야 claude-config/skills는 코덱스에서 어떻게 써야해?
+```
+
+Expected: Codex treats them as legacy references and does not assume Claude-only tools are directly available.
 
 ## Restart Relay In Test Mode
 

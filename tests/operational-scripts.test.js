@@ -53,6 +53,9 @@ describe('operational backend scripts', () => {
 
     expect(startCodex).toContain('codex-config/NINO_CODEX.md');
     expect(startCodex).toContain('CODEX_INSTRUCTIONS_FILE');
+    expect(startCodex).toContain('shared-context/NINO_SHARED_CONTEXT.md');
+    expect(startCodex).toContain('CODEX_SHARED_CONTEXT_FILE');
+    expect(startCodex).toContain('prompt+=$');
     expect(startCodex).toContain('codex --no-alt-screen --dangerously-bypass-approvals-and-sandbox "$prompt"');
     expect(startCodex).toContain('/home/bpx27/discord-bot-nino/src/discord-send -c CHANNEL_ID -r MESSAGE_ID');
   });

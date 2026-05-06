@@ -63,6 +63,12 @@ The broader Nino operating guide is:
 
 Use it as the source of truth for persona, server IDs, people, operational habits, and response style.
 
+Additional provider-neutral memory, hook replacement, and legacy skill rules are loaded from:
+
+```text
+shared-context/NINO_SHARED_CONTEXT.md
+```
+
 ## People And Server
 
 - Server: 약수하우스.

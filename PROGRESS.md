@@ -29,6 +29,7 @@ Make Claude and Codex optional AI backends for Nino while preserving WSL/tmux op
 ## Current Phase
 
 Phase 1 implementation and test-channel smoke test complete in branch `feat/optional-ai-backends`.
+Phase 2 shared Codex context implementation is in progress.
 
 ## Completed Tasks
 
@@ -42,6 +43,7 @@ Phase 1 implementation and test-channel smoke test complete in branch `feat/opti
 8. Fixed review findings for Claude-disabled/Codex-enabled operation and relay-level ownership completion.
 9. Added Codex Discord output bridge, reliable tmux submit handling, and Nino persona bootstrap.
 10. Hardened backend watchdog and health semantics after final review.
+11. Added provider-neutral shared context for Codex to find Claude-era memory, hook rules, shared-data rules, and legacy skills.
 
 ## Current Temporary Runtime State
 
@@ -102,9 +104,18 @@ systemctl --user restart nino-relay.service
 curl -s http://localhost:58090/health
 ```
 
+After restarting `nino-codex`, test shared context with:
+
+```text
+니노야 /home/bpx27/discord-bot-nino/memory/current-tasks.md 읽고 지금 진행중인 작업 한 줄로 말해줘.
+니노야 Claude 프로젝트 MEMORY.md 경로 알고 있어? 파일 내용은 길게 말하지 말고 어떤 경로를 봐야하는지만 말해줘.
+니노야 shared-data todo-list 수정할 때 어떤 git 절차 따라야 해?
+니노야 claude-config/skills는 코덱스에서 어떻게 써야해?
+```
+
 ## Verification
 
-- `npm test`: 11 suites / 98 tests passed.
+- `npm test`: 11 suites / 99 tests passed.
 - `bash -n scripts/start-backend.sh scripts/start-codex-nino.sh scripts/restart-backend.sh scripts/nino-watchdog.sh scripts/start-nino.sh scripts/restart-nino.sh`: passed.
 - Final code review: approved.
 - Real smoke tests passed:
@@ -114,16 +125,17 @@ curl -s http://localhost:58090/health
 
 ## Next Tasks
 
-1. Continue test-channel Codex operation for stability and behavior checks.
-2. Decide whether to keep the feature worktree override until merge or switch back to main before merge.
-3. Decide whether Codex-only mode should route all channels or require an explicit `PRIMARY_BACKEND=codex` for production.
-4. Decide whether Codex needs a stronger memory/hook replacement beyond `codex-config/NINO_CODEX.md`.
-5. Prepare PR/merge only after the test-channel run is considered stable.
+1. Restart `nino-codex` so the new shared context is loaded into the live Codex session.
+2. Run the shared context smoke tests in the Codex test channel.
+3. Continue test-channel Codex operation for stability and behavior checks.
+4. Decide whether to keep the feature worktree override until merge or switch back to main before merge.
+5. Decide whether Codex-only mode should route all channels or require an explicit `PRIMARY_BACKEND=codex` for production.
+6. Prepare PR/merge only after the test-channel run is considered stable.
 
 ## Open Questions
 
 - Which channels should be trusted for agent execution?
 - What timeout should trigger fallback?
 - Should fallback be disabled until manual operator approval?
-- Where should shared memory ultimately live: repo ignored `memory/` or external `~/nino-shared/memory`?
+- Should shared context eventually move from a startup prompt into a Codex-native skill/hook mechanism if the CLI supports it?
 - Should production `start-nino.sh` continue to run `git reset --hard origin/main`, or should deploy and restart be separated?
