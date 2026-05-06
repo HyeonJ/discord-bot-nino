@@ -201,7 +201,7 @@ Given Claude primary and Codex disabled, router sends to Claude.
 
 - [ ] **Step 2: Test disabled primary**
 
-Given primary disabled, router returns an explicit unavailable result and does not send.
+Given primary disabled, router tries the first enabled healthy fallback; if no fallback can route, it returns an explicit unavailable result and does not send.
 
 - [ ] **Step 3: Test fallback lease**
 

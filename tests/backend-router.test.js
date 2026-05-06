@@ -1,9 +1,9 @@
 const { createRouter } = require('../src/backends/router');
 
-function makeAdapter(id, { healthy = true } = {}) {
+function makeAdapter(id, { healthy = true, healthResult } = {}) {
   return {
     id,
-    health: jest.fn(() => ({ alive: healthy })),
+    health: jest.fn(() => healthResult || ({ alive: healthy })),
     send: jest.fn(() => true),
   };
 }
@@ -41,6 +41,28 @@ describe('backend router', () => {
     expect(result).toEqual({ ok: true, backendId: 'claude', requestId: 'req-1' });
     expect(claude.send).toHaveBeenCalledWith(request, { enabled: true, session: 'nino' });
     expect(codex.send).not.toHaveBeenCalled();
+  });
+
+  test('routes to tmux backend when session is available but process health is transiently missing', () => {
+    const claude = makeAdapter('claude', {
+      healthResult: { enabled: true, sessionAlive: true, alive: false, pid: null },
+    });
+    const router = createRouter({
+      config: {
+        primary: 'claude',
+        fallback: [],
+        backends: {
+          claude: { enabled: true, session: 'nino' },
+        },
+      },
+      adapters: { claude },
+    });
+
+    const request = makeRequest();
+    const result = router.routeRequest(request);
+
+    expect(result).toEqual({ ok: true, backendId: 'claude', requestId: 'req-1' });
+    expect(claude.send).toHaveBeenCalledWith(request, { enabled: true, session: 'nino' });
   });
 
   test('routes to healthy fallback when the primary is disabled', () => {
@@ -150,5 +172,35 @@ describe('backend router', () => {
       ignored: true,
     });
     expect(claude.send).not.toHaveBeenCalled();
+  });
+
+  test('ignores completion from backend that does not own the sent request', () => {
+    const claude = makeAdapter('claude');
+    const router = createRouter({
+      config: {
+        primary: 'claude',
+        fallback: [],
+        backends: {
+          claude: { enabled: true, session: 'nino' },
+        },
+      },
+      adapters: { claude },
+    });
+
+    router.routeRequest(makeRequest());
+    const result = router.markCompleted('req-1', 'other');
+
+    expect(result).toEqual({
+      ok: false,
+      reason: 'wrong_backend',
+      requestId: 'req-1',
+      backendId: 'other',
+      ownerBackendId: 'claude',
+      ignored: true,
+    });
+    expect(router.getState('req-1')).toMatchObject({
+      backendId: 'claude',
+      status: 'sent',
+    });
   });
 });

@@ -20,14 +20,24 @@ function getBackendConfig(config, backendId) {
   return config && config.backends ? config.backends[backendId] : undefined;
 }
 
-function isHealthy(adapter, backendConfig) {
-  if (!adapter || typeof adapter.health !== 'function') {
+function canRoute(adapter, backendConfig) {
+  if (!adapter) {
     return false;
   }
 
   try {
+    if (typeof adapter.canRoute === 'function') {
+      return Boolean(adapter.canRoute(backendConfig));
+    }
+    if (typeof adapter.ready === 'function') {
+      return Boolean(adapter.ready(backendConfig));
+    }
+    if (typeof adapter.health !== 'function') {
+      return false;
+    }
+
     const result = adapter.health(backendConfig);
-    return Boolean(result === true || (result && result.alive));
+    return Boolean(result === true || (result && (result.sessionAlive || result.alive)));
   } catch {
     return false;
   }
@@ -57,7 +67,7 @@ function createRouter({ config, adapters, state } = {}) {
     if (isBackendEnabled(backendConfig, primary)) {
       const primaryAdapter = backendAdapters[primary];
       const primaryConfig = getBackendConfig(backendConfig, primary);
-      if (isHealthy(primaryAdapter, primaryConfig)) {
+      if (canRoute(primaryAdapter, primaryConfig)) {
         return { ok: true, backendId: primary, adapter: primaryAdapter, config: primaryConfig };
       }
     }
@@ -69,7 +79,7 @@ function createRouter({ config, adapters, state } = {}) {
 
       const adapter = backendAdapters[backendId];
       const fallbackConfig = getBackendConfig(backendConfig, backendId);
-      if (isHealthy(adapter, fallbackConfig)) {
+      if (canRoute(adapter, fallbackConfig)) {
         return { ok: true, backendId, adapter, config: fallbackConfig };
       }
     }
@@ -121,6 +131,16 @@ function createRouter({ config, adapters, state } = {}) {
     const current = requestState.get(requestId);
     if (current && current.status === 'completed') {
       return completedResult(requestId, current);
+    }
+    if (current && current.backendId && current.backendId !== backendId) {
+      return {
+        ok: false,
+        reason: 'wrong_backend',
+        requestId,
+        backendId,
+        ownerBackendId: current.backendId,
+        ignored: true,
+      };
     }
 
     requestState.set(requestId, { status: 'completed', backendId });

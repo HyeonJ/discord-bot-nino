@@ -25,6 +25,7 @@ const RESPONSE_TIMEOUT_MS = 3 * 60 * 1000; // 3분
 // 응답 대기 중인 메시지 추적
 const pendingResponses = new Map(); // msgId → { channelId, timestamp, preview }
 let backendRouter;
+let relayStarted = false;
 
 try {
   backendRouter = createRouter({
@@ -43,8 +44,7 @@ try {
   });
 }
 
-// 주기적으로 타임아웃 체크 (10초마다) → 3분 지나면 tmux로 알림
-setInterval(() => {
+function checkPendingTimeouts() {
   const now = Date.now();
   for (const [msgId, info] of pendingResponses) {
     if (now - info.timestamp > RESPONSE_TIMEOUT_MS) {
@@ -56,10 +56,9 @@ setInterval(() => {
       } catch (e) {}
     }
   }
-}, 10000);
+}
 
-// 5분마다 미응답 메시지 리마인더 → tmux로 시스템 메시지 전송
-setInterval(() => {
+function remindPendingResponses() {
   if (pendingResponses.size === 0) return;
   const previews = [...pendingResponses.values()].map(v => `- ${v.preview}`).join('\n');
   const reminder = `[SYSTEM] ⏰ 리마인더: 아직 응답 못 한 메시지 ${pendingResponses.size}개 있어!\n${previews}`;
@@ -68,7 +67,7 @@ setInterval(() => {
     const escaped = reminder.replace(/'/g, "'\\''");
     execSync(`tmux send-keys -t '${TMUX_SESSION}' -- '${escaped}' C-m`);
   } catch (e) {}
-}, 30 * 60 * 1000);
+}
 
 // 니노 봇 ID — .env의 NINO_BOT_ID 또는 아래 기본값
 const NINO_BOT_ID = process.env.NINO_BOT_ID || '';
@@ -209,9 +208,15 @@ function sendToTmux(payload, msgId = null, channelId = null) {
       preview,
     });
     if (!result.ok) {
+      if (msgId) {
+        pendingResponses.delete(msgId);
+      }
       console.error(`[relay] backend route failed: ${result.reason}${result.backendId ? ` (${result.backendId})` : ''}`);
     }
   } catch (e) {
+    if (msgId) {
+      pendingResponses.delete(msgId);
+    }
     console.error('[relay] backend route error:', e.message);
   }
 }
@@ -412,32 +417,48 @@ function updatePresence() {
   }
 }
 
-try {
-  const statusDir = require('path').dirname(STATUS_FILE);
-  const statusBase = require('path').basename(STATUS_FILE);
-  fs.watch(statusDir, (eventType, filename) => {
-    if (filename === statusBase) updatePresence();
-  });
-  console.log('[relay] Using fs.watch for status file');
-} catch (e) {
-  fs.watchFile(STATUS_FILE, { interval: 2000 }, () => {
-    updatePresence();
-  });
-  console.log('[relay] Fallback to fs.watchFile for status file');
-}
+function startRelay() {
+  if (relayStarted) {
+    return;
+  }
+  relayStarted = true;
 
-// --- 크래시 방지 ---
-process.on('uncaughtException', (err) => {
-  console.error('[relay] uncaught exception:', err);
-});
-process.on('unhandledRejection', (err) => {
-  console.error('[relay] unhandled rejection:', err);
-});
+  setInterval(checkPendingTimeouts, 10000);
+  setInterval(remindPendingResponses, 30 * 60 * 1000);
+
+  try {
+    const statusDir = require('path').dirname(STATUS_FILE);
+    const statusBase = require('path').basename(STATUS_FILE);
+    fs.watch(statusDir, (eventType, filename) => {
+      if (filename === statusBase) updatePresence();
+    });
+    console.log('[relay] Using fs.watch for status file');
+  } catch (e) {
+    fs.watchFile(STATUS_FILE, { interval: 2000 }, () => {
+      updatePresence();
+    });
+    console.log('[relay] Fallback to fs.watchFile for status file');
+  }
+
+  // --- 크래시 방지 ---
+  process.on('uncaughtException', (err) => {
+    console.error('[relay] uncaught exception:', err);
+  });
+  process.on('unhandledRejection', (err) => {
+    console.error('[relay] unhandled rejection:', err);
+  });
+
+  client.login(process.env.DISCORD_BOT_TOKEN);
+}
 
 module.exports = {
   sendToTmux,
+  startRelay,
+  __test: {
+    pendingResponses,
+  },
 };
 
 if (require.main === module) {
-  client.login(process.env.DISCORD_BOT_TOKEN);
+  startRelay();
 }
