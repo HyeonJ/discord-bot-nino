@@ -53,6 +53,7 @@ Phase 2 shared Codex context implementation is in progress.
 18. Added DM-specific backend preference so direct messages can stay on Claude while guild channels test Codex.
 19. Fixed exact tmux session targeting so `nino` is never mistaken for `nino-codex`.
 20. Routed timeout and reminder system notices through backend adapters so Codex-owned pending messages submit correctly.
+21. Updated `start-nino.sh` so Windows auto-start of Claude also starts Codex when `CODEX_ENABLED=true`.
 
 ## Current Temporary Runtime State
 
@@ -85,6 +86,7 @@ As of 2026-05-06 20:51 KST this PC is intentionally running a temporary feature-
   - Direct messages prefer Claude via `DM_BACKEND=claude`.
   - tmux health, send, watchdog, restart, and quota scans use exact session targets.
   - Timeout and reminder system notices use the pending request owner backend instead of raw `TMUX_SESSION`.
+  - `scripts/start-nino.sh` starts `nino-codex` through `scripts/start-backend.sh codex` when Codex is enabled.
 
 ## Rollback Commands
 

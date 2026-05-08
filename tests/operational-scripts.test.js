@@ -21,6 +21,9 @@ describe('operational backend scripts', () => {
     expect(startNino).toContain('git reset --hard origin/main');
     expect(startNino).toContain('claude --model claude-opus-4-6 --dangerously-skip-permissions');
     expect(startNino).toContain('TMUX_TARGET="=$SESSION_NAME"');
+    expect(startNino).toContain('CODEX_ENABLED="${CODEX_ENABLED:-false}"');
+    expect(startNino).toContain('is_enabled "$CODEX_ENABLED"');
+    expect(startNino).toContain('"$SCRIPT_DIR/start-backend.sh" codex');
     expect(startNino).toContain('systemctl --user restart nino-relay.service');
   });
 

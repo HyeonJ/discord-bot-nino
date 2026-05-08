@@ -11,6 +11,13 @@ LOG_DIR="$BOT_DIR/logs"
 
 mkdir -p "$LOG_DIR"
 
+is_enabled() {
+  case "${1:-}" in
+    true|TRUE|True) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # git pull (손상된 오브젝트 방어 포함)
 echo "[start] git pull 중..."
 cd "$BOT_DIR"
@@ -29,10 +36,15 @@ fi
 if [[ -f "$BOT_DIR/.env" ]]; then
   set -a; source "$BOT_DIR/.env"; set +a
 fi
+CODEX_ENABLED="${CODEX_ENABLED:-false}"
 
 # tmux 세션 생성 + Claude Code 실행
 tmux new-session -d -s "$SESSION_NAME" -c "$BOT_DIR" -e "ALARM_TOOL_SESSION=nino"
 tmux send-keys -t "$TMUX_PANE_TARGET" "claude --model claude-opus-4-6 --dangerously-skip-permissions" C-m
+
+if is_enabled "$CODEX_ENABLED"; then
+  "$SCRIPT_DIR/start-backend.sh" codex
+fi
 
 # relay 시작 (systemd user service — 죽어도 자동 재시작됨)
 export XDG_RUNTIME_DIR=/run/user/$(id -u)
