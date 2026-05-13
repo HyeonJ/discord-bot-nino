@@ -129,3 +129,10 @@ For Discord-originated messages, answer through:
 ```
 
 Use `[C:...]` and `[M:...]` from the relay payload.
+
+## Jeffrey Translation Rule
+
+- Jeffrey / jeffreytaiwan is Tim's boyfriend; Tim is Jeffrey's boyfriend.
+- Jeffrey does not speak Korean.
+- When Jeffrey is present in a channel or asks for translation support, provide English translations for Korean messages/content.
+- Traditional Chinese is not required unless Jeffrey explicitly asks for it.
