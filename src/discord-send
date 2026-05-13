@@ -3,7 +3,12 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-source "$BOT_DIR/.env"
+ENV_FILE="$BOT_DIR/.env"
+LIVE_ENV_FILE="/home/bpx27/discord-bot-nino/.env"
+if [[ ! -f "$ENV_FILE" && -f "$LIVE_ENV_FILE" ]]; then
+  ENV_FILE="$LIVE_ENV_FILE"
+fi
+source "$ENV_FILE"
 
 CHANNEL_ID="${DISCORD_CHANNEL_ID:-1479813609499394169}"
 AUTH="Authorization: Bot $DISCORD_BOT_TOKEN"

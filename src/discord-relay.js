@@ -307,6 +307,12 @@ function resolveMentions(msg) {
   return text;
 }
 
+function hasRelayableMessageBody(msg) {
+  const text = (msg.content || '').trim();
+  const attachmentCount = msg.attachments?.size || 0;
+  return text.length > 0 || attachmentCount > 0;
+}
+
 client.on('messageCreate', async (msg) => {
   const botId = process.env.NINO_BOT_ID || client.user?.id;
   if (msg.author.id !== botId) {
@@ -357,6 +363,9 @@ client.on('messageCreate', async (msg) => {
   if (msg.author.bot && msg.author.id !== botId) {
     // GitHub auto-pull
     if (shouldAutoPull(msg)) runAutoPull(msg);
+    if (!hasRelayableMessageBody(msg)) {
+      return;
+    }
     const chId = msg.channel.isThread() ? msg.channel.id : msg.channelId;
     const botName = msg.author.username || msg.author.globalName || 'Bot';
     const content = resolveMentions(msg);

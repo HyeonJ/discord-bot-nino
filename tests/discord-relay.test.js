@@ -263,6 +263,44 @@ describe('discord relay module', () => {
     );
   });
 
+  test('other-bot guild messages with no text or attachments are ignored', async () => {
+    process.env.PRIMARY_BACKEND = 'codex';
+    process.env.CODEX_ENABLED = 'true';
+    process.env.CODEX_TMUX_SESSION = 'nino-codex-test';
+    mockTmuxCheckSession.mockReturnValue(true);
+    mockTmuxGetChildPid.mockReturnValue(456);
+    require('../src/discord-relay');
+
+    const messageHandler = mockClientOn.mock.calls.find(([event]) => event === 'messageCreate')?.[1];
+    const attachments = [];
+    attachments.size = 0;
+    await messageHandler({
+      id: 'bot-empty-1',
+      guildId: '1479813608023134342',
+      channelId: 'github-channel',
+      channel: {
+        id: 'github-channel',
+        name: 'github',
+        isThread: () => false,
+      },
+      author: {
+        id: 'github-bot',
+        bot: true,
+        username: 'GitHub',
+      },
+      content: '',
+      attachments,
+      embeds: [{ title: 'push event' }],
+      guild: {
+        members: { cache: new Map() },
+        roles: { cache: new Map() },
+        channels: { cache: new Map() },
+      },
+    });
+
+    expect(mockTmuxSendKeys).not.toHaveBeenCalled();
+  });
+
   test('direct messages prefer configured Claude backend even when Codex is primary', async () => {
     process.env.PRIMARY_BACKEND = 'codex';
     process.env.FALLBACK_BACKENDS = 'claude';

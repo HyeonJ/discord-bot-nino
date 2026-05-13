@@ -3,6 +3,7 @@ const path = require('path');
 
 const root = path.resolve(__dirname, '..');
 const script = (name) => fs.readFileSync(path.join(root, 'scripts', name), 'utf8');
+const srcScript = (name) => fs.readFileSync(path.join(root, 'src', name), 'utf8');
 
 describe('operational backend scripts', () => {
   test('start-backend can launch Claude or Codex sessions without replacing start-nino', () => {
@@ -18,11 +19,14 @@ describe('operational backend scripts', () => {
     expect(startBackend).toContain('TMUX_PANE_TARGET="=$SESSION:"');
     expect(startBackend).toContain('tmux has-session -t "$TMUX_TARGET"');
 
-    expect(startNino).toContain('git reset --hard origin/main');
-    expect(startNino).toContain('claude --model claude-opus-4-6 --dangerously-skip-permissions');
-    expect(startNino).toContain('TMUX_TARGET="=$SESSION_NAME"');
+    expect(startNino).toContain('git pull --ff-only');
+    expect(startNino).toContain('uncommitted changes detected; skipping git pull');
+    expect(startNino).toContain('flock -n 9');
+    expect(startNino).toContain('STARTUP_LOG="$LOG_DIR/startup.log"');
     expect(startNino).toContain('CODEX_ENABLED="${CODEX_ENABLED:-false}"');
     expect(startNino).toContain('is_enabled "$CODEX_ENABLED"');
+    expect(startNino).toContain('is_enabled "$CLAUDE_ENABLED"');
+    expect(startNino).toContain('"$SCRIPT_DIR/start-backend.sh" claude');
     expect(startNino).toContain('"$SCRIPT_DIR/start-backend.sh" codex');
     expect(startNino).toContain('systemctl --user restart nino-relay.service');
   });
@@ -52,8 +56,9 @@ describe('operational backend scripts', () => {
     expect(watchdog).toContain('check_backend "codex" "$CODEX_SESSION"');
     expect(watchdog).toContain('local tmux_target="=$session"');
     expect(watchdog).toContain('ps -p "$pane_pid" -o args=');
-    expect(watchdog).toContain('if [[ "$pane_command" == *"$process_pattern"* ]]');
+    expect(watchdog).toContain('if [[ "$pane_args" == *"$process_pattern"* ]]');
     expect(watchdog).toContain('pgrep -P "$pane_pid" -f "$process_pattern"');
+    expect(watchdog).toContain('WATCHDOG_SESSION_GRACE_SECONDS="${WATCHDOG_SESSION_GRACE_SECONDS:-45}"');
     expect(watchdog).toContain('check_claude_d_state "$CLAUDE_SESSION"');
     expect(watchdog).toContain('"$SCRIPT_DIR/restart-nino.sh"');
     expect(watchdog).toContain('"$SCRIPT_DIR/restart-backend.sh" "$backend"');
@@ -109,5 +114,13 @@ describe('operational backend scripts', () => {
     expect(scanner).toContain('usage limit reached|rate limit|quota exceeded|limit reached|try again later|too many requests|insufficient_quota');
     expect(scanner).toContain('backend-status.sh" set "$backend" quota_exhausted');
     expect(scanner).toContain('QUOTA_COOLDOWN_UNTIL');
+  });
+
+  test('discord-send can use the live WSL env when running from a feature worktree', () => {
+    const discordSend = srcScript('discord-send');
+
+    expect(discordSend).toContain('ENV_FILE="$BOT_DIR/.env"');
+    expect(discordSend).toContain('LIVE_ENV_FILE="/home/bpx27/discord-bot-nino/.env"');
+    expect(discordSend).toContain('source "$ENV_FILE"');
   });
 });
