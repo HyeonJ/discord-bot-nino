@@ -89,15 +89,6 @@ check_backend() {
     fi
   done
 
-  case "$pane_command" in
-    ""|bash|sh|zsh|fish)
-      log "DEAD: $backend pane command is '$pane_command' in session '$session'. Respawning..."
-      restart_backend "$backend"
-      alert "$backend backend restarted automatically (pane command not backend)"
-      return 1
-      ;;
-  esac
-
   if [ -n "$process_pattern" ]; then
     local pane_args
     pane_args=$(ps -p "$pane_pid" -o args= 2>/dev/null || echo "")
@@ -114,6 +105,15 @@ check_backend() {
       return 1
     fi
   fi
+
+  case "$pane_command" in
+    ""|bash|sh|zsh|fish)
+      log "DEAD: $backend pane command is '$pane_command' and no '$process_pattern' process was found in session '$session'. Respawning..."
+      restart_backend "$backend"
+      alert "$backend backend restarted automatically (pane command not backend)"
+      return 1
+      ;;
+  esac
 
   return 0
 }
