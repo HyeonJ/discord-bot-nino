@@ -22,8 +22,11 @@ const RESPONSE_TIMEOUT_MS = 3 * 60 * 1000; // 3분
 
 // 응답 대기 중인 메시지 추적
 const pendingResponses = new Map(); // msgId → { channelId, timestamp, preview }
+const processedMessageIds = new Set();
 let backendRouter;
 let relayStarted = false;
+const RELAY_STARTED_AT = Date.now();
+const BACKFILL_LOOKBACK_MS = Number(process.env.RELAY_BACKFILL_LOOKBACK_MS || 10 * 60 * 1000);
 
 try {
   backendRouter = createRouter({
@@ -125,6 +128,7 @@ const client = new Client({
 
 client.once('ready', () => {
   console.log(`[relay] Logged in as ${client.user.tag}`);
+  console.log(`[relay] ready guilds=${client.guilds.cache.size} channels=${client.channels.cache.size}`);
   // 봇 ID를 자동 설정
   if (!NINO_BOT_ID) {
     process.env.NINO_BOT_ID = client.user.id;
@@ -133,6 +137,17 @@ client.once('ready', () => {
   // 헬스체크 시작
   health.start();
   startChecking();
+  setTimeout(() => {
+    backfillRecentMessages().catch((e) => console.error('[relay] backfill error:', e.message));
+  }, 3000);
+});
+
+client.on('raw', (packet) => {
+  if (packet && packet.t === 'MESSAGE_CREATE') {
+    const d = packet.d || {};
+    const contentPreview = String(d.content || '').slice(0, 80).replace(/\n/g, ' ');
+    console.log(`[relay:raw] MESSAGE_CREATE guild=${d.guild_id || 'dm'} channel=${d.channel_id || ''} author=${d.author?.username || d.author?.id || ''} content=${JSON.stringify(contentPreview)}`);
+  }
 });
 
 function downloadAttachment(url, filename) {
@@ -313,7 +328,16 @@ function hasRelayableMessageBody(msg) {
   return text.length > 0 || attachmentCount > 0;
 }
 
-client.on('messageCreate', async (msg) => {
+async function handleIncomingMessage(msg, options = {}) {
+  if (processedMessageIds.has(msg.id)) {
+    return;
+  }
+  processedMessageIds.add(msg.id);
+  if (processedMessageIds.size > 1000) {
+    processedMessageIds.delete(processedMessageIds.values().next().value);
+  }
+
+  console.log(`[relay:event] messageCreate guild=${msg.guildId || 'dm'} channel=${msg.channelId || msg.channel?.id || ''} author=${msg.author?.username || msg.author?.id || ''} bot=${Boolean(msg.author?.bot)} content=${JSON.stringify((msg.content || '').slice(0, 80))}`);
   const botId = process.env.NINO_BOT_ID || client.user?.id;
   if (msg.author.id !== botId) {
     health.setLastMessageAt();
@@ -445,6 +469,10 @@ client.on('messageCreate', async (msg) => {
   const mentionsOtherUser = msg.mentions.users.some(u => u.id !== botId);
   const pendingId = mentionsOtherUser ? null : msg.id;
   sendToTmux(payload, pendingId, channelId);
+}
+
+client.on('messageCreate', async (msg) => {
+  await handleIncomingMessage(msg);
 });
 
 client.on('guildMemberAdd', (member) => {
@@ -458,6 +486,42 @@ client.on('guildMemberRemove', (member) => {
 });
 
 // --- 프레즌스(상태) 관리 ---
+async function backfillRecentMessages() {
+  const since = RELAY_STARTED_AT - BACKFILL_LOOKBACK_MS;
+  let checked = 0;
+  let routed = 0;
+
+  for (const channel of client.channels.cache.values()) {
+    if (!channel || typeof channel.isTextBased !== 'function' || !channel.isTextBased()) {
+      continue;
+    }
+    if (channel.guildId && channel.guildId !== GUILD_ID) {
+      continue;
+    }
+    if (!channel.messages || typeof channel.messages.fetch !== 'function') {
+      continue;
+    }
+
+    try {
+      const messages = await channel.messages.fetch({ limit: 10 });
+      const recent = [...messages.values()]
+        .filter((msg) => msg.createdTimestamp >= since)
+        .filter((msg) => !msg.author?.bot)
+        .sort((a, b) => a.createdTimestamp - b.createdTimestamp);
+
+      checked += recent.length;
+      for (const msg of recent) {
+        await handleIncomingMessage(msg, { source: 'backfill' });
+        routed += 1;
+      }
+    } catch (e) {
+      console.error(`[relay] backfill failed for channel ${channel.id}:`, e.message);
+    }
+  }
+
+  console.log(`[relay] backfill complete checked=${checked} routed=${routed}`);
+}
+
 const STATUS_FILE = '/tmp/nino-status';
 
 function updatePresence() {
