@@ -337,7 +337,8 @@ async function handleIncomingMessage(msg, options = {}) {
     processedMessageIds.delete(processedMessageIds.values().next().value);
   }
 
-  console.log(`[relay:event] messageCreate guild=${msg.guildId || 'dm'} channel=${msg.channelId || msg.channel?.id || ''} author=${msg.author?.username || msg.author?.id || ''} bot=${Boolean(msg.author?.bot)} content=${JSON.stringify((msg.content || '').slice(0, 80))}`);
+  const source = options.source ? ` source=${options.source}` : '';
+  console.log(`[relay:event] messageCreate${source} guild=${msg.guildId || 'dm'} channel=${msg.channelId || msg.channel?.id || ''} author=${msg.author?.username || msg.author?.id || ''} bot=${Boolean(msg.author?.bot)} content=${JSON.stringify((msg.content || '').slice(0, 80))}`);
   const botId = process.env.NINO_BOT_ID || client.user?.id;
   if (msg.author.id !== botId) {
     health.setLastMessageAt();
@@ -486,12 +487,14 @@ client.on('guildMemberRemove', (member) => {
 });
 
 // --- 프레즌스(상태) 관리 ---
-async function backfillRecentMessages() {
+async function backfillRecentMessages(options = {}) {
   const since = RELAY_STARTED_AT - BACKFILL_LOOKBACK_MS;
+  const botId = process.env.NINO_BOT_ID || client.user?.id;
+  const channels = options.channels || client.channels.cache.values();
   let checked = 0;
   let routed = 0;
 
-  for (const channel of client.channels.cache.values()) {
+  for (const channel of channels) {
     if (!channel || typeof channel.isTextBased !== 'function' || !channel.isTextBased()) {
       continue;
     }
@@ -503,7 +506,7 @@ async function backfillRecentMessages() {
     }
 
     try {
-      const messages = await channel.messages.fetch({ limit: 10 });
+      const messages = await channel.messages.fetch({ limit: 50 });
       const recent = [...messages.values()]
         .filter((msg) => msg.createdTimestamp >= since)
         .filter((msg) => !msg.author?.bot)
@@ -511,6 +514,9 @@ async function backfillRecentMessages() {
 
       checked += recent.length;
       for (const msg of recent) {
+        if (await ninoRepliedAfter(channel, msg, botId)) {
+          continue;
+        }
         await handleIncomingMessage(msg, { source: 'backfill' });
         routed += 1;
       }
@@ -520,6 +526,20 @@ async function backfillRecentMessages() {
   }
 
   console.log(`[relay] backfill complete checked=${checked} routed=${routed}`);
+}
+
+async function ninoRepliedAfter(channel, userMsg, botId) {
+  if (!botId || !channel?.messages || typeof channel.messages.fetch !== 'function') {
+    return false;
+  }
+
+  try {
+    const messages = await channel.messages.fetch({ limit: 50, after: userMsg.id });
+    return [...messages.values()].some((msg) => msg.author?.id === botId);
+  } catch (e) {
+    console.error(`[relay] reply-check failed for channel ${channel.id}:`, e.message);
+    return false;
+  }
 }
 
 const STATUS_FILE = '/tmp/nino-status';
@@ -583,6 +603,8 @@ module.exports = {
   startRelay,
   __test: {
     pendingResponses,
+    processedMessageIds,
+    backfillRecentMessages,
     checkPendingTimeouts,
     remindPendingResponses,
     completePendingInChannel,

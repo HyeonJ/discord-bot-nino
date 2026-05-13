@@ -301,6 +301,115 @@ describe('discord relay module', () => {
     expect(mockTmuxSendKeys).not.toHaveBeenCalled();
   });
 
+  test('backfill skips messages that already have a Nino reply', async () => {
+    process.env.NINO_BOT_ID = 'nino-bot';
+    process.env.PRIMARY_BACKEND = 'codex';
+    process.env.CODEX_ENABLED = 'true';
+    process.env.CODEX_TMUX_SESSION = 'nino-codex-test';
+    mockTmuxCheckSession.mockReturnValue(true);
+    mockTmuxGetChildPid.mockReturnValue(456);
+    const relay = require('../src/discord-relay');
+
+    const userMsg = {
+      id: 'missed-msg-1',
+      guildId: '1479813608023134342',
+      channelId: 'chan-1',
+      createdTimestamp: Date.now(),
+      channel: {
+        id: 'chan-1',
+        name: 'work',
+        isThread: () => false,
+      },
+      author: {
+        id: 'user-1',
+        bot: false,
+        username: 'Darren',
+        displayName: 'Darren',
+      },
+      content: '니노야 지금 들리면 codex ok 라고만 답해줘',
+      attachments: Object.assign([], { size: 0, map: Array.prototype.map }),
+      mentions: { users: { some: () => false } },
+      guild: {
+        members: { cache: new Map() },
+        roles: { cache: new Map() },
+        channels: { cache: new Map() },
+      },
+    };
+    const ninoReply = {
+      id: 'nino-reply-1',
+      author: { id: 'nino-bot', bot: true, username: '니노' },
+      content: 'codex ok',
+    };
+    const fetch = jest.fn()
+      .mockResolvedValueOnce(new Map([[userMsg.id, userMsg]]))
+      .mockResolvedValueOnce(new Map([[ninoReply.id, ninoReply]]));
+    const channel = {
+      id: 'chan-1',
+      guildId: '1479813608023134342',
+      isTextBased: () => true,
+      messages: { fetch },
+    };
+
+    await relay.__test.backfillRecentMessages({ channels: [channel] });
+
+    expect(fetch).toHaveBeenCalledWith({ limit: 50 });
+    expect(fetch).toHaveBeenCalledWith({ limit: 50, after: 'missed-msg-1' });
+    expect(mockTmuxSendKeys).not.toHaveBeenCalled();
+  });
+
+  test('backfill routes recent unreplied user messages', async () => {
+    process.env.NINO_BOT_ID = 'nino-bot';
+    process.env.PRIMARY_BACKEND = 'codex';
+    process.env.CODEX_ENABLED = 'true';
+    process.env.CODEX_TMUX_SESSION = 'nino-codex-test';
+    mockTmuxCheckSession.mockReturnValue(true);
+    mockTmuxGetChildPid.mockReturnValue(456);
+    const relay = require('../src/discord-relay');
+
+    const userMsg = {
+      id: 'missed-msg-2',
+      guildId: '1479813608023134342',
+      channelId: 'chan-1',
+      createdTimestamp: Date.now(),
+      channel: {
+        id: 'chan-1',
+        name: 'work',
+        isThread: () => false,
+      },
+      author: {
+        id: 'user-1',
+        bot: false,
+        username: 'Darren',
+        displayName: 'Darren',
+      },
+      content: '니노야 다시 테스트',
+      attachments: Object.assign([], { size: 0, map: Array.prototype.map }),
+      mentions: { users: { some: () => false } },
+      guild: {
+        members: { cache: new Map() },
+        roles: { cache: new Map() },
+        channels: { cache: new Map() },
+      },
+    };
+    const fetch = jest.fn()
+      .mockResolvedValueOnce(new Map([[userMsg.id, userMsg]]))
+      .mockResolvedValueOnce(new Map());
+    const channel = {
+      id: 'chan-1',
+      guildId: '1479813608023134342',
+      isTextBased: () => true,
+      messages: { fetch },
+    };
+
+    await relay.__test.backfillRecentMessages({ channels: [channel] });
+
+    expect(mockTmuxSendKeys).toHaveBeenCalledWith(
+      'nino-codex-test',
+      expect.stringContaining('[M:missed-msg-2] 니노야 다시 테스트'),
+      { submitDelaySeconds: 1 }
+    );
+  });
+
   test('direct messages prefer configured Claude backend even when Codex is primary', async () => {
     process.env.PRIMARY_BACKEND = 'codex';
     process.env.FALLBACK_BACKENDS = 'claude';
