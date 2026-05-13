@@ -15,6 +15,7 @@ CODEX_ENABLED="${CODEX_ENABLED:-false}"
 CLAUDE_SESSION="${CLAUDE_TMUX_SESSION:-${TMUX_SESSION:-nino}}"
 CODEX_SESSION="${CODEX_TMUX_SESSION:-nino-codex}"
 LEGACY_CLAUDE_SESSION="nino"
+WATCHDOG_SESSION_GRACE_SECONDS="${WATCHDOG_SESSION_GRACE_SECONDS:-45}"
 
 log() {
   mkdir -p "$(dirname "$LOG")"
@@ -53,6 +54,7 @@ check_backend() {
   local backend="$1"
   local session="$2"
   local process_pattern="${3:-}"
+  local expected_commands="${4:-}"
   local tmux_target="=$session"
 
   if ! tmux has-session -t "$tmux_target" 2>/dev/null; then
@@ -62,8 +64,18 @@ check_backend() {
     return 1
   fi
 
-  local pane_pid
+  local pane_pid pane_command pane_start_time now age expected
   pane_pid=$(tmux list-panes -t "$tmux_target" -F '#{pane_pid}' 2>/dev/null | head -1)
+  pane_command=$(tmux list-panes -t "$tmux_target" -F '#{pane_current_command}' 2>/dev/null | head -1)
+  pane_start_time=$(tmux list-panes -t "$tmux_target" -F '#{pane_start_time}' 2>/dev/null | head -1)
+
+  now=$(date +%s)
+  age=$((now - ${pane_start_time:-0}))
+  if [ "$age" -ge 0 ] && [ "$age" -lt "$WATCHDOG_SESSION_GRACE_SECONDS" ]; then
+    log "GRACE: $backend session '$session' is ${age}s old; skipping restart check"
+    return 0
+  fi
+
   if [ -z "$pane_pid" ] || ! kill -0 "$pane_pid" 2>/dev/null; then
     log "DEAD: $backend pane process gone (PID: $pane_pid). Respawning..."
     restart_backend "$backend"
@@ -71,10 +83,25 @@ check_backend() {
     return 1
   fi
 
+  for expected in $expected_commands; do
+    if [ "$pane_command" = "$expected" ]; then
+      return 0
+    fi
+  done
+
+  case "$pane_command" in
+    ""|bash|sh|zsh|fish)
+      log "DEAD: $backend pane command is '$pane_command' in session '$session'. Respawning..."
+      restart_backend "$backend"
+      alert "$backend backend restarted automatically (pane command not backend)"
+      return 1
+      ;;
+  esac
+
   if [ -n "$process_pattern" ]; then
-    local pane_command
-    pane_command=$(ps -p "$pane_pid" -o args= 2>/dev/null || echo "")
-    if [[ "$pane_command" == *"$process_pattern"* ]]; then
+    local pane_args
+    pane_args=$(ps -p "$pane_pid" -o args= 2>/dev/null || echo "")
+    if [[ "$pane_args" == *"$process_pattern"* ]]; then
       return 0
     fi
 
@@ -117,13 +144,13 @@ check_claude_d_state() {
 }
 
 if is_enabled "$CLAUDE_ENABLED"; then
-  check_backend "claude" "$CLAUDE_SESSION" "claude" || exit 0
+  check_backend "claude" "$CLAUDE_SESSION" "claude" "claude" || exit 0
   scan_quota "claude" "$CLAUDE_SESSION"
   check_claude_d_state "$CLAUDE_SESSION" || exit 0
 fi
 
 if is_enabled "$CODEX_ENABLED"; then
-  check_backend "codex" "$CODEX_SESSION" "codex" || exit 0
+  check_backend "codex" "$CODEX_SESSION" "codex" "codex node" || exit 0
   scan_quota "codex" "$CODEX_SESSION"
 fi
 
