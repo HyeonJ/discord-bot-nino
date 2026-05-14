@@ -69,6 +69,7 @@ describe('discord relay module', () => {
     delete process.env.CODEX_TMUX_SESSION;
     delete process.env.DM_BACKEND;
     delete process.env.NINO_BOT_ID;
+    delete process.env.RELAY_BACKFILL_DM_CHANNELS;
   });
 
   afterEach(() => {
@@ -406,6 +407,55 @@ describe('discord relay module', () => {
     expect(mockTmuxSendKeys).toHaveBeenCalledWith(
       'nino-codex-test',
       expect.stringContaining('[M:missed-msg-2] 니노야 다시 테스트'),
+      { submitDelaySeconds: 1 }
+    );
+  });
+
+  test('backfill can route recent DM messages from explicit channel ids', async () => {
+    process.env.NINO_BOT_ID = 'nino-bot';
+    process.env.PRIMARY_BACKEND = 'codex';
+    process.env.CODEX_ENABLED = 'true';
+    process.env.CODEX_TMUX_SESSION = 'nino-codex-test';
+    process.env.RELAY_BACKFILL_DM_CHANNELS = 'dm-channel-1';
+    mockTmuxCheckSession.mockReturnValue(true);
+    mockTmuxGetChildPid.mockReturnValue(456);
+    const relay = require('../src/discord-relay');
+    const { Client } = require('discord.js');
+    const clientInstance = Client.mock.results[0].value;
+
+    const dmMsg = {
+      id: 'missed-dm-1',
+      guildId: null,
+      channelId: 'dm-channel-1',
+      createdTimestamp: Date.now(),
+      channel: { id: 'dm-channel-1' },
+      author: {
+        id: 'user-1',
+        bot: false,
+        username: 'Darren',
+      },
+      content: '니노야',
+      attachments: Object.assign([], { size: 0, map: Array.prototype.map }),
+    };
+    const fetch = jest.fn()
+      .mockResolvedValueOnce(new Map([[dmMsg.id, dmMsg]]))
+      .mockResolvedValueOnce(new Map());
+    const dmChannel = {
+      id: 'dm-channel-1',
+      isTextBased: () => true,
+      messages: { fetch },
+    };
+    clientInstance.channels = {
+      cache: new Map(),
+      fetch: jest.fn().mockResolvedValue(dmChannel),
+    };
+
+    await relay.__test.backfillRecentMessages({ channelIds: ['dm-channel-1'] });
+
+    expect(clientInstance.channels.fetch).toHaveBeenCalledWith('dm-channel-1');
+    expect(mockTmuxSendKeys).toHaveBeenCalledWith(
+      'nino-codex-test',
+      '[DM][Darren][C:dm-channel-1][M:missed-dm-1] 니노야',
       { submitDelaySeconds: 1 }
     );
   });

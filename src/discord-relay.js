@@ -12,6 +12,7 @@ const claudeBackend = require('./backends/claude');
 
 const ATTACHMENT_DIR = '/tmp/discord-attachments';
 const HISTORY_DIR = path.join(__dirname, '..', 'memory', 'discord-history');
+const CHANNEL_MAP_FILE = path.join(__dirname, '..', 'config', 'channel-map.json');
 
 const GUILD_ID = '1479813608023134342';
 const DEFAULT_CHANNEL = '1479813609499394169';
@@ -490,7 +491,7 @@ client.on('guildMemberRemove', (member) => {
 async function backfillRecentMessages(options = {}) {
   const since = RELAY_STARTED_AT - BACKFILL_LOOKBACK_MS;
   const botId = process.env.NINO_BOT_ID || client.user?.id;
-  const channels = options.channels || client.channels.cache.values();
+  const channels = options.channels || await getBackfillChannels(options.channelIds);
   let checked = 0;
   let routed = 0;
 
@@ -526,6 +527,51 @@ async function backfillRecentMessages(options = {}) {
   }
 
   console.log(`[relay] backfill complete checked=${checked} routed=${routed}`);
+}
+
+async function getBackfillChannels(extraChannelIds = []) {
+  const channels = new Map();
+  for (const channel of client.channels.cache.values()) {
+    channels.set(channel.id, channel);
+  }
+
+  const channelIds = new Set([...getConfiguredDmChannelIds(), ...extraChannelIds].filter(Boolean));
+  for (const channelId of channelIds) {
+    if (channels.has(channelId)) {
+      continue;
+    }
+    try {
+      const channel = await client.channels.fetch(channelId);
+      if (channel) {
+        channels.set(channel.id, channel);
+      }
+    } catch (e) {
+      console.error(`[relay] backfill channel fetch failed for ${channelId}:`, e.message);
+    }
+  }
+
+  return channels.values();
+}
+
+function getConfiguredDmChannelIds() {
+  const envIds = String(process.env.RELAY_BACKFILL_DM_CHANNELS || '')
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean);
+  if (envIds.length > 0) {
+    return envIds;
+  }
+
+  try {
+    const channelMap = JSON.parse(fs.readFileSync(CHANNEL_MAP_FILE, 'utf8'));
+    return Object.entries(channelMap)
+      .filter(([name]) => name.startsWith('DM-'))
+      .map(([, id]) => String(id).trim())
+      .filter(Boolean);
+  } catch (e) {
+    console.error('[relay] DM channel map read failed:', e.message);
+    return [];
+  }
 }
 
 async function ninoRepliedAfter(channel, userMsg, botId) {
