@@ -5,17 +5,37 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 LOG_DIR="$BOT_DIR/logs"
 STARTUP_LOG="$LOG_DIR/startup.log"
-LOCK_FILE="$LOG_DIR/start-nino.lock"
+LOCK_DIR="$LOG_DIR/start-nino.lockdir"
 
 mkdir -p "$LOG_DIR"
 
-exec 9>"$LOCK_FILE"
-if command -v flock >/dev/null 2>&1; then
-  if ! flock -n 9; then
+acquire_lock() {
+  if mkdir "$LOCK_DIR" 2>/dev/null; then
+    echo "$$" > "$LOCK_DIR/pid"
+    trap 'rm -rf "$LOCK_DIR"' EXIT
+    return 0
+  fi
+
+  local lock_pid
+  lock_pid="$(cat "$LOCK_DIR/pid" 2>/dev/null || true)"
+  if [[ -n "$lock_pid" ]] && kill -0 "$lock_pid" 2>/dev/null; then
     echo "[start] another start-nino run is already active"
     exit 0
   fi
-fi
+
+  echo "[start] removing stale start lock"
+  rm -rf "$LOCK_DIR"
+  if mkdir "$LOCK_DIR" 2>/dev/null; then
+    echo "$$" > "$LOCK_DIR/pid"
+    trap 'rm -rf "$LOCK_DIR"' EXIT
+    return 0
+  fi
+
+  echo "[start] another start-nino run is already active"
+  exit 0
+}
+
+acquire_lock
 
 exec > >(while IFS= read -r line; do printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$line"; done | tee -a "$STARTUP_LOG") 2>&1
 
@@ -74,8 +94,11 @@ sleep "${BACKEND_STARTUP_GRACE_SECONDS:-5}"
 
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 if command -v systemctl >/dev/null 2>&1; then
-  systemctl --user restart nino-relay.service
-  echo "[start] relay restarted via systemd user service"
+  if systemctl --user restart nino-relay.service; then
+    echo "[start] relay restarted via systemd user service"
+  else
+    echo "[start] relay restart via systemd user service failed; continuing"
+  fi
 else
   echo "[start] systemctl not found; relay restart skipped"
 fi

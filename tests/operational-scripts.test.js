@@ -21,7 +21,8 @@ describe('operational backend scripts', () => {
 
     expect(startNino).toContain('git pull --ff-only');
     expect(startNino).toContain('uncommitted changes detected; skipping git pull');
-    expect(startNino).toContain('flock -n 9');
+    expect(startNino).toContain('LOCK_DIR="$LOG_DIR/start-nino.lockdir"');
+    expect(startNino).toContain('acquire_lock');
     expect(startNino).toContain('STARTUP_LOG="$LOG_DIR/startup.log"');
     expect(startNino).toContain('CODEX_ENABLED="${CODEX_ENABLED:-false}"');
     expect(startNino).toContain('is_enabled "$CODEX_ENABLED"');
