@@ -22,6 +22,16 @@ const RESPONSE_TIMEOUT_MS = 3 * 60 * 1000; // 3분
 // 응답 대기 중인 메시지 추적
 const pendingResponses = new Map(); // msgId → { channelId, timestamp, preview }
 
+// tmux 입력창에 텍스트 + Enter 전송.
+// 텍스트와 Enter를 분리해서 보내야 Claude Code TUI의 bracketed paste가
+// Enter를 제출이 아닌 줄바꿈으로 흡수하는 걸 방지할 수 있다.
+function sendToTmux(text) {
+  const escaped = text.replace(/'/g, "'\\''");
+  execSync(`tmux send-keys -t '${TMUX_SESSION}' -- '${escaped}'`);
+  execSync('sleep 0.3');
+  execSync(`tmux send-keys -t '${TMUX_SESSION}' Enter`);
+}
+
 // 주기적으로 타임아웃 체크 (10초마다) → 3분 지나면 tmux로 알림
 setInterval(() => {
   const now = Date.now();
@@ -30,8 +40,7 @@ setInterval(() => {
       pendingResponses.delete(msgId);
       const alert = `[SYSTEM] ⚠️ 응답 못 한 메시지 있어! 확인해줘: ${info.preview}`;
       try {
-        const escaped = alert.replace(/'/g, "'\\''");
-        execSync(`tmux send-keys -t '${TMUX_SESSION}' -- '${escaped}' C-m`);
+        sendToTmux(alert);
       } catch (e) {}
     }
   }
@@ -44,8 +53,7 @@ setInterval(() => {
   const reminder = `[SYSTEM] ⏰ 리마인더: 아직 응답 못 한 메시지 ${pendingResponses.size}개 있어!\n${previews}`;
   console.log(`[relay] ${reminder}`);
   try {
-    const escaped = reminder.replace(/'/g, "'\\''");
-    execSync(`tmux send-keys -t '${TMUX_SESSION}' -- '${escaped}' C-m`);
+    sendToTmux(reminder);
   } catch (e) {}
 }, 30 * 60 * 1000);
 
@@ -179,8 +187,7 @@ function sendToTmux(payload, msgId = null, channelId = null) {
   }
 
   try {
-    const escaped = processed.replace(/'/g, "'\\''");
-    execSync(`tmux send-keys -t '${TMUX_SESSION}' -- '${escaped}' C-m`);
+    sendToTmux(processed);
   } catch (e) {
     if (!e.message.includes('no server running') && !e.message.includes("can't find")) {
       console.error(`[relay] tmux send-keys failed:`, e.message);
