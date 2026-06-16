@@ -25,7 +25,7 @@ const pendingResponses = new Map(); // msgId → { channelId, timestamp, preview
 // tmux 입력창에 텍스트 + Enter 전송.
 // 텍스트와 Enter를 분리해서 보내야 Claude Code TUI의 bracketed paste가
 // Enter를 제출이 아닌 줄바꿈으로 흡수하는 걸 방지할 수 있다.
-function sendToTmux(text) {
+function submitToTmux(text) {
   const escaped = text.replace(/'/g, "'\\''");
   execSync(`tmux send-keys -t '${TMUX_SESSION}' -- '${escaped}'`);
   execSync('sleep 0.3');
@@ -40,7 +40,7 @@ setInterval(() => {
       pendingResponses.delete(msgId);
       const alert = `[SYSTEM] ⚠️ 응답 못 한 메시지 있어! 확인해줘: ${info.preview}`;
       try {
-        sendToTmux(alert);
+        submitToTmux(alert);
       } catch (e) {}
     }
   }
@@ -53,7 +53,7 @@ setInterval(() => {
   const reminder = `[SYSTEM] ⏰ 리마인더: 아직 응답 못 한 메시지 ${pendingResponses.size}개 있어!\n${previews}`;
   console.log(`[relay] ${reminder}`);
   try {
-    sendToTmux(reminder);
+    submitToTmux(reminder);
   } catch (e) {}
 }, 30 * 60 * 1000);
 
@@ -187,7 +187,7 @@ function sendToTmux(payload, msgId = null, channelId = null) {
   }
 
   try {
-    sendToTmux(processed);
+    submitToTmux(processed);
   } catch (e) {
     if (!e.message.includes('no server running') && !e.message.includes("can't find")) {
       console.error(`[relay] tmux send-keys failed:`, e.message);
