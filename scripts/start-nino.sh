@@ -30,7 +30,7 @@ fi
 
 # tmux 세션 생성 + Claude Code 실행
 tmux new-session -d -s "$SESSION_NAME" -c "$BOT_DIR" -e "ALARM_TOOL_SESSION=nino"
-tmux send-keys -t "$SESSION_NAME" "claude --model claude-opus-4-6 --dangerously-skip-permissions" C-m
+tmux send-keys -t "$SESSION_NAME" "source ~/.nvm/nvm.sh && claude --model claude-opus-4-8 --dangerously-skip-permissions" C-m
 
 # relay 시작 (systemd user service — 죽어도 자동 재시작됨)
 export XDG_RUNTIME_DIR=/run/user/$(id -u)

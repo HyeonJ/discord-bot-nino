@@ -712,7 +712,7 @@ def add_to_history(channel_id, speaker_name, text):
 def choose_model(text, voice_mode=False):
     """발화 복잡도에 따라 모델 선택"""
     if not voice_mode:
-        return "claude-opus-4-6"  # 텍스트는 항상 Opus
+        return "claude-opus-4-8"  # 텍스트는 항상 Opus
 
     # 복잡한 질문 키워드 → Opus
     complex_keywords = [
@@ -721,7 +721,7 @@ def choose_model(text, voice_mode=False):
         "계획", "방법", "원리", "이유", "역사", "의미",
     ]
     if any(kw in text for kw in complex_keywords):
-        return "claude-opus-4-6"
+        return "claude-opus-4-8"
 
     # 중간 길이 → Sonnet
     if len(text) > 30:
@@ -758,7 +758,7 @@ def ask_claude(channel_id: int, voice_mode: bool = False) -> str:
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
             startupinfo.wShowWindow = 0
         cmd = ["claude", "-p", "--dangerously-skip-permissions"]
-        if model != "claude-opus-4-6":
+        if model != "claude-opus-4-8":
             cmd.extend(["--model", model])
         cmd.append(prompt)
         print(f"[MODEL] {model} (input: {last_user_text[:30]})", flush=True)
