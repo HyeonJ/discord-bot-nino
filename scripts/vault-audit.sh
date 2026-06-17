@@ -2,14 +2,23 @@
 # vault-audit.sh — wiki 건강검진 (LLM 없이 결정적 검사)
 # Usage: vault-audit.sh [--stale-days N]
 #
+# ⚠️ Linux/bash 4+ 전용 (GNU date·grep -P·mapfile 사용). macOS(BSD)에서는 시작 시 에러로 중단.
+#
 # 검사 (정규식/파서 기반, false positive 적음):
 #   1. broken wikilink — [[X]] 인데 X.md 페이지가 없음
 #   2. duplicate       — 같은 slug(파일명)이 여러 카테고리에 중복
 #   3. stale 후보      — frontmatter updated(없으면 created)가 N일 이상 지남
 # 산출물: vault 루트 audit-report.md + stdout 요약
 # 수정은 하지 않는다(진단만). 수정은 사람 승인 후 별도.
+# audit-report.md는 git commit 하지 않는다 (cron 반복 시 노이즈 commit 방지 — 호출측이 필요하면 별도 처리).
 
 set -euo pipefail
+
+# GNU 도구 가드 — BSD(macOS)에서 silently fail(stale 0건 오인) 방지
+if ! date --version 2>/dev/null | grep -q GNU; then
+    echo "ERROR: GNU date가 필요합니다 (Linux/WSL 전용). macOS(BSD date)에서는 동작하지 않습니다." >&2
+    exit 1
+fi
 
 VAULT_DIR="${VAULT_DIR:-$HOME/obsidian-vault}"
 WIKI_DIR="$VAULT_DIR/wiki"
