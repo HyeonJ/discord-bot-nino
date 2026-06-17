@@ -7,7 +7,7 @@ describe('health endpoint', () => {
   beforeAll(() => {
     process.env.HEALTH_PORT = String(TEST_PORT);
     process.env.TMUX_SESSION = 'nino';
-    healthModule = require('../health');
+    healthModule = require('../src/health');
     healthModule.start();
   });
 
