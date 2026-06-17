@@ -39,10 +39,13 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# 1. 필수 인자
-[[ -n "$TOPIC" ]]    || err "--topic 필수"
-[[ -n "$CATEGORY" ]] || err "--category 필수"
-[[ -n "$CONTENT" ]]  || err "--content 필수"
+# YAML frontmatter 값 sanitize — 큰따옴표 제거(따옴표로 감싸므로 깨짐 방지) + 개행 제거
+sanitize_yaml() { echo "$1" | tr -d '"\r\n'; }
+
+# 1. 필수 인자 (공백만 입력도 거부)
+[[ -n "${TOPIC//[[:space:]]/}" ]]   || err "--topic 필수 (공백만 불가)"
+[[ -n "$CATEGORY" ]]                 || err "--category 필수"
+[[ -n "${CONTENT//[[:space:]]/}" ]] || err "--content 필수 (공백만 불가)"
 
 # 2. category 유효성
 if ! echo " $VALID_CATEGORIES " | grep -q " $CATEGORY "; then
@@ -57,21 +60,22 @@ if [[ "$PRIVACY" == "sensitive" ]]; then
     err "privacy=sensitive 는 저장 금지 (민감정보)."
 fi
 
-# slug: 공백→-, 경로/제어문자 제거 (한글 보존)
+# slug: 공백→-, 경로/제어문자 제거 (한글 보존), 80자 cap
 slug=$(echo "$TOPIC" | tr ' ' '-' | tr -d '/\\:*?"<>|')
+slug=${slug:0:80}
 date_str=$(date '+%Y-%m-%d')
 mkdir -p "$CAND_DIR"
 out_file="$CAND_DIR/${date_str}-${slug}.md"
 
 {
     echo "---"
-    echo "topic: \"$TOPIC\""
+    echo "topic: \"$(sanitize_yaml "$TOPIC")\""
     echo "category: $CATEGORY"
     echo "source: ${SOURCE:-local}"
     echo "privacy: $PRIVACY"
     [[ -n "$CONFIDENCE" ]] && echo "confidence: $CONFIDENCE"
-    [[ -n "$REASON" ]] && echo "reason: \"$REASON\""
-    [[ -n "$TARGET_NOTE" ]] && echo "target_note: \"$TARGET_NOTE\""
+    [[ -n "$REASON" ]] && echo "reason: \"$(sanitize_yaml "$REASON")\""
+    [[ -n "$TARGET_NOTE" ]] && echo "target_note: \"$(sanitize_yaml "$TARGET_NOTE")\""
     echo "created: $date_str"
     echo "status: candidate"
     echo "---"

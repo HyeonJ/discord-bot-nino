@@ -2,7 +2,7 @@
 # wiki-digest.sh — 대화 중 위키에 축적할 내용이 있으면 '후보'로 적재하도록 안내
 # Claude Code Stop hook으로 사용
 #
-# 입력: stdin으로 JSON (stop_hook_result)
+# Stop hook이 넘기는 stdin JSON은 사용하지 않는다 (리마인더 출력만).
 # 이 훅은 리마인더 역할 — 실제 판단은 Claude가 함.
 # 정책: 자동 '저장(병합)'이 아니라 자동 '후보화'. 병합은 사람/명시 명령으로만.
 
