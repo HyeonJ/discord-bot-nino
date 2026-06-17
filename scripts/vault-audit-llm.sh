@@ -78,7 +78,8 @@ ${bundle}"
     verdict=$(source ~/.nvm/nvm.sh 2>/dev/null; cd /tmp && "$CLAUDE_BIN" -p "$prompt" --model claude-sonnet-4-6 --dangerously-skip-permissions 2>/dev/null || echo "(판정 실패)")
     verdict=$(echo "$verdict" | sed '/^```/d')
 
-    if ! echo "$verdict" | grep -q '^모순 없음$'; then
+    # "모순 없음" 뒤 마침표/공백 허용 (LLM이 '모순 없음.' 등으로 답해도 오탐 안 나게)
+    if ! echo "$verdict" | grep -qE '^모순 없음[.[:space:]]*$'; then
         findings+=("[$tag] ${verdict}")
     fi
 done

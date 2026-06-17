@@ -84,6 +84,15 @@ describe('vault-audit-llm.sh', () => {
     expect(fs.existsSync(path.join(vaultDir, 'llm-audit-report.md'))).toBe(true);
   });
 
+  test("LLM이 '모순 없음.'(마침표)으로 답해도 모순으로 오탐하지 않는다", () => {
+    const cleanBin = makeFakeClaude('모순 없음.');
+    note('travel', 'a.md', '---\ntags: [#travel/japan]\n---\n# A\n내용');
+    note('travel', 'b.md', '---\ntags: [#travel/japan]\n---\n# B\n내용');
+    runLlmAudit(['--days', '7'], cleanBin);
+    const report = fs.readFileSync(path.join(vaultDir, 'llm-audit-report.md'), 'utf8');
+    expect(report).toMatch(/모순 의심 0건|모순 의심 \(0\)/);
+  });
+
   test('LLM이 모순을 보고하면 리포트에 반영된다', () => {
     const conflictBin = makeFakeClaude('모순 발견: A는 비싸다, B는 싸다');
     note('travel', 'a.md', '---\ntags: [#travel/japan]\n---\n# A\n비싸다');
