@@ -22,16 +22,17 @@ function makeFakeClaude(outputMarkdown) {
 }
 
 function runAppend(args, opts = {}) {
+  const { env: optsEnv, ...restOpts } = opts;
   return execFileSync('bash', [SCRIPT, ...args], {
     env: {
       ...process.env,
       VAULT_DIR: vaultDir,
       CLAUDE_BIN: fakeClaudeBin,
       BOT_DIR: botDir, // 실제 memory/logs 격리
-      ...(opts.env || {}),
+      ...(optsEnv || {}),
     },
     encoding: 'utf8',
-    ...opts,
+    ...restOpts,
   });
 }
 
@@ -105,5 +106,19 @@ describe('vault-append.sh 안전장치', () => {
 
   test('필수 인자 누락 시 에러', () => {
     expect(() => runAppend(['--topic', '주제만'])).toThrow();
+  });
+
+  test('LLM 출력의 백슬래시가 저장 파일에 보존된다 (printf)', () => {
+    const bsBin = makeFakeClaude(
+      '---\ntitle: "백슬래시"\ncategory: tech\ncreated: 2026-06-17\n---\n\n# 백슬래시\n\n' +
+        String.raw`정규식 \d+ 와 경로 C:\Users\test 를 포함한 충분히 긴 본문입니다.`
+    );
+    runAppend(['--topic', '백슬래시', '--category', 'tech', '--content', '내용'], {
+      env: { CLAUDE_BIN: bsBin },
+    });
+    const f = fs.readdirSync(path.join(wikiDir(), 'tech')).find((x) => x.endsWith('.md'));
+    const body = fs.readFileSync(path.join(wikiDir(), 'tech', f), 'utf8');
+    expect(body).toContain(String.raw`\d+`);
+    expect(body).toContain(String.raw`C:\Users\test`);
   });
 });

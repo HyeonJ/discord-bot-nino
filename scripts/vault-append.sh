@@ -130,6 +130,7 @@ if $DRY_RUN; then
 fi
 
 prompt_file=$(mktemp /tmp/vault-append-XXXXXX.txt)
+trap 'rm -f "$prompt_file"' EXIT  # 중간 exit에도 임시파일 정리 보장
 
 if [[ -n "$existing_note" ]]; then
     # 기존 노트에 병합
@@ -212,12 +213,13 @@ if [[ -z "$output" ]] || [[ ${#output} -lt 50 ]]; then
 fi
 
 # 기존 노트 덮어쓰기 전 백업 (.bak) — 잘못된 병합 복구용
+# 직전 1개만 보관(매번 덮어씀). 더 긴 히스토리는 vault git이 보장.
 if [[ -f "$target_file" ]]; then
     cp "$target_file" "${target_file}.bak"
     log "BACKUP: ${target_file}.bak"
 fi
 
-echo "$output" > "$target_file"
+printf '%s\n' "$output" > "$target_file"  # echo 대신 printf — 백슬래시 보존
 log "SAVED: $target_file"
 rel_path=$(echo "$target_file" | sed "s|$VAULT_DIR/||")
 if [[ -n "$existing_note" ]]; then
@@ -240,7 +242,13 @@ if ! git diff --quiet || ! git diff --cached --quiet || [[ -n "$(git ls-files --
     git add -A
     git reset -q -- '*.bak' 2>/dev/null || true
     git -c user.name="Nino" -c user.email="nino@yaksu.house" commit -m "wiki: ${TOPIC} 업데이트 ($(date '+%Y-%m-%d %H:%M'))" 2>/dev/null || true
-    git push origin main 2>/dev/null && log "Git push done" || log "Git push failed"
+    push_err=$(mktemp /tmp/vault-push-err-XXXXXX.txt)
+    if git push origin main 2>"$push_err"; then
+        log "Git push done"
+    else
+        log "Git push failed: $(head -c 200 "$push_err" | tr '\n' ' ')"
+    fi
+    rm -f "$push_err"
 fi
 
 log "DONE: '$TOPIC'"
