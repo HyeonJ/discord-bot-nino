@@ -9,7 +9,24 @@ CHANNEL_ID="${DISCORD_CHANNEL_ID:-1479813609499394169}"
 CHANNEL_DEFAULT="$CHANNEL_ID"
 AUTH="Authorization: Bot $DISCORD_BOT_TOKEN"
 CHANNEL_MAP="$BOT_DIR/config/channel-map.json"
+MENTION_MAP="$BOT_DIR/config/mention-map.json"
 HASH_DB="${YAKSU_HISTORY_DB:-$HOME/.local/share/yaksu-history/messages.db}"
+
+# @이름 → <@ID> 멘션 변환 (mention-map.json 기반).
+# - 이미 <@...> 형태(raw ID)는 negative lookbehind로 건드리지 않음
+# - 워드바운더리라 "@룬드가"처럼 조사가 붙으면 매치 안 됨 → 멘션 뒤엔 공백을 둘 것
+# - 긴 이름 우선 치환(부분일치 방지)
+convert_mentions() {
+  [[ -f "$MENTION_MAP" ]] || { printf '%s' "$1"; return 0; }
+  python3 - "$1" "$MENTION_MAP" <<'PY'
+import json, re, sys
+msg = sys.argv[1]
+m = json.load(open(sys.argv[2]))
+for name in sorted(m, key=len, reverse=True):
+    msg = re.sub(r'(?<!<)@' + re.escape(name) + r'\b', '<@' + m[name] + '>', msg)
+sys.stdout.write(msg)
+PY
+}
 
 # bot-core relay 전환: relay가 [M:해시]/[T:명:해시]/[R:해시] (4자리 base36) 방출.
 # is_hash로 판정 → DB에서 raw ID 역조회. 18자리 raw ID·채널명은 종전대로.
@@ -45,6 +62,11 @@ while [[ $# -gt 0 ]]; do
     *) MESSAGE="$1"; shift ;;
   esac
 done
+
+# @이름 → <@ID> 멘션 변환 (페이로드·드라이런·파일전송 모두 반영)
+if [[ -n "$MESSAGE" ]]; then
+  MESSAGE="$(convert_mentions "$MESSAGE")"
+fi
 
 # -c 값 해석: 숫자ID→raw / 4자리 해시→DB(스레드ID 또는 메시지의 채널) / 채널명→channel-map
 if [[ -n "$CHANNEL_ID" && ! "$CHANNEL_ID" =~ ^[0-9]+$ ]]; then
