@@ -7,6 +7,9 @@ const DM_TIM = 'DM-Tim';
 const CHECK_INTERVAL_MS = 60 * 1000;
 const STALE_THRESHOLD_MS = 90 * 1000;
 const COOLDOWN_MS = 5 * 60 * 1000;
+// 연속 실패 디바운스: 단일 blip(순간 타임아웃·부하) 오탐 방지 — N회 연속 실패 시에만 알림.
+// (2026-07-22 Tim 지적 오탐: 룬드 정상인데 순간 blip 1회로 알림 발동. Darren 승인 수정)
+const FAILURE_THRESHOLD = parseInt(process.env.HEALTH_FAILURE_THRESHOLD || '3', 10);
 
 const OWNER_MAP = {
   rund: DM_TIM,
@@ -16,6 +19,7 @@ const OWNER_MAP = {
 
 let checkInterval = null;
 const lastAlertTime = new Map();
+const consecutiveFailures = new Map();
 
 function parseTargets() {
   const raw = process.env.HEALTH_TARGETS || '';
@@ -90,9 +94,24 @@ function analyzeHealth(botName, data) {
   return issues;
 }
 
+// 연속 실패 카운터 갱신 — 정상(이슈 없음)이면 0으로 리셋, 아니면 +1. 갱신된 카운트 반환.
+function registerCheck(botName, hasIssues) {
+  const next = hasIssues ? (consecutiveFailures.get(botName) || 0) + 1 : 0;
+  consecutiveFailures.set(botName, next);
+  return next;
+}
+
+// 알림 발동 조건: FAILURE_THRESHOLD 연속 실패 도달 + 쿨다운 경과 (단일 blip은 거름)
 function shouldAlert(botName) {
+  if ((consecutiveFailures.get(botName) || 0) < FAILURE_THRESHOLD) return false;
   const lastAlert = lastAlertTime.get(botName) || 0;
   return Date.now() - lastAlert > COOLDOWN_MS;
+}
+
+// 테스트용 상태 초기화
+function resetDebounceState() {
+  consecutiveFailures.clear();
+  lastAlertTime.clear();
 }
 
 async function checkBot(target) {
@@ -104,11 +123,13 @@ async function checkBot(target) {
   }
 
   const issues = analyzeHealth(target.name, data);
+  registerCheck(target.name, issues.length > 0);
 
   if (issues.length > 0 && shouldAlert(target.name)) {
     const dmChannel = OWNER_MAP[target.name] || DM_DARREN;
+    const fails = consecutiveFailures.get(target.name) || 0;
     const issueList = issues.map(i => `• ${i}`).join('\n');
-    const alert = `⚠️ **${target.name} 이상 감지**\n${issueList}\n확인 필요`;
+    const alert = `⚠️ **${target.name} 이상 감지** (${fails}회 연속 실패)\n${issueList}\n확인 필요`;
     sendAlert(alert, dmChannel);
     lastAlertTime.set(target.name, Date.now());
     console.log(`[health-checker] alert sent for ${target.name} via ${dmChannel}: ${issues.join(', ')}`);
@@ -149,4 +170,8 @@ module.exports = {
   fetchHealth,
   analyzeHealth,
   parseTargets,
+  registerCheck,
+  shouldAlert,
+  resetDebounceState,
+  FAILURE_THRESHOLD,
 };

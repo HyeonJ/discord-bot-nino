@@ -1,4 +1,11 @@
-const { analyzeHealth, parseTargets } = require('../src/health-checker');
+const {
+  analyzeHealth,
+  parseTargets,
+  registerCheck,
+  shouldAlert,
+  resetDebounceState,
+  FAILURE_THRESHOLD,
+} = require('../src/health-checker');
 
 describe('health-checker', () => {
   describe('parseTargets', () => {
@@ -90,6 +97,52 @@ describe('health-checker', () => {
       };
       const issues = analyzeHealth('haru', data);
       expect(issues.some(i => i.includes('stale'))).toBe(false);
+    });
+  });
+
+  describe('디바운스 (연속 실패 오탐 방지)', () => {
+    beforeEach(() => resetDebounceState());
+
+    test('기본 임계값은 3', () => {
+      expect(FAILURE_THRESHOLD).toBe(3);
+    });
+
+    test('registerCheck: 실패면 +1, 정상이면 0 리셋', () => {
+      expect(registerCheck('rund', true)).toBe(1);
+      expect(registerCheck('rund', true)).toBe(2);
+      expect(registerCheck('rund', false)).toBe(0); // 정상 → 리셋
+      expect(registerCheck('rund', true)).toBe(1);
+    });
+
+    test('임계값 미만 연속 실패 → 알림 안 함 (단일/이중 blip 거름)', () => {
+      registerCheck('rund', true); // 1회
+      expect(shouldAlert('rund')).toBe(false);
+      registerCheck('rund', true); // 2회
+      expect(shouldAlert('rund')).toBe(false);
+    });
+
+    test('임계값 도달(3회 연속) → 알림 발동', () => {
+      registerCheck('rund', true);
+      registerCheck('rund', true);
+      registerCheck('rund', true); // 3회
+      expect(shouldAlert('rund')).toBe(true);
+    });
+
+    test('중간에 정상 1회 끼면 카운터 리셋 → 알림 안 함 (blip 시나리오)', () => {
+      registerCheck('rund', true); // 1
+      registerCheck('rund', true); // 2
+      registerCheck('rund', false); // 정상 blip 복구 → 리셋
+      registerCheck('rund', true); // 다시 1
+      expect(shouldAlert('rund')).toBe(false);
+    });
+
+    test('봇별 카운터 독립', () => {
+      registerCheck('rund', true);
+      registerCheck('rund', true);
+      registerCheck('rund', true);
+      registerCheck('haru', true); // haru는 1회뿐
+      expect(shouldAlert('rund')).toBe(true);
+      expect(shouldAlert('haru')).toBe(false);
     });
   });
 });
