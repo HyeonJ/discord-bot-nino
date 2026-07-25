@@ -20,7 +20,9 @@ set +a
 # 코어가 읽는 경로 명시(cwd 의존 제거)
 export CHANNEL_MAP="$BOT_DIR/config/channel-map.json"
 export MENTION_MAP="$BOT_DIR/config/mention-map.json"
-export YAKSU_HISTORY_DB="${YAKSU_HISTORY_DB:-$HOME/.local/share/yaksu-history/messages.db}"
+# ⚠️ $HOME 폴백 금지(룬드 M:xm2p 리뷰) — $HOME은 실행 주체(systemd User·cron·sudo·타 유저 셸)에 따라
+# 바뀌고, 어긋나면 전송이 아니라 **해시 역조회**가 조용히 깨진다(-r·M:해시 답장). QUIET=1이면 경고도 없다.
+export YAKSU_HISTORY_DB="${YAKSU_HISTORY_DB:-/home/bpx27/.local/share/yaksu-history/messages.db}"
 
 # §8 계측 정책(§14-⑤): 니노는 -c가 문서상 표준이라 경고는 끄고, 카운터는 남겨 7일 추이를 실데이터로 본다.
 export DISCORD_SEND_QUIET_SHIM="${DISCORD_SEND_QUIET_SHIM:-1}"
