@@ -10,8 +10,8 @@
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-CHANNEL_MAP="$BOT_DIR/config/channel-map.json"
-DISCORD_CHANNEL=$(jq -r '.["현인-다용도"]' "$CHANNEL_MAP")
+# jq 미설치 환경에서 set -e로 즉시 종료됐던 줄 — 코어가 채널명을 해석하므로 조회 자체가 불필요(2026-07-25).
+DISCORD_CHANNEL="현인-다용도"
 
 # 1. OAuth 토큰 추출
 TOKEN=$(python3 -c "import json; d=json.load(open('$HOME/.claude/.credentials.json')); print(d['claudeAiOauth']['accessToken'])" 2>/dev/null)
@@ -98,5 +98,5 @@ PYEOF
 
 # 4. 경고 메시지가 있으면 Discord로 전송
 if [ -n "$ALERT_MSG" ]; then
-  "$BOT_DIR/src/discord-send" -c "$DISCORD_CHANNEL" "$ALERT_MSG"
+  "$BOT_DIR/src/discord-send" "$DISCORD_CHANNEL" "$ALERT_MSG"
 fi

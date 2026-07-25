@@ -54,7 +54,7 @@ function fetchHealth(url) {
 function sendAlert(message, dmChannel) {
   try {
     const escaped = message.replace(/'/g, "'\\''");
-    execSync(`${DISCORD_SEND_BIN} -c ${dmChannel} '${escaped}'`);
+    execSync(`${DISCORD_SEND_BIN} ${dmChannel} '${escaped}'`);
   } catch (e) {
     console.error('[health-checker] alert send failed:', e.message);
   }

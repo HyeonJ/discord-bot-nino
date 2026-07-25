@@ -20,6 +20,10 @@ package.json
 # claude-config/hooks/
 # claude-config/user-settings.json
 
+# OF DRM 디바이스 키 — 절대 커밋 금지 (git add of/ 한 번에 딸려 들어감. 2026-07-25 실수 직전 차단)
+of/cdm/
+*.wvd
+
 # 런타임/임시 파일
 relay-attachments/
 null
