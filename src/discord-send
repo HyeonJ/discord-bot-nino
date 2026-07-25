@@ -1,149 +1,31 @@
 #!/usr/bin/env bash
+# discord-send 코어 셔틀 (정본 — 2026-07-25 단계2 전환 완료, Darren 승인 M:cs41)
+# 실물 bash는 src/discord-send-legacy로 은퇴. 로직 0, 전부 코어 cli.js 위임 (§5 설계).
+# 롤백: cp src/discord-send-legacy src/discord-send
+# env 절대경로 고정 → 어디서 실행해도 니노 정체 고정(부록 A-5 401 근본교정).
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-BOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+BOT_DIR="/home/bpx27/discord-bot-nino"
+# 프로덕션 전용 체크아웃(-live) — dev 클론(~/yaksu-bot-core)을 쓰면 거기서 브랜치 체크아웃하는 순간
+# 통신선이 같이 흔들린다. relay(systemd unit)도 같은 경로라 relay↔send 버전 드리프트 불가(2026-07-25).
+CORE_CLI="/home/bpx27/yaksu-bot-core-live/relay/discord-send/cli.js"
+BUN="/home/bpx27/.nvm/versions/node/v24.14.0/bin/bun"   # 절대경로 — launchd/cron 최소 PATH엔 bun 없음(§14 nit①)
+
+# .env 로드(DISCORD_BOT_TOKEN 등) — 절대경로 source
+set -a
+# shellcheck disable=SC1091
 source "$BOT_DIR/.env"
+set +a
 
-CHANNEL_ID="${DISCORD_CHANNEL_ID:-1479813609499394169}"
-CHANNEL_DEFAULT="$CHANNEL_ID"
-AUTH="Authorization: Bot $DISCORD_BOT_TOKEN"
-CHANNEL_MAP="$BOT_DIR/config/channel-map.json"
-MENTION_MAP="$BOT_DIR/config/mention-map.json"
-HASH_DB="${YAKSU_HISTORY_DB:-$HOME/.local/share/yaksu-history/messages.db}"
+# 코어가 읽는 경로 명시(cwd 의존 제거)
+export CHANNEL_MAP="$BOT_DIR/config/channel-map.json"
+export MENTION_MAP="$BOT_DIR/config/mention-map.json"
+# ⚠️ $HOME 폴백 금지(룬드 M:xm2p 리뷰) — $HOME은 실행 주체(systemd User·cron·sudo·타 유저 셸)에 따라
+# 바뀌고, 어긋나면 전송이 아니라 **해시 역조회**가 조용히 깨진다(-r·M:해시 답장). QUIET=1이면 경고도 없다.
+export YAKSU_HISTORY_DB="${YAKSU_HISTORY_DB:-/home/bpx27/.local/share/yaksu-history/messages.db}"
 
-# @이름 → <@ID> 멘션 변환 (mention-map.json 기반).
-# - 이미 <@...> 형태(raw ID)는 negative lookbehind로 건드리지 않음
-# - 워드바운더리라 "@룬드가"처럼 조사가 붙으면 매치 안 됨 → 멘션 뒤엔 공백을 둘 것
-# - 긴 이름 우선 치환(부분일치 방지)
-convert_mentions() {
-  [[ -f "$MENTION_MAP" ]] || { printf '%s' "$1"; return 0; }
-  python3 - "$1" "$MENTION_MAP" <<'PY'
-import json, re, sys
-msg = sys.argv[1]
-m = json.load(open(sys.argv[2]))
-for name in sorted(m, key=len, reverse=True):
-    msg = re.sub(r'(?<!<)@' + re.escape(name) + r'\b', '<@' + m[name] + '>', msg)
-sys.stdout.write(msg)
-PY
-}
+# §8 계측 정책(§14-⑤): 니노는 -c가 문서상 표준이라 경고는 끄고, 카운터는 남겨 7일 추이를 실데이터로 본다.
+export DISCORD_SEND_QUIET_SHIM="${DISCORD_SEND_QUIET_SHIM:-1}"
+export DISCORD_SEND_SHIM_LOG="${DISCORD_SEND_SHIM_LOG:-$BOT_DIR/logs/discord-send-shim.log}"
 
-# bot-core relay 전환: relay가 [M:해시]/[T:명:해시]/[R:해시] (4자리 base36) 방출.
-# is_hash로 판정 → DB에서 raw ID 역조회. 18자리 raw ID·채널명은 종전대로.
-is_hash() { [[ "$1" =~ ^[0-9a-z]{4}$ ]]; }
-
-# 해시 → DB 조회. 출력: "thread:<threadId>" | "msg:<msgId>:<channelId>" | ""
-resolve_hash() {
-  [[ -f "$HASH_DB" ]] || return 0
-  python3 - "$HASH_DB" "$1" <<'PY'
-import sqlite3, sys
-db = sqlite3.connect(sys.argv[1]); h = sys.argv[2]
-row = db.execute("SELECT thread_id FROM messages WHERE thread_hash=? AND thread_id IS NOT NULL ORDER BY timestamp DESC LIMIT 1", (h,)).fetchone()
-if row:
-    print(f"thread:{row[0]}")
-else:
-    row = db.execute("SELECT message_id, COALESCE(thread_id, channel_id) FROM messages WHERE message_hash=? ORDER BY timestamp DESC LIMIT 1", (h,)).fetchone()
-    if row:
-        print(f"msg:{row[0]}:{row[1]}")
-PY
-}
-
-FILE=""
-MESSAGE=""
-REPLY_TO=""
-THREAD_NAME=""
-
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    -f|--file) FILE="$2"; shift 2 ;;
-    -c|--channel) CHANNEL_ID="$2"; shift 2 ;;
-    -r|--reply) REPLY_TO="$2"; shift 2 ;;
-    -t|--thread) THREAD_NAME="$2"; shift 2 ;;
-    *) MESSAGE="$1"; shift ;;
-  esac
-done
-
-# @이름 → <@ID> 멘션 변환 (페이로드·드라이런·파일전송 모두 반영)
-if [[ -n "$MESSAGE" ]]; then
-  MESSAGE="$(convert_mentions "$MESSAGE")"
-fi
-
-# -c 값 해석: 숫자ID→raw / 4자리 해시→DB(스레드ID 또는 메시지의 채널) / 채널명→channel-map
-if [[ -n "$CHANNEL_ID" && ! "$CHANNEL_ID" =~ ^[0-9]+$ ]]; then
-  if is_hash "$CHANNEL_ID"; then
-    R=$(resolve_hash "$CHANNEL_ID")
-    if [[ "$R" == thread:* ]]; then
-      CHANNEL_ID="${R#thread:}"
-    elif [[ "$R" == msg:* ]]; then
-      IFS=':' read -r _ _ CHANNEL_ID <<< "$R"
-    else
-      echo "Error: hash '$CHANNEL_ID' not found in DB" >&2; exit 1
-    fi
-  elif [[ -f "$CHANNEL_MAP" ]]; then
-    RESOLVED=$(python3 -c "import json,sys; m=json.load(open(sys.argv[1])); print(m.get(sys.argv[2],''))" "$CHANNEL_MAP" "$CHANNEL_ID" 2>/dev/null)
-    if [[ -n "$RESOLVED" ]]; then
-      CHANNEL_ID="$RESOLVED"
-    fi
-  fi
-fi
-
-# -r 값이 4자리 해시면 → 메시지ID 역조회. -c 미지정(기본값)이면 그 메시지의 채널로 답장.
-if [[ -n "$REPLY_TO" ]] && is_hash "$REPLY_TO"; then
-  R=$(resolve_hash "$REPLY_TO")
-  if [[ "$R" == msg:* ]]; then
-    IFS=':' read -r _ RMSG RCH <<< "$R"
-    REPLY_TO="$RMSG"
-    [[ "$CHANNEL_ID" == "$CHANNEL_DEFAULT" ]] && CHANNEL_ID="$RCH"
-  else
-    echo "Error: reply hash '$REPLY_TO' not found in DB" >&2; exit 1
-  fi
-fi
-
-# --thread: 부모 채널에 스레드 생성 후 그 스레드에 메시지 전송
-if [[ -n "$THREAD_NAME" ]]; then
-  THREAD_PAYLOAD=$(python3 -c "import json,sys; print(json.dumps({'name':sys.argv[1],'type':11,'auto_archive_duration':10080}))" "$THREAD_NAME")
-  THREAD_RESPONSE=$(curl -s -X POST "https://discord.com/api/v10/channels/$CHANNEL_ID/threads" \
-    -H "$AUTH" \
-    -H "Content-Type: application/json" \
-    -d "$THREAD_PAYLOAD")
-  THREAD_ID=$(python3 -c "import json,sys; d=json.loads(sys.argv[1]); print(d.get('id',''))" "$THREAD_RESPONSE")
-  if [[ -z "$THREAD_ID" ]]; then
-    echo "Error: 스레드 생성 실패: $THREAD_RESPONSE" >&2
-    exit 1
-  fi
-  # channel-map.json에 스레드명 → ID 등록
-  python3 -c "
-import json,sys
-path=sys.argv[1]
-m=json.load(open(path))
-m[sys.argv[2]]=sys.argv[3]
-json.dump(m, open(path,'w'), ensure_ascii=False, indent=2)
-print('Registered thread: ' + sys.argv[2] + ' -> ' + sys.argv[3])
-" "$CHANNEL_MAP" "$THREAD_NAME" "$THREAD_ID"
-  CHANNEL_ID="$THREAD_ID"
-fi
-
-# 드라이런: 실제 전송 없이 해석 결과만 출력 (테스트/디버그용)
-if [[ -n "${DISCORD_SEND_DRY_RUN:-}" ]]; then
-  echo "DRY_RUN channel=$CHANNEL_ID reply=$REPLY_TO thread=$THREAD_NAME msg=$MESSAGE"
-  exit 0
-fi
-
-API="https://discord.com/api/v10/channels/$CHANNEL_ID/messages"
-
-JSON_PAYLOAD=$(python3 -c "
-import json,sys
-payload = {'content': sys.argv[1]}
-if sys.argv[2]:
-    payload['message_reference'] = {'message_id': sys.argv[2]}
-print(json.dumps(payload))
-" "$MESSAGE" "$REPLY_TO")
-
-if [[ -n "$FILE" ]]; then
-  curl -s -H "$AUTH" -F "payload_json=$JSON_PAYLOAD" -F "files[0]=@$FILE" "$API" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('content','') or d.get('message','error'))"
-elif [[ -n "$MESSAGE" ]]; then
-  curl -s -H "$AUTH" -H "Content-Type: application/json" -d "$JSON_PAYLOAD" "$API" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('content','') or d.get('message','error'))"
-else
-  echo "Usage: discord-send [-f file] [-c channel_id] [-r reply_msg_id] [-t thread_name] \"message\""
-  exit 1
-fi
+exec "$BUN" "$CORE_CLI" "$@"

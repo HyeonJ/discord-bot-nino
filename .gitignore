@@ -21,6 +21,7 @@ package.json
 # claude-config/user-settings.json
 
 # 런타임/임시 파일
+relay-attachments/
 null
 *.wav
 current-playlist.json
