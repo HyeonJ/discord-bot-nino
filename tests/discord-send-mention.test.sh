@@ -19,7 +19,7 @@ SHIM_TMP="$(mktemp)"
 trap 'rm -f "$SHIM_TMP"' EXIT
 export DISCORD_SEND_SHIM_LOG="$SHIM_TMP"
 
-pass=0; fail=0
+pass=0; fail=0; skipped=0
 # ⚠️ ((pass++))는 pass=0일 때 exit 1을 반환해 `check && ok || bad`가 둘 다 실행된다 → 산술 대입으로 회피
 ok()   { echo "  ✅ $1"; pass=$((pass + 1)); }
 bad()  { echo "  ❌ $1"; echo "     want: [$2]"; echo "     got:  [$3]"; fail=$((fail + 1)); }
@@ -90,7 +90,12 @@ if [[ -n "$HASH" ]]; then
   got=$(DISCORD_SEND_DRY_RUN=1 "$SEND" -c "$CH" -r "$HASH" "답장" 2>&1 | field_of message_reference.message_id)
   [[ -n "$got" ]] && ok "④ -r 해시 → message_reference 역조회" || bad "④ -r 해시 → message_reference 역조회" "message_id 있음" "빈값"
 else
-  echo "  ⏭️  ④ -r 해시 역조회 (DB에 해시 없음 — 스킵)"
+  # 조용한 스킵은 "CI 그린 = 검증됨"이라는 착각을 만든다(룬드 M:bzqi) → 이유를 stderr로 시끄럽게.
+  # 근본 해결은 fixture DB(후속). 그때까지는 최소한 스킵 사실이 눈에 띄게 한다.
+  skipped=$((skipped + 1))
+  echo "  ⏭️  ④ -r 해시 역조회 — **스킵됨**"
+  echo "     이유: 실DB($([[ -n "${YAKSU_HISTORY_DB:-}" ]] && echo "$YAKSU_HISTORY_DB" || echo "$HOME/.local/share/yaksu-history/messages.db"))에 message_hash 행이 없음" >&2
+  echo "     ⚠️ 이 케이스는 검증되지 않았다 — DB 상태 의존(fixture DB로 대체 예정)" >&2
 fi
 
 # ⑤ QUIET=1: stderr 경고 없음 + SHIM_LOG 카운터는 유지 (§14-⑤ 정책)
@@ -104,5 +109,9 @@ else
 fi
 
 echo ""
-echo "결과: $pass pass, $fail fail"
+if [[ $skipped -gt 0 ]]; then
+  echo "결과: $pass pass, $fail fail, ⚠️ $skipped skipped (미검증 — 위 stderr 참고)"
+else
+  echo "결과: $pass pass, $fail fail"
+fi
 [[ $fail -eq 0 ]]
