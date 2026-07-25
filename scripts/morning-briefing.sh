@@ -34,7 +34,7 @@ done
 
 if [[ -z "$SCHEDULE_FILE" ]]; then
   source ~/.nvm/nvm.sh
-  "$BOT_DIR/src/discord-send" -c "$CHANNEL_ID" "오늘($TODAY) 스케줄 파일을 찾지 못했어ㅠ Vault에 파일 있는지 확인해줘"
+  "$BOT_DIR/src/discord-send" "$CHANNEL_ID" "오늘($TODAY) 스케줄 파일을 찾지 못했어ㅠ Vault에 파일 있는지 확인해줘"
   exit 0
 fi
 

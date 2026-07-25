@@ -63,7 +63,7 @@ curl -o /tmp/mage-output.png "$IMG_URL"
 
 ### 7. 디스코드 전송
 ```bash
-discord-send -f /tmp/mage-output.png -c 채널ID "이미지 생성 완료!"
+discord-send -f /tmp/mage-output.png 채널ID "이미지 생성 완료!"
 ```
 
 ## 참조 이미지 업로드 (선택)

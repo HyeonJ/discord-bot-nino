@@ -45,7 +45,7 @@ description: 알람/리마인더 설정, 조회, 취소 — alarm-tool CLI + TTS
 알람에 TTS가 필요한 경우 (예: 사람 깨우기), Discord 메시지와 함께 TTS도 실행:
 ```bash
 # Discord 메시지 전송
-/home/bpx27/discord-bot-nino/discord-send -c 채널명 "알람 메시지"
+/home/bpx27/discord-bot-nino/src/discord-send 채널명 "알람 메시지"
 
 # TTS (Windows 집컴 스피커로 출력)
 /mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -Command "Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak('알람 메시지')"

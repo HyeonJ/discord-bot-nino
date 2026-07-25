@@ -57,7 +57,7 @@ function fetchHealth(url) {
 function sendAlert(message, dmChannel) {
   try {
     const escaped = message.replace(/'/g, "'\\''");
-    execSync(`${SCRIPT_DIR}/discord-send -c ${dmChannel} '${escaped}'`);
+    execSync(`${SCRIPT_DIR}/discord-send ${dmChannel} '${escaped}'`);
   } catch (e) {
     console.error('[health-checker] alert send failed:', e.message);
   }
