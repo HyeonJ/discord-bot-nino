@@ -25,7 +25,10 @@ export MENTION_MAP="$BOT_DIR/config/mention-map.json"
 export YAKSU_HISTORY_DB="${YAKSU_HISTORY_DB:-/home/bpx27/.local/share/yaksu-history/messages.db}"
 
 # §8 계측 정책(§14-⑤): 니노는 -c가 문서상 표준이라 경고는 끄고, 카운터는 남겨 7일 추이를 실데이터로 본다.
-export DISCORD_SEND_QUIET_SHIM="${DISCORD_SEND_QUIET_SHIM:-1}"
+# 콜론 없는 `-`가 의도 — 플래그성 env는 **빈값을 "해제"로 쓸 수 있어야** 한다.
+# `:-`면 빈 문자열도 미설정으로 취급해 1로 채워, `QUIET=`으로 경고를 되살릴 수 없다(룬드 M:s7e9 발견).
+# 값 자체가 의미인 경로·로그(SHIM_LOG·HISTORY_DB)는 `:-`가 맞다 — 빈 경로는 해제가 아니라 고장이니까.
+export DISCORD_SEND_QUIET_SHIM="${DISCORD_SEND_QUIET_SHIM-1}"
 export DISCORD_SEND_SHIM_LOG="${DISCORD_SEND_SHIM_LOG:-$BOT_DIR/logs/discord-send-shim.log}"
 
 exec "$BUN" "$CORE_CLI" "$@"

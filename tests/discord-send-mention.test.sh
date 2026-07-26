@@ -108,6 +108,18 @@ else
   bad "⑤ QUIET=1 → 경고 없음 + 카운터 기록 유지" "경고없음 + 기록≥1" "err=[$err] lines=$lines"
 fi
 
+# ⑥ QUIET 빈값 = "억제 해제" → 경고 다시 보임 (플래그성 env는 `${VAR-기본}`이라야 성립)
+# 왜: `${VAR:-1}`은 빈 문자열도 미설정으로 취급해 1로 채워버려, 빈값으로 억제를 풀 수 없었다
+# (룬드 M:s7e9가 CALLER_EXCLUDE에서 같은 함정을 밟고 발견). 값이 의미인 env는 `:-`, 플래그는 `-`.
+: > "$SHIM_TMP"
+err=$(DISCORD_SEND_DRY_RUN=1 DISCORD_SEND_QUIET_SHIM= "$SEND" -c "$CH" "unquiet" 2>&1 >/dev/null)
+lines=$(wc -l < "$SHIM_TMP")
+if [[ "$err" == *deprecated* && "$lines" -ge 1 ]]; then
+  ok "⑥ QUIET 빈값 → 경고 복원 + 카운터 유지"
+else
+  bad "⑥ QUIET 빈값 → 경고 복원 + 카운터 유지" "경고있음 + 기록≥1" "err=[$err] lines=$lines"
+fi
+
 echo ""
 if [[ $skipped -gt 0 ]]; then
   echo "결과: $pass pass, $fail fail, ⚠️ $skipped skipped (미검증 — 위 stderr 참고)"
