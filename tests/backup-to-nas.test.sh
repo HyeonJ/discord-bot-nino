@@ -263,10 +263,39 @@ fi
   || bad "스냅샷 실패가 앞 단계까지 무효화했다" "$(logtext)"
 teardown
 
-# ⑯ retention: 14일 넘은 스냅샷만 삭제, 최근 것은 보존
+# ⑯ 🔴 같은 날 2회차 실패가 **1회차 정상 사본을 파괴하지 않는다** (룬드 리뷰)
+#    파일명이 날짜 기반이라 같은 날 두 번 돌면 경로가 같다. 실패 정리로 최종 경로를 지우면
+#    1회차 성공분이 날아간다 — 실패가 상태를 악화시키는 방향(retention 을 성공 분기에
+#    둔 것과 같은 논리인데 여기서만 반대로 갔던 자리).
+#    ⚠️ 발견 당시 프로덕션에 8163행 사본이 이미 있었으므로 **실재하는 위험**이었다.
+setup
+make_db "$ROOT/msgs.db"
+run_backup BACKUP_FORCE_HOUR=03 BACKUP_HISTORY_DB="$ROOT/msgs.db" >/dev/null
+SNAP1="$(find "$ROOT/nas/yaksu-history" -name 'messages-*.db' | head -1)"
+if [[ -z "$SNAP1" || "$(count_rows "$SNAP1")" != "37" ]]; then
+  bad "선행 조건 실패 — 1회차 사본이 없어 파괴 검사가 무의미(공허한 통과 방지)"
+else
+  echo "이건 sqlite DB가 아니다" > "$ROOT/broken.db"
+  run_backup BACKUP_FORCE_HOUR=03 BACKUP_HISTORY_DB="$ROOT/broken.db" >/dev/null; RC=$?
+  if [[ ! -f "$SNAP1" ]]; then
+    bad "2회차 실패가 1회차 정상 사본을 삭제했다" "$(ls -la "$ROOT/nas/yaksu-history/")"
+  elif [[ "$(count_rows "$SNAP1")" != "37" ]]; then
+    bad "1회차 사본이 덮여 손상됐다 (행 수 $(count_rows "$SNAP1"))" "$(logtext)"
+  elif [[ -n "$(find "$ROOT/nas/yaksu-history" -name '*.partial' 2>/dev/null)" ]]; then
+    bad ".partial 껍데기가 남았다" "$(ls -la "$ROOT/nas/yaksu-history/")"
+  elif [[ $RC -eq 0 ]]; then
+    bad "2회차가 실패했는데 rc=0"
+  else
+    ok "같은 날 2회차 실패 → 1회차 사본 무사(37행) + .partial 잔재 없음 + rc=$RC"
+  fi
+fi
+teardown
+
+# ⑰ retention: 14일 넘은 스냅샷만 삭제, 최근 것은 보존
 setup
 make_db "$ROOT/msgs.db"
 mkdir -p "$ROOT/nas/yaksu-history"
+# ⚠️ `touch -d` 는 GNU 전용 — 코어(macOS)로 옮기면 `touch -t` 로 바꿔야 한다(룬드 지적)
 touch -d '30 days ago' "$ROOT/nas/yaksu-history/messages-20260101.db"
 touch -d '3 days ago'  "$ROOT/nas/yaksu-history/messages-20260724.db"
 run_backup BACKUP_FORCE_HOUR=03 BACKUP_HISTORY_DB="$ROOT/msgs.db" >/dev/null
