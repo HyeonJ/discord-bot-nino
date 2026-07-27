@@ -146,15 +146,52 @@ else
 fi
 teardown
 
-# ⑨ NAS 접근 불가면 실패로 종료 (조용한 skip 금지)
-setup
+# ⑨ NAS 접근 불가 → rc는 1로 알리되 **git 축은 계속 돈다** (축 독립성)
+#    ⚠️ "NAS 불가 → exit 1"만 보면 **현재 구현을 명세로 굳혀** 결함을 승인해버린다(룬드 지적).
+#    이 PR의 명제가 "NAS는 --delete 미러라 실수 삭제를 복구 못 하니 git이 그 축을 덮는다"인데,
+#    NAS 장애로 git 축이 같이 멈추면 두 축은 독립이 아니고 명제가 성립하지 않는다.
+#    한 축을 죽였을 때 다른 축이 사는지를 봐야 독립이 증명된다.
+setup; init_git_repo
+echo "변경3" >> "$ROOT/auto-memory/MEMORY.md"
+BEFORE="$(git -C "$ROOT/remote.git" rev-parse HEAD)"
 OUT="$(env BACKUP_NAS_ROOT="$ROOT/no-such-mount" \
   BACKUP_NAS_DIR="$ROOT/nas" BACKUP_MEMORY_SRC="$ROOT/auto-memory" \
   BACKUP_BOT_MEMORY_SRC="$ROOT/bot-memory" BACKUP_LOG_FILE="$ROOT/logs/backup.log" \
-  bash "$SCRIPT" 2>&1)"; RC=$?
-[[ $RC -ne 0 ]] \
-  && ok "NAS 접근 불가 → exit $RC (skip 아님)" \
-  || bad "NAS 없는데 성공으로 끝났다" "$OUT"
+  BACKUP_FORCE_HOUR=03 bash "$SCRIPT" 2>&1)"; RC=$?
+AFTER="$(git -C "$ROOT/remote.git" rev-parse HEAD)"
+if [[ $RC -eq 0 ]]; then
+  bad "NAS 없는데 성공으로 끝났다(조용한 skip)" "$OUT"
+elif [[ "$BEFORE" == "$AFTER" ]]; then
+  bad "NAS 장애가 git 축까지 멈췄다 — 두 축이 독립이 아님" "$(logtext)"
+else
+  ok "NAS 불가 → rc=$RC 로 알리면서 git 축은 계속 수행(축 독립)"
+fi
+
+# ⑩ 역방향: git 축이 죽어도 NAS 축은 살아야 한다
+git -C "$ROOT/auto-memory" remote set-url origin "$ROOT/gone.git"
+echo "변경4" >> "$ROOT/bot-memory/current-tasks.md"
+run_backup BACKUP_FORCE_HOUR=03 >/dev/null; RC=$?
+if ! grep -q "변경4" "$ROOT/nas/bot-memory/current-tasks.md" 2>/dev/null; then
+  bad "push 실패가 NAS 축까지 멈췄다 — 역방향 독립 깨짐" "$(logtext)"
+else
+  ok "git push 실패 → NAS 축은 정상 수행(역방향 독립)"
+fi
+teardown
+
+# ⑪ 백업 소스가 사라지면 조용한 WARN이 아니라 rc로 알린다 + **기존 백업을 지우지 않는다**
+#    소스 부재는 "백업이 아무것도 못 덮고 있다"는 뜻 = 이 PR이 없애려던 상태 그대로다.
+#    동시에 --delete 로 rsync 하면 남아 있던 백업까지 날아가므로 rsync는 건너뛴다.
+setup
+run_backup >/dev/null   # 정상 1회로 백업 적재
+rm -rf "$ROOT/bot-memory"
+run_backup >/dev/null; RC=$?
+if [[ $RC -eq 0 ]]; then
+  bad "봇 memory 소스가 사라졌는데 rc=0 (조용한 통과)" "$(logtext)"
+elif [[ ! -f "$ROOT/nas/bot-memory/current-tasks.md" ]]; then
+  bad "소스 부재인데 기존 백업이 삭제됐다(--delete 로 날아감)" "$(logtext)"
+else
+  ok "소스 부재 → rc=$RC 로 알리고 기존 백업은 보존"
+fi
 teardown
 
 echo

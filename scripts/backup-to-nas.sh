@@ -10,7 +10,14 @@
 # 조용히 죽으므로 배선을 tests/backup-to-nas.test.sh 로 고정한다.
 #
 # 경로·시각을 env로 받는 이유: 테스트가 실제 NAS·실제 원격을 건드리지 않기 위함(기본값=프로덕션).
-set -euo pipefail
+#
+# ⚠️ `set -e` 를 쓰지 않는다(룬드 리뷰 반영). 위 명제("NAS는 --delete 미러라 실수 삭제를
+#   복구 못 하니 git이 그 축을 덮는다")가 성립하려면 두 축이 **독립**이어야 한다.
+#   -e + 직렬이면 NAS 마운트 유실·rsync 실패가 git 단계를 건너뛰게 만들어, NAS가 며칠 죽은
+#   동안 git 백업도 0이 된다. 그런데 로그엔 `ERROR: NAS not accessible` 만 남아서
+#   **git 축이 같이 멈춘 건 보이지도 않는다** — 이 스크립트가 없애려던 상태(미커밋 방치)의 재현.
+#   그래서 축마다 독립 실행 + 실패는 rc에 누적해서 마지막에 한 번 반환한다.
+set -uo pipefail
 
 NAS_DIR="${BACKUP_NAS_DIR:-/mnt/d/Darren/backup/nino}"
 NAS_ROOT="${BACKUP_NAS_ROOT:-/mnt/d/}"
@@ -24,33 +31,46 @@ HOUR="${BACKUP_FORCE_HOUR:-$(date +%H)}"
 mkdir -p "$(dirname "$LOG_FILE")"
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOG_FILE"; }
 
-# NAS 접근 확인 (D:\ = yaksu-storage, WSL에서 /mnt/d/)
-# 없으면 exit 1 — 조용한 skip이면 백업이 멈춘 걸 아무도 모른다
-if [ ! -d "$NAS_ROOT" ]; then
-    log "ERROR: NAS not accessible ($NAS_ROOT not found)"
-    exit 1
-fi
-
-mkdir -p "$NAS_DIR/memory" "$NAS_DIR/bot-memory" "$NAS_DIR/yaksu-history"
+RC=0
+fail() { log "ERROR: $*"; RC=1; }
 
 RSYNC_OPTS=(-r --no-perms --no-owner --no-group --delete)
 
-# 1. auto-memory rsync (매시간)
-rsync "${RSYNC_OPTS[@]}" "$MEMORY_SRC/" "$NAS_DIR/memory/"
-log "OK: auto-memory synced ($(find "$MEMORY_SRC" -type f | wc -l) files)"
+# 소스 → NAS 한 대상. 한 대상이 실패해도 rc만 올리고 **다음 대상을 계속** 처리한다.
+# 소스 부재는 조용한 WARN이 아니라 ERROR다 — "백업이 아무것도 못 덮고 있다"는 뜻이고,
+# 그게 이 스크립트가 없애려던 상태다(봇 memory/가 어디에도 백업되지 않던 6주).
+# 단, 부재일 때 rsync 하면 --delete 로 **남아 있던 백업까지 날아가므로** 건너뛴다.
+sync_dir() {
+    local label="$1" src="$2" dst="$3"
+    if [ ! -d "$src" ]; then
+        fail "$label source not found ($src) — 기존 백업은 보존, rsync 건너뜀"
+        return
+    fi
+    mkdir -p "$dst"
+    if rsync "${RSYNC_OPTS[@]}" "$src/" "$dst/"; then
+        log "OK: $label synced ($(find "$src" -type f | wc -l) files)"
+    else
+        fail "$label rsync 실패 (디스크 full·권한·I/O 확인)"
+    fi
+}
 
-# 2. 봇 memory/ rsync (매시간) — WAL·알람·리서치.
-#    대상은 memory/ 뿐이다: 코드는 브랜치→PR 리뷰 게이트를 지나야 하므로 자동 백업 대상이 아니다.
-if [ -d "$BOT_MEMORY_SRC" ]; then
-    rsync "${RSYNC_OPTS[@]}" "$BOT_MEMORY_SRC/" "$NAS_DIR/bot-memory/"
-    log "OK: bot memory synced ($(find "$BOT_MEMORY_SRC" -type f | wc -l) files)"
+# ── 축 1: NAS 미러 ──────────────────────────────────────────────
+# NAS 접근 불가면 rc=1로 알리되 **여기서 종료하지 않는다** — git 축은 NAS와 무관하다.
+# (D:\ = yaksu-storage, WSL에서 /mnt/d/)
+NAS_OK=1
+if [ ! -d "$NAS_ROOT" ]; then
+    NAS_OK=0
+    fail "NAS not accessible ($NAS_ROOT not found) — NAS 축 전체 skip, git 축은 계속"
 else
-    log "WARN: bot memory source not found ($BOT_MEMORY_SRC)"
+    # 대상은 memory/ 뿐이다: 코드는 브랜치→PR 리뷰 게이트를 지나야 하므로 자동 백업 대상이 아니다.
+    sync_dir "auto-memory" "$MEMORY_SRC" "$NAS_DIR/memory"
+    sync_dir "bot memory" "$BOT_MEMORY_SRC" "$NAS_DIR/bot-memory"
 fi
 
-# 3. auto-memory git push (매일 03시) — NAS 미러 외 두 번째 사본.
-#    NAS는 삭제까지 미러링(--delete)하므로 실수 삭제는 복구가 안 된다. git이 그 축을 덮는다.
-#    실패해도 rc를 올리지 않는다(백업 결과를 덮어쓰면 안 됨) — 대신 **조용히 넘기지도** 않는다.
+# ── 축 2: auto-memory git 원격 (매일 03시) ───────────────────────
+# NAS 미러 외 두 번째 사본. NAS는 삭제까지 미러링(--delete)하므로 실수 삭제는 복구가 안 된다.
+# git이 그 축을 덮는다 — 그래서 **NAS 상태를 조건에 넣지 않는다**(넣으면 두 축이 같이 죽는다).
+# push 실패는 rc를 올리지 않는다(NAS 백업 성공 결과를 덮어쓰면 안 됨) — 대신 조용히 넘기지도 않는다.
 if [ "$HOUR" = "03" ] && [ -d "$MEMORY_SRC/.git" ]; then
     PENDING="$(git -C "$MEMORY_SRC" status --porcelain | wc -l)"
     if [ "$PENDING" -eq 0 ]; then
@@ -74,21 +94,35 @@ if [ "$HOUR" = "03" ] && [ -d "$MEMORY_SRC/.git" ]; then
     fi
 fi
 
-# 4. yaksu-history DB (매일 새벽 3시에만 스냅샷)
-if [ "$HOUR" = "03" ] && [ -f "$HISTORY_DB" ]; then
-    SNAP="$NAS_DIR/yaksu-history/messages-$(date +%Y%m%d).db"
-    sqlite3 "$HISTORY_DB" ".backup '$SNAP'"
-    # 14일 이상 된 스냅샷 삭제
-    find "$NAS_DIR/yaksu-history/" -name "messages-*.db" -mtime +14 -delete
-    log "OK: yaksu-history snapshot created"
+# ── 축 1 계속: NAS에 쓰는 03시 스냅샷들 ─────────────────────────
+# NAS_OK 게이트가 필요하다 — 이들은 NAS_DIR에 쓰므로 마운트 없이 실행하면
+# WSL 로컬 디스크에 유령 디렉토리를 만들고 "OK"를 남긴다(백업된 줄 알게 되는 최악).
+if [ "$NAS_OK" = "1" ] && [ "$HOUR" = "03" ]; then
+    if [ -f "$HISTORY_DB" ]; then
+        mkdir -p "$NAS_DIR/yaksu-history"
+        SNAP="$NAS_DIR/yaksu-history/messages-$(date +%Y%m%d).db"
+        if sqlite3 "$HISTORY_DB" ".backup '$SNAP'"; then
+            find "$NAS_DIR/yaksu-history/" -name "messages-*.db" -mtime +14 -delete
+            log "OK: yaksu-history snapshot created"
+        else
+            fail "yaksu-history 스냅샷 실패 ($HISTORY_DB)"
+        fi
+    fi
+
+    AGE_BIN="$HOME/.local/bin/age"
+    AGE_PUBKEY="age1zx3fzyhgk3ysv9nxnhvrw3wezzpkj9ktchdclzdz9k7td5zkjdnqgd3pkl"
+    if [ -f "$ENV_FILE" ] && [ -x "$AGE_BIN" ]; then
+        if "$AGE_BIN" -r "$AGE_PUBKEY" -o "$NAS_DIR/env.age" "$ENV_FILE"; then
+            log "OK: .env encrypted backup created"
+        else
+            fail ".env 암호화 백업 실패"
+        fi
+    fi
 fi
 
-# 5. .env 암호화 백업 (매일 새벽 3시에만)
-AGE_BIN="$HOME/.local/bin/age"
-AGE_PUBKEY="age1zx3fzyhgk3ysv9nxnhvrw3wezzpkj9ktchdclzdz9k7td5zkjdnqgd3pkl"
-if [ "$HOUR" = "03" ] && [ -f "$ENV_FILE" ] && [ -x "$AGE_BIN" ]; then
-    "$AGE_BIN" -r "$AGE_PUBKEY" -o "$NAS_DIR/env.age" "$ENV_FILE"
-    log "OK: .env encrypted backup created"
+if [ "$RC" -eq 0 ]; then
+    log "OK: backup complete"
+else
+    log "ERROR: backup completed with failures (rc=$RC) — 위 ERROR 줄 확인"
 fi
-
-log "OK: backup complete"
+exit "$RC"
