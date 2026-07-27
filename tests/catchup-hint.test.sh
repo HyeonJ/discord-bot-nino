@@ -95,6 +95,21 @@ run "10일 전 → 48시간(2880m)으로 클램프"      'yaksu-history --after 
 run "클램프하면 그 사실을 지시문에 남긴다"     '(잘랐|클램프|48시간)'
 
 echo ""
+echo "🔴 상한은 시간만으로 안 걸린다 — 건수에도 걸어야 한다 (룬드 지적 M:ssvm):"
+# 내 DB 실측: 2시간 창 161건 ≈49k 토큰 / 48시간 창 627건 ≈167k → MAX_WINDOW 안이어도 세션이 날아간다.
+# 픽스처: 니노 발화 300분 전 + 그 사이 남의 메시지 40건(상한 10건으로 낮춰서 시험)
+seed_args=(300 니노)
+for i in $(seq 1 40); do seed_args+=( $(( i * 5 )) Tim ); done
+seed_db "${seed_args[@]}"
+CATCHUP_MAX_ROWS=10 run "건수가 넘치면 창을 좁힌다"        'yaksu-history --after ([1-9][0-9]?)m'
+CATCHUP_MAX_ROWS=10 run "좁혔다는 사실과 원래 창을 남긴다"  '원래 창은 30[0-9]분\(4[0-9]건\)'
+CATCHUP_MAX_ROWS=10 run "🔴 앞 구간 회수 경로를 같이 준다"  '\-\-after 30[0-9]m \-\-channel'
+CATCHUP_MAX_ROWS=10 run_not "300분 창을 그대로 주지 않는다" 'after 30[0-9]m 돌려서'
+# 상한 안 걸리면 좁히지 않는다(문구도 없다)
+CATCHUP_MAX_ROWS=1000 run "상한 미달이면 원래 창 그대로"    'yaksu-history --after 30[0-9]m'
+CATCHUP_MAX_ROWS=1000 run_not "상한 미달이면 좁힘 문구 없음" '원래 창은'
+
+echo ""
 echo "🔴 앵커를 못 구할 때 — 기본 창 + 모른다는 사실 명시:"
 rm -f "$DB"
 run "DB 파일 없음 → 기본 창으로"              'yaksu-history --after [0-9]+m'
