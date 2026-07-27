@@ -203,13 +203,24 @@ teardown
 #   테스트는 **CLI 유무와 무관하게** 통과해야 한다(그게 전환의 목적).
 
 # 실제 DB 픽스처 — 행 수를 세서 "빈 파일이 아니라 진짜 사본"인지 볼 수 있게 만든다
+# ⚠️ 픽스처는 **WAL 모드**로 만든다 — 프로덕션 messages.db 가 WAL 이고,
+#    `backup()` 이 journal_mode 까지 물려주기 때문에 이게 사본의 자기완결성을 가른다.
+#    기본(delete) 모드로 픽스처를 만들면 sidecar 문제가 재현되지 않아 테스트가 무의미해진다.
 make_db() {
   python3 - "$1" <<'PY'
 import sqlite3, sys
 c = sqlite3.connect(sys.argv[1])
+c.execute("PRAGMA journal_mode=WAL")
 c.execute("CREATE TABLE messages (id INTEGER PRIMARY KEY, body TEXT)")
 c.executemany("INSERT INTO messages (body) VALUES (?)", [(f"msg{i}",) for i in range(37)])
 c.commit(); c.close()
+PY
+}
+journal_mode() {
+  python3 - "$1" <<'PY' 2>/dev/null || echo "?"
+import sqlite3, sys
+c = sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True)
+print(c.execute("PRAGMA journal_mode").fetchone()[0]); c.close()
 PY
 }
 count_rows() {
@@ -291,7 +302,37 @@ else
 fi
 teardown
 
-# ⑰ retention: 14일 넘은 스냅샷만 삭제, 최근 것은 보존
+# ⑰ 🔴 스냅샷은 **자기완결 단일 파일**이어야 한다 (sidecar 잔재 금지)
+#    `backup()` 은 원본의 journal_mode 를 물려준다. 프로덕션 원본이 WAL 이라 사본도 WAL 이 되고,
+#    그러면 읽기만 해도 -wal/-shm 이 생기며 `mv` 는 본체 하나만 옮긴다
+#    → **옛 DB의 sidecar 가 새 본체 옆에 남아** sqlite 가 짝이 안 맞는 wal 을 적용할 수 있다.
+#    "교체를 원자적으로"의 단위가 파일 하나가 아니었던 자리(룬드 .partial 지적의 한 겹 아래).
+setup
+make_db "$ROOT/msgs.db"
+[[ "$(journal_mode "$ROOT/msgs.db")" == "wal" ]] \
+  || bad "선행 조건 실패 — 픽스처가 WAL 이 아니어서 sidecar 문제가 재현되지 않는다(공허한 통과 방지)"
+# 옛 WAL 시절 sidecar 를 심어둔다 — 정리되는지 봐야 한다
+mkdir -p "$ROOT/nas/yaksu-history"
+touch "$ROOT/nas/yaksu-history/messages-$(date +%Y%m%d).db-wal" \
+      "$ROOT/nas/yaksu-history/messages-$(date +%Y%m%d).db-shm"
+run_backup BACKUP_FORCE_HOUR=03 BACKUP_HISTORY_DB="$ROOT/msgs.db" >/dev/null
+SNAP="$(find "$ROOT/nas/yaksu-history" -name 'messages-*.db' | head -1)"
+SIDE="$(find "$ROOT/nas/yaksu-history" \( -name '*-wal' -o -name '*-shm' -o -name '*.partial*' \) | wc -l)"
+if [[ -z "$SNAP" ]]; then
+  bad "스냅샷이 없어 판정 불가"
+elif [[ "$(journal_mode "$SNAP")" == "wal" ]]; then
+  bad "사본이 WAL 모드 — 자기완결 파일이 아니다(원본 모드를 물려받았다)"
+elif [[ "$SIDE" -ne 0 ]]; then
+  bad "sidecar/partial 잔재 $SIDE 건" "$(ls -la "$ROOT/nas/yaksu-history/")"
+elif [[ "$(count_rows "$SNAP")" != "37" ]]; then
+  # journal_mode 를 바꾸면서 데이터가 날아가지 않았는지 — 체크포인트가 본체에 반영됐어야 한다
+  bad "모드 전환 과정에서 데이터가 유실됐다 (행 수 $(count_rows "$SNAP"))"
+else
+  ok "사본이 자기완결(journal_mode=$(journal_mode "$SNAP")) + sidecar 잔재 0 + 37행 보존"
+fi
+teardown
+
+# ⑱ retention: 14일 넘은 스냅샷만 삭제, 최근 것은 보존
 setup
 make_db "$ROOT/msgs.db"
 mkdir -p "$ROOT/nas/yaksu-history"
