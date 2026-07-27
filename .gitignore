@@ -1,5 +1,10 @@
 .env
-.envn
+# 시크릿 파일은 **파생형까지** 막아야 한다. `.env` 만 있던 동안 손으로 만든 백업
+# (.env.bak-*, .env.bak.2026*, .env.preflip-bak) 7개가 NOT-IGNORED 였고
+# `git add -A` 한 번이면 디스코드 토큰이 커밋되는 상태였다 (2026-07-27 실측/차단).
+# 검증은 눈으로 읽지 말고: `git check-ignore -q <파일> && echo IGNORED || echo NOT-IGNORED`
+.env.*
+!.env.example
 *.log
 __pycache__/
 *.pyc
