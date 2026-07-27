@@ -26,6 +26,10 @@ BOT_MEMORY_SRC="${BACKUP_BOT_MEMORY_SRC:-$HOME/discord-bot-nino/memory}"
 HISTORY_DB="${BACKUP_HISTORY_DB:-$HOME/.local/share/yaksu-history/messages.db}"
 ENV_FILE="${BACKUP_ENV_FILE:-$HOME/discord-bot-nino/.env}"
 LOG_FILE="${BACKUP_LOG_FILE:-$HOME/discord-bot-nino/logs/backup.log}"
+CDM_SRC="${BACKUP_CDM_SRC:-$HOME/discord-bot-nino/of/cdm}"
+AGE_BIN="${BACKUP_AGE_BIN:-$HOME/.local/bin/age}"
+AGE_PUBKEY="${BACKUP_AGE_PUBKEY:-age1zx3fzyhgk3ysv9nxnhvrw3wezzpkj9ktchdclzdz9k7td5zkjdnqgd3pkl}"
+CRONTAB_CMD="${BACKUP_CRONTAB_CMD:-crontab -l}"
 HOUR="${BACKUP_FORCE_HOUR:-$(date +%H)}"
 
 mkdir -p "$(dirname "$LOG_FILE")"
@@ -167,14 +171,58 @@ if [ "$NAS_OK" = "1" ] && [ "$HOUR" = "03" ]; then
         fi
     fi
 
-    AGE_BIN="$HOME/.local/bin/age"
-    AGE_PUBKEY="age1zx3fzyhgk3ysv9nxnhvrw3wezzpkj9ktchdclzdz9k7td5zkjdnqgd3pkl"
-    if [ -f "$ENV_FILE" ] && [ -x "$AGE_BIN" ]; then
-        if "$AGE_BIN" -r "$AGE_PUBKEY" -o "$NAS_DIR/env.age" "$ENV_FILE"; then
-            log "OK: .env encrypted backup created"
+    # ⚠️ `[ -x "$AGE_BIN" ]` 를 조건에 함께 두면 **age 가 사라진 날 백업이 조용히 skip 된다**
+    #    (sqlite3 4개월 사고와 같은 클래스 — 의존 부재는 항상 조용하다). 그래서 도구 부재는
+    #    스킵 사유가 아니라 **실패**로 올린다. 백업할 대상이 있는데 도구가 없는 건 사고다.
+    if [ -f "$ENV_FILE" ] || [ -d "$CDM_SRC" ]; then
+        if [ ! -x "$AGE_BIN" ]; then
+            fail "age 바이너리 없음 ($AGE_BIN) — .env·cdm 암호화 백업 전부 미실행"
         else
-            fail ".env 암호화 백업 실패"
+            if [ -f "$ENV_FILE" ]; then
+                if "$AGE_BIN" -r "$AGE_PUBKEY" -o "$NAS_DIR/env.age" "$ENV_FILE"; then
+                    log "OK: .env encrypted backup created"
+                else
+                    fail ".env 암호화 백업 실패"
+                fi
+            fi
+
+            # DRM 디바이스 키. **재발급이 불가능해 복구 비용이 가장 크다** — 특정 Android SDK
+            # 빌드에서 추출한 디바이스 바인딩 키라 잃으면 추출 과정을 처음부터 밟아야 한다.
+            # 16K 짜리가 15M 짜리보다 비싸다(우선순위는 크기가 아니라 복구 비용으로 매긴다).
+            #
+            # 보안상 git 제외 대상(.gitignore "절대 커밋 금지")이라 **제외가 곧 무보호**였다.
+            # 같은 .gitignore 안에 성질이 정반대인 두 종류가 섞여 있었다:
+            #   코드   = "다른 데(git)에 있다"      → 제외해도 보호됨
+            #   cdm    = "여기 있으면 안 된다"      → 제외하면 어디에도 없음  ← 이 축은 소실 대비 필수
+            # 평문으로 NAS 에 둘 수 없으니 .env 와 같은 age 경로에 태운다(새 배선 아님).
+            if [ -d "$CDM_SRC" ]; then
+                if tar -cf - -C "$(dirname "$CDM_SRC")" "$(basename "$CDM_SRC")" \
+                     | "$AGE_BIN" -r "$AGE_PUBKEY" -o "$NAS_DIR/cdm.age"; then
+                    log "OK: cdm encrypted backup created ($(wc -c < "$NAS_DIR/cdm.age" | tr -d ' ') bytes)"
+                else
+                    fail "cdm 암호화 백업 실패 ($CDM_SRC)"
+                fi
+            else
+                # cdm 부재는 ERROR 가 아니다 — memory/ 부재와 성질이 다르다.
+                # memory/ 는 항상 있어야 하지만 cdm 은 **DRM 도구 미설치면 정상적으로 없다**.
+                # 다만 조용히 넘기지는 않는다(없다는 사실 자체는 로그에 남긴다).
+                log "INFO: cdm 소스 없음 ($CDM_SRC) — DRM 도구 미설치로 간주, 백업 대상 아님"
+            fi
         fi
+    fi
+
+    # 잡 정의 백업. 잃으면 봇 자동시작·백업·알람·헬스체크 스케줄이 **전부 조용히** 사라진다.
+    # 자기참조 주의: stale 감지 규약이 감시 목록을 crontab 에서 유도하므로, crontab 유실은
+    # ①감지기가 감시 대상을 잃고 ②잡이 안 도니 마커도 없고 ③목록이 비었으니 missing=stale 도
+    # 안 걸려서 **양방향 감지가 동시에 무력해진다**. 백업은 되돌려주고, 감지는 "목록 0개 = 감시
+    # 실패" 검사가 알려준다 — 둘은 별개 축이라 둘 다 필요하다(룬드와 규약 10번으로 합의).
+    # 민감정보가 없어 평문 텍스트로 둔다.
+    CRON_OUT="$($CRONTAB_CMD 2>/dev/null)"
+    if [ -n "$CRON_OUT" ]; then
+        printf '%s\n' "$CRON_OUT" > "$NAS_DIR/crontab.txt"
+        log "OK: crontab backed up ($(printf '%s\n' "$CRON_OUT" | grep -cE '^[^#[:space:]]') 잡)"
+    else
+        fail "crontab 이 비었거나 읽지 못했다 ($CRONTAB_CMD) — 잡 정의 백업 미실행"
     fi
 fi
 

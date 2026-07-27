@@ -349,6 +349,92 @@ else
 fi
 teardown
 
+# ── 커버리지 확장: cdm(재발급 불가) + crontab(잡 정의) ─────────
+# 왜: 백업이 "무엇을 덮는가"만 보고 있어서 **무엇이 빠졌는가**를 안 셌다. 실측 결과 2건 누락:
+#   of/cdm  16K  DRM 디바이스 키 — **재발급 불가**(추출 과정 재수행). 복구 비용이 가장 크다.
+#                .gitignore "절대 커밋 금지" 대상이라 **제외가 곧 무보호**였다.
+#   crontab  8잡  봇 자동시작·백업·알람 스케줄. git 0건 / NAS 0건.
+# 판별 질문: 제외 근거가 "다른 데 있다"인가 "여기 있으면 안 된다"인가. 후자는 소실 대비 필수.
+AGE_REAL="$HOME/.local/bin/age"
+
+# ⑲ cdm 이 **암호화되어** 백업된다 (평문 노출 금지)
+if [[ ! -x "$AGE_REAL" ]]; then
+  bad "age 바이너리가 없어 cdm 검사 불가 — 건너뛰지 않고 실패로 표시(조용한 skip 금지)"
+else
+  setup
+  mkdir -p "$ROOT/cdm"
+  echo "SECRET-DEVICE-KEY-MATERIAL" > "$ROOT/cdm/device_private_key"
+  run_backup BACKUP_FORCE_HOUR=03 BACKUP_CDM_SRC="$ROOT/cdm" \
+             BACKUP_AGE_BIN="$AGE_REAL" >/dev/null; RC=$?
+  if [[ ! -f "$ROOT/nas/cdm.age" ]]; then
+    bad "cdm.age 가 생성되지 않았다" "$(logtext)"
+  elif grep -qa "SECRET-DEVICE-KEY-MATERIAL" "$ROOT/nas/cdm.age"; then
+    # 파일 존재만 보면 tar 만 하고 암호화가 빠져도 통과한다 → 평문이 없는지 직접 확인
+    bad "🔴 cdm.age 안에 평문 키가 그대로 들어 있다(암호화 안 됨)"
+  elif ! head -c 21 "$ROOT/nas/cdm.age" | grep -qa "age-encryption.org"; then
+    bad "cdm.age 가 age 포맷이 아니다" "$(head -c 40 "$ROOT/nas/cdm.age" | tr -d '\0')"
+  elif [[ $RC -ne 0 ]]; then
+    bad "cdm 백업은 됐는데 rc=$RC" "$(logtext)"
+  else
+    ok "cdm 암호화 백업 — age 포맷 + 평문 미노출"
+  fi
+  teardown
+fi
+
+# ⑳ crontab 이 백업된다
+#    ⚠️ 주입은 **실행 파일 경로**로 한다. `BACKUP_CRONTAB_CMD` 는 스크립트에서 비인용 확장
+#    (`$CRONTAB_CMD`)이라 단어 분리에 의존하므로 **따옴표를 포함한 명령을 담을 수 없다**
+#    (`printf '...'` 를 넣었더니 따옴표가 리터럴이 되어 깨졌다 — 실제로 한 번 밟음).
+#    `eval` 로 풀면 임의 명령 주입면이 생기므로 쓰지 않는다. 기본값 `crontab -l` 처럼
+#    **공백 구분 단순 인자**까지만 허용하는 계약이다.
+setup
+cat > "$ROOT/fake-crontab" <<'FAKE'
+#!/bin/bash
+printf '0 3 * * * a\n*/5 * * * * b\n'
+FAKE
+chmod +x "$ROOT/fake-crontab"
+run_backup BACKUP_FORCE_HOUR=03 BACKUP_CRONTAB_CMD="$ROOT/fake-crontab" >/dev/null
+if [[ ! -f "$ROOT/nas/crontab.txt" ]]; then
+  bad "crontab.txt 가 없다" "$(logtext)"
+elif [[ "$(grep -c . "$ROOT/nas/crontab.txt")" != "2" ]]; then
+  bad "crontab 내용이 온전하지 않다" "$(cat "$ROOT/nas/crontab.txt")"
+else
+  ok "crontab 백업 (2잡 온전)"
+fi
+
+# ㉑ crontab 이 비면 **조용히 넘기지 않는다** — 목록 유실은 stale 감지도 무력화한다
+run_backup BACKUP_FORCE_HOUR=03 BACKUP_CRONTAB_CMD="true" >/dev/null; RC=$?
+if [[ $RC -eq 0 ]]; then
+  bad "crontab 이 비었는데 rc=0 (목록 유실이 조용히 통과)" "$(logtext)"
+elif ! logtext | grep -qE "ERROR.*crontab"; then
+  bad "crontab 유실이 로그에 안 남았다" "$(logtext)"
+else
+  ok "crontab 비었음 → rc=$RC + ERROR (감시 목록 유실 감지)"
+fi
+teardown
+
+# ㉒ 🔴 age 부재는 **조용한 skip 이 아니라 실패**다
+#    기존 코드가 `[ -f "$ENV_FILE" ] && [ -x "$AGE_BIN" ]` 였다 — age 가 사라진 날
+#    .env 암호화 백업이 **아무 신호 없이** 안 돌았다. sqlite3 4개월 사고와 같은 클래스
+#    (의존 부재는 항상 조용하다). 백업할 대상이 있는데 도구가 없는 건 사고다.
+setup
+echo "TOKEN=xxx" > "$ROOT/fake.env"
+run_backup BACKUP_FORCE_HOUR=03 BACKUP_ENV_FILE="$ROOT/fake.env" \
+           BACKUP_AGE_BIN="$ROOT/no-such-age" >/dev/null; RC=$?
+if [[ $RC -eq 0 ]]; then
+  bad "age 없는데 rc=0 (.env 백업이 조용히 skip 됐다)" "$(logtext)"
+elif ! logtext | grep -qE "ERROR.*age"; then
+  bad "age 부재가 로그에 안 남았다" "$(logtext)"
+else
+  ok "age 부재 → rc=$RC + ERROR (조용한 skip 아님)"
+fi
+
+# ㉓ age 부재가 **다른 축(NAS rsync)까지 죽이지 않는다**
+[[ -f "$ROOT/nas/bot-memory/current-tasks.md" ]] \
+  && ok "age 부재에도 memory rsync 는 수행됨(축 독립 유지)" \
+  || bad "age 부재가 앞 단계까지 무효화했다" "$(logtext)"
+teardown
+
 echo
 echo "=== 결과: $pass pass / $fail fail ==="
 [[ $fail -eq 0 ]] || exit 1
