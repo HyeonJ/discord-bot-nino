@@ -22,10 +22,15 @@ description: 룬드(Tim의 봇, 구 Klaude)가 죽었을 때 깨우기 - SSH 재
 ssh -o ConnectTimeout=10 -o BatchMode=yes klaude@192.168.68.67 \
 'export PATH="/Users/klaude/.local/bin:/Users/klaude/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; \
 tmux new-session -d -s rund -c ~/Assistant \
-"cd ~/Assistant && export PATH=/Users/klaude/.local/bin:/opt/homebrew/bin:\$PATH; source .env 2>/dev/null; source ~/.secrets 2>/dev/null; claude --dangerously-skip-permissions --effort max --continue || claude --dangerously-skip-permissions --effort max"; \
+"cd ~/Assistant && export PATH=/Users/klaude/.local/bin:/opt/homebrew/bin:\$PATH; source .env 2>/dev/null; source ~/.secrets 2>/dev/null; claude --dangerously-skip-permissions --effort max --model opus --continue || claude --dangerously-skip-permissions --effort max --model opus"; \
 sleep 8; tmux capture-pane -t rund:0.0 -p | tail -20'
 # capture-pane 결과에 "Not logged in"/"Run /login" 보이면 → Tim/Darren에게 /login 요청
 ```
+> ⚠️ **`--model opus` 를 빼지 말 것.** 이 수동 명령은 `start-rund.sh` 를 **우회**하므로,
+> 룬드 쪽 스크립트에 모델 인자를 넣어도(b361cb3) 이 경로엔 닿지 않는다. 빠지면 기본 모델로
+> 뜨고, `--continue` 는 모델 인자를 승계하지 않아 **이전 모델에 고정된 채로 계속 돈다**
+> (니노가 밟은 클래스 — [[ref_model_switch_restart]]). 버전 대신 `opus` **별칭**을 쓰는 이유는
+> 상위 모델이 나와도 자동 추종하기 위함(니노 381d8eb 과 동일 판단).
 
 ## 실행 순서
 
