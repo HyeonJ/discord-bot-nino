@@ -194,6 +194,120 @@ else
 fi
 teardown
 
+# ── yaksu-history 스냅샷 ────────────────────────────────────────
+# 왜: `sqlite3` CLI 가 이 컴에 **미설치**라 4개월간 매일 03시 그 지점에서 죽고 있었다.
+#   set -e 였던 동안엔 완료·실패 로그가 **둘 다** 안 남아 아무 신호가 없었다.
+#   증거: 스냅샷 0개(폴더는 3/23 생성) / env.age 가 2026-07-27 에 처음 생성 /
+#   03시 로그가 전부 `OK: memory synced` 한 줄에서 끝남.
+#   → python3 내장 sqlite3(Connection.backup, 온라인 백업 API)로 전환해 외부 CLI 의존을 없앤다.
+#   테스트는 **CLI 유무와 무관하게** 통과해야 한다(그게 전환의 목적).
+
+# 실제 DB 픽스처 — 행 수를 세서 "빈 파일이 아니라 진짜 사본"인지 볼 수 있게 만든다
+make_db() {
+  python3 - "$1" <<'PY'
+import sqlite3, sys
+c = sqlite3.connect(sys.argv[1])
+c.execute("CREATE TABLE messages (id INTEGER PRIMARY KEY, body TEXT)")
+c.executemany("INSERT INTO messages (body) VALUES (?)", [(f"msg{i}",) for i in range(37)])
+c.commit(); c.close()
+PY
+}
+count_rows() {
+  python3 - "$1" <<'PY' 2>/dev/null || echo -1
+import sqlite3, sys
+c = sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True)
+print(c.execute("SELECT count(*) FROM messages").fetchone()[0])
+PY
+}
+
+# ⑫ 03시에 스냅샷이 생기고 **내용이 실제로 복사**된다 (sqlite3 CLI 없이)
+setup
+make_db "$ROOT/msgs.db"
+run_backup BACKUP_FORCE_HOUR=03 BACKUP_HISTORY_DB="$ROOT/msgs.db" >/dev/null; RC=$?
+SNAP="$(find "$ROOT/nas/yaksu-history" -name 'messages-*.db' 2>/dev/null | head -1)"
+if [[ -z "$SNAP" ]]; then
+  bad "03시인데 스냅샷이 생성되지 않았다" "$(logtext)"
+elif [[ "$(count_rows "$SNAP")" != "37" ]]; then
+  # 파일 존재만 보면 0바이트 껍데기도 통과한다 — 행 수까지 봐야 "사본"이 증명된다
+  bad "스냅샷이 유효한 사본이 아니다 (행 수 $(count_rows "$SNAP") ≠ 37)" "$(ls -la "$SNAP")"
+elif [[ $RC -ne 0 ]]; then
+  bad "스냅샷은 만들었는데 rc=$RC" "$(logtext)"
+else
+  ok "03시 스냅샷 생성 + 행 수 37 일치 (외부 sqlite3 CLI 불필요)"
+fi
+
+# ⑬ 비-03시엔 스냅샷을 만들지 않는다 (매시간 6.8MB 복사 방지)
+rm -f "$ROOT/nas/yaksu-history"/messages-*.db
+run_backup BACKUP_FORCE_HOUR=09 BACKUP_HISTORY_DB="$ROOT/msgs.db" >/dev/null
+[[ -z "$(find "$ROOT/nas/yaksu-history" -name 'messages-*.db' 2>/dev/null)" ]] \
+  && ok "비-03시엔 스냅샷 미생성" \
+  || bad "03시가 아닌데 스냅샷이 생겼다"
+teardown
+
+# ⑭ 스냅샷 실패는 **조용히 넘어가지 않는다** (rc=1 + ERROR 로그)
+#    이번 사고의 본체가 "실패했는데 아무 신호가 없었다"는 것이라 이 케이스가 회귀 가드다.
+setup
+echo "이건 sqlite DB가 아니다" > "$ROOT/broken.db"
+run_backup BACKUP_FORCE_HOUR=03 BACKUP_HISTORY_DB="$ROOT/broken.db" >/dev/null; RC=$?
+if [[ $RC -eq 0 ]]; then
+  bad "DB가 깨졌는데 rc=0 (조용한 실패 — 4개월 사고의 형태)" "$(logtext)"
+elif ! logtext | grep -qE "ERROR.*(history|스냅샷)"; then
+  bad "스냅샷 실패가 로그에 안 남았다" "$(logtext)"
+else
+  ok "스냅샷 실패 → rc=$RC + ERROR 로그"
+fi
+
+# ⑮ 실패해도 **다른 축은 계속** — 스냅샷 실패가 NAS rsync 결과를 덮지 않는다
+[[ -f "$ROOT/nas/bot-memory/current-tasks.md" ]] \
+  && ok "스냅샷 실패에도 memory rsync 는 수행됨(축 독립 유지)" \
+  || bad "스냅샷 실패가 앞 단계까지 무효화했다" "$(logtext)"
+teardown
+
+# ⑯ 🔴 같은 날 2회차 실패가 **1회차 정상 사본을 파괴하지 않는다** (룬드 리뷰)
+#    파일명이 날짜 기반이라 같은 날 두 번 돌면 경로가 같다. 실패 정리로 최종 경로를 지우면
+#    1회차 성공분이 날아간다 — 실패가 상태를 악화시키는 방향(retention 을 성공 분기에
+#    둔 것과 같은 논리인데 여기서만 반대로 갔던 자리).
+#    ⚠️ 발견 당시 프로덕션에 8163행 사본이 이미 있었으므로 **실재하는 위험**이었다.
+setup
+make_db "$ROOT/msgs.db"
+run_backup BACKUP_FORCE_HOUR=03 BACKUP_HISTORY_DB="$ROOT/msgs.db" >/dev/null
+SNAP1="$(find "$ROOT/nas/yaksu-history" -name 'messages-*.db' | head -1)"
+if [[ -z "$SNAP1" || "$(count_rows "$SNAP1")" != "37" ]]; then
+  bad "선행 조건 실패 — 1회차 사본이 없어 파괴 검사가 무의미(공허한 통과 방지)"
+else
+  echo "이건 sqlite DB가 아니다" > "$ROOT/broken.db"
+  run_backup BACKUP_FORCE_HOUR=03 BACKUP_HISTORY_DB="$ROOT/broken.db" >/dev/null; RC=$?
+  if [[ ! -f "$SNAP1" ]]; then
+    bad "2회차 실패가 1회차 정상 사본을 삭제했다" "$(ls -la "$ROOT/nas/yaksu-history/")"
+  elif [[ "$(count_rows "$SNAP1")" != "37" ]]; then
+    bad "1회차 사본이 덮여 손상됐다 (행 수 $(count_rows "$SNAP1"))" "$(logtext)"
+  elif [[ -n "$(find "$ROOT/nas/yaksu-history" -name '*.partial' 2>/dev/null)" ]]; then
+    bad ".partial 껍데기가 남았다" "$(ls -la "$ROOT/nas/yaksu-history/")"
+  elif [[ $RC -eq 0 ]]; then
+    bad "2회차가 실패했는데 rc=0"
+  else
+    ok "같은 날 2회차 실패 → 1회차 사본 무사(37행) + .partial 잔재 없음 + rc=$RC"
+  fi
+fi
+teardown
+
+# ⑰ retention: 14일 넘은 스냅샷만 삭제, 최근 것은 보존
+setup
+make_db "$ROOT/msgs.db"
+mkdir -p "$ROOT/nas/yaksu-history"
+# ⚠️ `touch -d` 는 GNU 전용 — 코어(macOS)로 옮기면 `touch -t` 로 바꿔야 한다(룬드 지적)
+touch -d '30 days ago' "$ROOT/nas/yaksu-history/messages-20260101.db"
+touch -d '3 days ago'  "$ROOT/nas/yaksu-history/messages-20260724.db"
+run_backup BACKUP_FORCE_HOUR=03 BACKUP_HISTORY_DB="$ROOT/msgs.db" >/dev/null
+OLD_GONE=$([[ -f "$ROOT/nas/yaksu-history/messages-20260101.db" ]] && echo NO || echo YES)
+NEW_KEPT=$([[ -f "$ROOT/nas/yaksu-history/messages-20260724.db" ]] && echo YES || echo NO)
+if [[ "$OLD_GONE" == "YES" && "$NEW_KEPT" == "YES" ]]; then
+  ok "retention — 30일 전 삭제 / 3일 전 보존"
+else
+  bad "retention 오동작 (구파일삭제=$OLD_GONE 신파일보존=$NEW_KEPT)" "$(ls -la "$ROOT/nas/yaksu-history/")"
+fi
+teardown
+
 echo
 echo "=== 결과: $pass pass / $fail fail ==="
 [[ $fail -eq 0 ]] || exit 1

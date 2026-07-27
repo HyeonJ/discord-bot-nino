@@ -36,6 +36,46 @@ fail() { log "ERROR: $*"; RC=1; }
 
 RSYNC_OPTS=(-r --no-perms --no-owner --no-group --delete)
 
+# yaksu-history DB 스냅샷.
+#
+# ⚠️ **외부 `sqlite3` CLI 를 쓰지 않는다.** 이 컴에 미설치인데 `set -e` 와 겹쳐서
+#   4개월간(3/23~7/27) 매일 03시 이 지점에서 죽고, **완료 로그도 실패 로그도 안 남았다**.
+#   피해: 스냅샷 0개 + 뒤에 있던 .env 암호화 백업까지 동반 미실행(env.age 가 7/27 에 처음 생성).
+#   교훈은 "설치하면 된다"가 아니라 **시스템 패키지 의존 자체가 조용한 단일 실패점**이라는 것.
+#
+# python3 내장 sqlite3 의 `Connection.backup` 은 `.backup` 명령과 같은 **온라인 백업 API** 라
+# relay 가 DB에 쓰는 중에도 일관된 사본을 만든다. 원본은 `mode=ro` 로 열어 절대 변형하지 않는다.
+#
+# ⚠️ **`.partial` 에 쓰고 성공 시 `mv` 한다** (룬드 리뷰). 최종 경로에 직접 쓰면:
+#   파일명이 날짜 기반이라 같은 날 두 번 돌면 경로가 같다 → 1회차 성공 → 2회차 실패 →
+#   실패 정리(`rm -f`)가 **1회차 정상 사본을 파괴**한다. retention 을 성공 분기에 둔 이유
+#   ("실패가 상태를 악화시켜선 안 된다")와 같은 논리인데 여기서만 반대로 갔던 자리다.
+#   `.partial` 이면 실패해도 기존 사본 무사 + 껍데기도 안 남고 + 교체가 원자적이다.
+snapshot_db() {
+    local src="$1" dst="$2" tmp="$2.partial"
+    rm -f "$tmp"
+    if python3 - "$src" "$tmp" <<'PY'
+import sqlite3, sys
+src, dst = sys.argv[1], sys.argv[2]
+source = sqlite3.connect(f"file:{src}?mode=ro", uri=True)
+try:
+    target = sqlite3.connect(dst)
+    try:
+        with target:
+            source.backup(target)
+    finally:
+        target.close()
+finally:
+    source.close()
+PY
+    then
+        mv -f "$tmp" "$dst"
+        return 0
+    fi
+    rm -f "$tmp"
+    return 1
+}
+
 # 소스 → NAS 한 대상. 한 대상이 실패해도 rc만 올리고 **다음 대상을 계속** 처리한다.
 # 소스 부재는 조용한 WARN이 아니라 ERROR다 — "백업이 아무것도 못 덮고 있다"는 뜻이고,
 # 그게 이 스크립트가 없애려던 상태다(봇 memory/가 어디에도 백업되지 않던 6주).
@@ -101,11 +141,16 @@ if [ "$NAS_OK" = "1" ] && [ "$HOUR" = "03" ]; then
     if [ -f "$HISTORY_DB" ]; then
         mkdir -p "$NAS_DIR/yaksu-history"
         SNAP="$NAS_DIR/yaksu-history/messages-$(date +%Y%m%d).db"
-        if sqlite3 "$HISTORY_DB" ".backup '$SNAP'"; then
+        if snapshot_db "$HISTORY_DB" "$SNAP"; then
+            # retention 은 **성공 분기 안에** 둔다 — 스냅샷이 실패한 날 옛 스냅샷을 지우면
+            # 마지막 정상 사본까지 날아간다(백업 없는 상태로 수렴).
             find "$NAS_DIR/yaksu-history/" -name "messages-*.db" -mtime +14 -delete
-            log "OK: yaksu-history snapshot created"
+            # `wc -c <` 로 크기를 읽는다 — `stat -c%s` 는 GNU 전용이라 코어(macOS)로 옮길 때 깨진다
+            log "OK: yaksu-history snapshot created ($(wc -c < "$SNAP" | tr -d ' ') bytes)"
         else
-            fail "yaksu-history 스냅샷 실패 ($HISTORY_DB)"
+            # 정리는 snapshot_db 가 `.partial` 만 지운다 — 최종 경로를 건드리면
+            # 같은 날 1회차 성공분을 2회차 실패가 파괴한다(룬드 리뷰)
+            fail "yaksu-history 스냅샷 실패 ($HISTORY_DB) — python3/DB 상태 확인"
         fi
     fi
 
