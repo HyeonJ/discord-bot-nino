@@ -93,6 +93,41 @@ PY
     return 1
 }
 
+# age 암호화 산출물도 **`.partial` + `mv`** 로 쓴다 (룬드 리뷰 PR #26).
+# `age -o <최종경로>` 는 파일을 바로 열어 truncate 하므로, 실패하면 **어제의 정상 사본이
+# 파괴되고 부분 파일이 남는다**. snapshot_db 가 이미 이 패턴을 쓰고 있었는데(같은 파일
+# 100줄 위, 이유까지 주석에 있음) age 출력엔 안 붙어 있었다 — **같은 파일 안의 불일치**.
+encrypt_to() {
+    local dst="$1" src="$2" tmp="$1.partial"
+    rm -f "$tmp"
+    if "$AGE_BIN" -r "$AGE_PUBKEY" -o "$tmp" "$src"; then
+        mv -f "$tmp" "$dst"
+        return 0
+    fi
+    rm -f "$tmp"
+    return 1
+}
+
+# 디렉토리 → tar → age. **파이프로 잇지 않는다** (룬드 리뷰의 핵심 지적).
+#   `tar -cf - ... | age -o out` 에서 tar 가 중간에 죽으면 age 는 **그때까지 받은 부분
+#   입력을 정상적으로 암호화하고 exit 0** 으로 끝날 수 있다. pipefail 이 rc 는 1로
+#   만들어주지만 **파일은 남고, age 포맷으로 유효하고, 복호화도 된다** — 안이 잘려 있을 뿐.
+#   즉 "포맷이 맞나 / 평문이 없나" 검사를 **전부 통과하는 손상 파일**이 만들어진다.
+#   그리고 age 는 공개키로만 암호화하므로(개인키는 이 머신에 없음) **사후 내용 검증이 불가능**하다.
+# → tar 를 먼저 완결시켜 파일로 만들고 `tar -tf` 로 **완전성을 확인한 뒤** 암호화한다.
+#   임시 tar 는 평문 키를 담으므로 NAS(가 아니라) **로컬 + umask 077** 로 만들고 반드시 지운다
+#   (원본이 이미 로컬 평문이라 노출 범위는 늘지 않는다).
+archive_encrypt_to() {
+    local dst="$1" src="$2" tar_tmp rc=1
+    tar_tmp="$(umask 077; mktemp "${TMPDIR:-/tmp}/nino-arc.XXXXXX")" || return 1
+    if tar -cf "$tar_tmp" -C "$(dirname "$src")" "$(basename "$src")" \
+       && tar -tf "$tar_tmp" >/dev/null 2>&1; then
+        encrypt_to "$dst" "$tar_tmp" && rc=0
+    fi
+    rm -f "$tar_tmp"
+    return "$rc"
+}
+
 # 소스 → NAS 한 대상. 한 대상이 실패해도 rc만 올리고 **다음 대상을 계속** 처리한다.
 # 소스 부재는 조용한 WARN이 아니라 ERROR다 — "백업이 아무것도 못 덮고 있다"는 뜻이고,
 # 그게 이 스크립트가 없애려던 상태다(봇 memory/가 어디에도 백업되지 않던 6주).
@@ -179,10 +214,10 @@ if [ "$NAS_OK" = "1" ] && [ "$HOUR" = "03" ]; then
             fail "age 바이너리 없음 ($AGE_BIN) — .env·cdm 암호화 백업 전부 미실행"
         else
             if [ -f "$ENV_FILE" ]; then
-                if "$AGE_BIN" -r "$AGE_PUBKEY" -o "$NAS_DIR/env.age" "$ENV_FILE"; then
-                    log "OK: .env encrypted backup created"
+                if encrypt_to "$NAS_DIR/env.age" "$ENV_FILE"; then
+                    log "OK: .env encrypted backup created ($(wc -c < "$NAS_DIR/env.age" | tr -d ' ') bytes)"
                 else
-                    fail ".env 암호화 백업 실패"
+                    fail ".env 암호화 백업 실패 — 기존 사본은 보존됨"
                 fi
             fi
 
@@ -196,8 +231,7 @@ if [ "$NAS_OK" = "1" ] && [ "$HOUR" = "03" ]; then
             #   cdm    = "여기 있으면 안 된다"      → 제외하면 어디에도 없음  ← 이 축은 소실 대비 필수
             # 평문으로 NAS 에 둘 수 없으니 .env 와 같은 age 경로에 태운다(새 배선 아님).
             if [ -d "$CDM_SRC" ]; then
-                if tar -cf - -C "$(dirname "$CDM_SRC")" "$(basename "$CDM_SRC")" \
-                     | "$AGE_BIN" -r "$AGE_PUBKEY" -o "$NAS_DIR/cdm.age"; then
+                if archive_encrypt_to "$NAS_DIR/cdm.age" "$CDM_SRC"; then
                     log "OK: cdm encrypted backup created ($(wc -c < "$NAS_DIR/cdm.age" | tr -d ' ') bytes)"
                 else
                     fail "cdm 암호화 백업 실패 ($CDM_SRC)"

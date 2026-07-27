@@ -435,6 +435,86 @@ fi
   || bad "age 부재가 앞 단계까지 무효화했다" "$(logtext)"
 teardown
 
+# ⚠️ 판정은 **크기가 아니라 해시**로 한다. `tar` 는 10240바이트 블록으로 패딩하므로
+#    작은 파일이 하나 빠져도 **크기가 동일하다**(실측: 1파일 tar = 2파일 tar = 10240 bytes).
+#    처음에 크기로 비교했더니 수정 전 코드에서도 통과해 **공허한 테스트**였다.
+side_hash() { sha256sum "$1" 2>/dev/null | cut -d' ' -f1 || echo "none"; }
+
+# ㉔ age 자체 실패가 기존 사본을 파괴하지 않는다 (회귀 가드)
+#    ⚠️ 정직한 주석: 이 케이스는 **수정 전에도 통과한다**. 실측 결과 age 는 recipient 검증과
+#    입력 파일 열기를 **출력 파일 생성보다 먼저** 하므로, 그 두 실패로는 최종 경로가 안 열린다.
+#    즉 "`-o` 가 무조건 즉시 truncate 한다"는 전제는 age 에선 성립하지 않았다.
+#    실제 파괴 경로는 ㉕(파이프 중간 실패)뿐이다. 이 케이스는 **age 구현이 바뀌면 깨지도록**
+#    남기는 회귀 가드이고, 새 동작을 증명하는 테스트가 아니다.
+if [[ ! -x "$AGE_REAL" ]]; then
+  bad "age 없어 파괴 검사 불가 — 건너뛰지 않고 실패로 표시"
+else
+  setup
+  mkdir -p "$ROOT/cdm"; echo "SECRET-KEY" > "$ROOT/cdm/device_private_key"
+  echo "TOKEN=xxx" > "$ROOT/fake.env"
+  # 1회차 정상
+  run_backup BACKUP_FORCE_HOUR=03 BACKUP_CDM_SRC="$ROOT/cdm" \
+             BACKUP_ENV_FILE="$ROOT/fake.env" BACKUP_AGE_BIN="$AGE_REAL" >/dev/null
+  SZ_CDM=$(wc -c < "$ROOT/nas/cdm.age" 2>/dev/null || echo 0)
+  SZ_ENV=$(wc -c < "$ROOT/nas/env.age" 2>/dev/null || echo 0)
+  if [[ "$SZ_CDM" -eq 0 || "$SZ_ENV" -eq 0 ]]; then
+    bad "선행 조건 실패 — 1회차 사본이 없어 파괴 검사가 무의미(공허한 통과 방지)"
+  else
+    # 2회차: 잘못된 recipient 로 age 를 실패시킨다
+    run_backup BACKUP_FORCE_HOUR=03 BACKUP_CDM_SRC="$ROOT/cdm" \
+               BACKUP_ENV_FILE="$ROOT/fake.env" BACKUP_AGE_BIN="$AGE_REAL" \
+               BACKUP_AGE_PUBKEY="age1invalid-recipient-xxx" >/dev/null; RC=$?
+    NOW_CDM=$(wc -c < "$ROOT/nas/cdm.age" 2>/dev/null || echo 0)
+    NOW_ENV=$(wc -c < "$ROOT/nas/env.age" 2>/dev/null || echo 0)
+    LEFT=$(find "$ROOT/nas" -name '*.partial' 2>/dev/null | wc -l)
+    if [[ $RC -eq 0 ]]; then
+      bad "age 가 실패했는데 rc=0" "$(logtext)"
+    elif [[ "$NOW_CDM" != "$SZ_CDM" || "$NOW_ENV" != "$SZ_ENV" ]]; then
+      bad "age 실패가 기존 사본을 파괴했다 (cdm $SZ_CDM→$NOW_CDM, env $SZ_ENV→$NOW_ENV)" "$(logtext)"
+    elif [[ "$LEFT" -ne 0 ]]; then
+      bad ".partial 잔재 $LEFT 건" "$(ls -la "$ROOT/nas/")"
+    else
+      ok "age 실패 → 기존 cdm.age·env.age 무사 + .partial 잔재 0 + rc=$RC"
+    fi
+  fi
+  teardown
+fi
+
+# ㉕ 🔴 tar 가 실패하면 **암호화 단계로 넘어가지 않는다**
+#    파이프(`tar | age`)면 tar 가 중간에 죽어도 age 가 부분 입력을 정상 암호화하고 exit 0 →
+#    **포맷·평문 검사를 전부 통과하는 손상 파일**이 남는다. age 는 공개키 전용이라
+#    (개인키가 이 머신에 없어) **사후 내용 검증이 불가능**하므로 사전에 막아야 한다.
+if [[ ! -x "$AGE_REAL" ]]; then
+  bad "age 없어 tar 실패 검사 불가 — 건너뛰지 않고 실패로 표시"
+else
+  setup
+  mkdir -p "$ROOT/cdm"; echo "SECRET-KEY" > "$ROOT/cdm/ok_file"
+  run_backup BACKUP_FORCE_HOUR=03 BACKUP_CDM_SRC="$ROOT/cdm" BACKUP_AGE_BIN="$AGE_REAL" >/dev/null
+  BASE="$(side_hash "$ROOT/nas/cdm.age")"
+  # 읽을 수 없는 파일을 넣어 tar 를 실패시킨다 (root 가 아니어야 유효)
+  echo "unreadable" > "$ROOT/cdm/locked"; chmod 000 "$ROOT/cdm/locked"
+  if [[ "$BASE" == "none" ]]; then
+    bad "선행 조건 실패 — 1회차 사본이 없어 덮어쓰기 검사가 무의미(공허한 통과 방지)"
+  elif [[ -r "$ROOT/cdm/locked" ]]; then
+    bad "tar 실패 유도 불가 — 권한 무시 환경(root?)이라 판정 무의미(공허한 통과 방지)"
+  else
+    run_backup BACKUP_FORCE_HOUR=03 BACKUP_CDM_SRC="$ROOT/cdm" BACKUP_AGE_BIN="$AGE_REAL" >/dev/null; RC=$?
+    NOW="$(side_hash "$ROOT/nas/cdm.age")"
+    LEFT=$(find "$ROOT/nas" -name '*.partial' 2>/dev/null | wc -l)
+    if [[ $RC -eq 0 ]]; then
+      bad "tar 가 실패했는데 rc=0 (손상 사본이 정상으로 통과)" "$(logtext)"
+    elif [[ "$NOW" != "$BASE" ]]; then
+      bad "🔴 tar 실패가 기존 사본을 덮었다 (해시 변경) — 손상 아카이브가 최종 경로에 남음" "$(logtext)"
+    elif [[ "$LEFT" -ne 0 ]]; then
+      bad ".partial 잔재 $LEFT 건" "$(ls -la "$ROOT/nas/")"
+    else
+      ok "tar 실패 → 암호화 미수행 + 기존 사본 무사(해시 동일) + rc=$RC"
+    fi
+  fi
+  chmod 644 "$ROOT/cdm/locked" 2>/dev/null
+  teardown
+fi
+
 echo
 echo "=== 결과: $pass pass / $fail fail ==="
 [[ $fail -eq 0 ]] || exit 1
