@@ -40,7 +40,9 @@ echo "[start] relay 시작됨 (systemd)"
 # Claude Code가 준비될 때까지 대기 후 초기 메시지 전송
 # 따라잡기 지시문은 catchup-hint.sh 한 곳에서 만든다(restart-nino.sh와 공유 — 사본 두 벌이던 걸 합쳤다).
 sleep 8
-HINT="$("$SCRIPT_DIR/catchup-hint.sh")"
+# --no-head: 앞머리("재시작됐어. ")를 이 호출부가 이미 갖고 있다. 안 주면
+# "새 세션 시작됐어 … 그리고 재시작됐어."로 두 문장이 겹친다(룬드 리뷰 M:vsdg ②).
+HINT="$("$SCRIPT_DIR/catchup-hint.sh" --no-head)"
 tmux send-keys -t "$SESSION_NAME" "새 세션 시작됐어. 봇-놀이터(1480479067881865347)에 '니노 재부팅했어' 보내줘. 그리고 $HINT" C-m
 
 echo "[start] 니노 시작 완료! tmux session: $SESSION_NAME"

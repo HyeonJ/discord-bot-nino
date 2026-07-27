@@ -6,10 +6,12 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 SESSION_NAME="nino"
 
-# 중단 시각 기록 — 재시작 후 "얼마나 못 봤나"를 계산하는 유일한 근거다.
-# 이게 없으면 catchup-hint가 기본 창으로 떨어지고, 실제 중단 시간과 창이 어긋난 걸 아무도 모른다.
+# 🔴 여기서 logs/last-stop-utc를 쓰던 걸 없앴다 (룬드 리뷰 M:vsdg).
+#   이 스크립트가 **맨 위에서 now를 쓰고 ~7초 뒤 아래에서 읽으니** 경과가 항상 0 →
+#   창이 최소값 5분에 고정됐다. 10시에 죽어 15시에 재시작해도 `--after 5m`.
+#   부팅 경로에선 반대로 며칠 전 값이 남아 48시간 클램프 경고가 헛나왔다.
+#   → catchup-hint.sh가 "니노 마지막 발화"(DB)를 앵커로 쓴다. 파일이 없으니 낡을 수도 없다.
 mkdir -p "$BOT_DIR/logs"
-date -u +%Y-%m-%dT%H:%M:%SZ > "$BOT_DIR/logs/last-stop-utc"
 
 # relay 일시정지 (경합 방지)
 export XDG_RUNTIME_DIR=/run/user/$(id -u)

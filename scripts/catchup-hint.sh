@@ -7,69 +7,97 @@
 #
 # 왜 jsonl 경로 주입에서 CLI로 바꾸나 (Tim 지시 M:qf4k):
 #   조회 정본이 yaksu-history CLI다. jsonl 경로를 주입하면 세션이 파일을 직접 읽어야 하고,
-#   그 파일에 구멍이 있어도(2026-07-26 07~10시 실측 0행) 알 방법이 없다.
+#   그 파일에 구멍이 있어도(2026-07-26 07~10시+09 실측 0행) 알 방법이 없다.
 #
-# 🔴 설계 원칙: 중단 시각을 모를 때 조용히 기본값으로 넘어가지 않는다.
-#   모르면 기본 창을 쓰되 **모른다는 사실을 지시문에 남긴다** — 조용한 기본값이 오늘 사고들의 공통 형태였다.
+# 🔴 창의 앵커 = **"니노가 마지막으로 말한 시각"** (DB). 룬드 리뷰 M:vsdg로 두 번 고친 자리다.
+#   ① 처음엔 restart가 쓰는 logs/last-stop-utc를 썼다 → restart가 **맨 위에서 now를 쓰고 7초 뒤 읽어서**
+#      경과가 항상 0 → 창이 5분에 고정됐다(경과 분기 도달 불가). 부팅 경로에선 며칠 전 값이 남아 반대로 틀렸다.
+#   ② 룬드 대안 MAX(timestamp) 전체도 무너진다 — restart가 **relay를 먼저 살리고**(sleep 5) 지시문을 만들어서,
+#      그 5초에 메시지 한 건만 와도 앵커가 "방금"이 된다(실측 0분 전). 둘 다 **창이 좁아지는** 방향의 오류다.
+#   ③ 우리가 찾는 건 relay가 죽은 시각이 아니라 **세션이 반응을 멈춘 시각**이다. 니노 발화가 그 대리값이다:
+#        깨끗한 재시작 → 방금 발화 → 창 작음(실제로 놓친 게 없다)
+#        얼어 있었음   → 몇 시간 전 → 창 넓음(그동안 못 처리했다)
+#        조용했을 뿐   → 창이 넓어짐 → 좀 더 읽는다(무해 — 안전한 방향)
 #
-# 시각 표기: 접미사 없는 시각을 쓰지 않는다(`14:55+09` / `05:55Z`). 룬드가 하루에 세 번 KST/UTC를 뒤집은 뒤 합의한 규칙.
+# 시각 표기: 접미사 없는 시각을 쓰지 않는다(`14:55+09` / `05:55Z`). KST/UTC를 하루에 세 번 뒤집은 뒤 합의한 규칙.
 set -uo pipefail
 
 BOT_DIR="${CATCHUP_BOT_DIR:-/home/bpx27/discord-bot-nino}"
 CLI="${CATCHUP_CLI:-$HOME/.local/bin/yaksu-history}"
-STATE="$BOT_DIR/logs/last-stop-utc"
+DB="${YAKSU_HISTORY_DB:-$HOME/.local/share/yaksu-history/messages.db}"
+SELF="${CATCHUP_SELF:-니노}"
 NOTIFY="$BOT_DIR/logs/pending-restart-notify.txt"
 
-MIN_WINDOW=5        # 방금 멈췄어도 최소 5분은 훑는다(경계 메시지 유실 방지)
+MIN_WINDOW=5        # 방금까지 말하고 있었어도 최소 5분은 훑는다(경계 메시지 유실 방지)
 MAX_WINDOW=2880     # 48시간. 그보다 길면 따라잡기가 아니라 별도 복구 작업이다
-DEFAULT_WINDOW=120  # 중단 시각을 모를 때
+DEFAULT_WINDOW=120  # 앵커를 못 구할 때
 
-reboot=0
-[[ "${1:-}" == "--reboot" ]] && reboot=1
+reboot=0; nohead=0
+for a in "$@"; do
+    case "$a" in
+        --reboot)  reboot=1 ;;
+        --no-head) nohead=1 ;;   # 호출부가 자기 앞머리를 갖는 경우(start-nino) 문장 중복 방지
+    esac
+done
 
-# ── 창 계산 ────────────────────────────────────────────────
+# ── 앵커: 니노가 마지막으로 말한 시각 → 경과 분 ────────────
+elapsed="$(python3 - "$DB" "$SELF" <<'PY' 2>/dev/null
+import sqlite3, sys, datetime as dt
+db, self_name = sys.argv[1], sys.argv[2]
+try:
+    c = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    row = c.execute(
+        "SELECT MAX(timestamp) FROM messages WHERE author_name = ?", (self_name,)
+    ).fetchone()
+except sqlite3.Error:
+    raise SystemExit(1)
+if not row or not row[0]:
+    raise SystemExit(1)
+t = dt.datetime.fromisoformat(row[0].replace("Z", "+00:00"))
+if t.tzinfo is None:
+    raise SystemExit(1)
+print(int((dt.datetime.now(dt.timezone.utc) - t).total_seconds() // 60))
+PY
+)"
+
 window=""; note=""
-if [[ -r "$STATE" ]]; then
-    stop_raw="$(head -1 "$STATE" 2>/dev/null)"
-    stop_epoch="$(date -u -d "$stop_raw" +%s 2>/dev/null || true)"
-    if [[ -n "$stop_epoch" ]]; then
-        elapsed=$(( ( $(date -u +%s) - stop_epoch ) / 60 ))
-        if (( elapsed > MAX_WINDOW )); then
-            window=$MAX_WINDOW
-            note=" 실제로는 ${elapsed}분 꺼져 있었는데 48시간으로 잘랐어 — 그 앞 구간은 따라잡기가 아니라 별도 복구가 필요해."
-        elif (( elapsed < MIN_WINDOW )); then
-            window=$MIN_WINDOW
-        else
-            window=$elapsed
-        fi
+if [[ "$elapsed" =~ ^[0-9]+$ ]]; then
+    if (( elapsed > MAX_WINDOW )); then
+        window=$MAX_WINDOW
+        note=" 내 마지막 발화가 ${elapsed}분 전인데 48시간으로 잘랐어 — 그 앞 구간은 따라잡기가 아니라 별도 복구가 필요해."
+    elif (( elapsed < MIN_WINDOW )); then
+        window=$MIN_WINDOW
+    else
+        window=$elapsed
     fi
-fi
-if [[ -z "$window" ]]; then
+else
     window=$DEFAULT_WINDOW
     # 여기서 "모른다"를 말하지 않으면, 기본 창이 실제 중단 시간인 것처럼 읽힌다.
-    note=" 중단 시각을 몰라서(logs/last-stop-utc 없음·해석 불가) 기본 ${DEFAULT_WINDOW}분으로 잡았어 — 빠진 게 있어 보이면 창을 넓혀서 다시 봐."
+    note=" 내 마지막 발화 시각을 못 구해서(DB 조회 실패·기록 없음) 기본 ${DEFAULT_WINDOW}분으로 잡았어 — 빠진 게 있어 보이면 창을 넓혀서 다시 봐."
 fi
 
 # ── 앞머리 ────────────────────────────────────────────────
-if (( reboot )) && [[ -f "$NOTIFY" ]]; then
-    head_msg="재부팅했어. logs/pending-restart-notify.txt 있으니까 처리해줘."
+if (( nohead )); then
+    head_msg=""
+elif (( reboot )) && [[ -f "$NOTIFY" ]]; then
+    head_msg="재부팅했어. logs/pending-restart-notify.txt 있으니까 처리해줘. "
 elif (( reboot )); then
-    head_msg="재부팅했어."
+    head_msg="재부팅했어. "
 else
-    head_msg="재시작됐어."
+    head_msg="재시작됐어. "
 fi
 
 # ── 따라잡기 수단: CLI → jsonl → current-tasks 순서로 폴백 ──
 # 폴백이 있는 이유: CLI가 없을 때 "yaksu-history 돌려줘"를 주면 세션이 실패한 명령을 보고 헤맨다.
 if [[ -x "$CLI" ]]; then
-    printf '%s\n' "$head_msg $CLI --after ${window}m 돌려서 못 봤던 대화 파악해줘 (출력 timestamp는 UTC니까 KST는 +9).${note}"
+    printf '%s\n' "${head_msg}$CLI --after ${window}m 돌려서 못 봤던 대화 파악해줘 (출력 timestamp는 UTC니까 KST는 +9).${note}"
     exit 0
 fi
 
 TODAY="$(TZ=Asia/Seoul date +%Y-%m-%d)"
 HISTORY_FILE="$BOT_DIR/memory/discord-history/$TODAY.jsonl"
 if [[ -f "$HISTORY_FILE" ]]; then
-    printf '%s\n' "$head_msg 조회 CLI가 없어서($CLI 실행 불가) memory/discord-history/$TODAY.jsonl 읽고 못 봤던 대화 파악해줘. CLI 부재도 같이 확인해줘 — 조회 정본이 빠진 상태야."
+    printf '%s\n' "${head_msg}조회 CLI가 없어서($CLI 실행 불가) memory/discord-history/$TODAY.jsonl 읽고 못 봤던 대화 파악해줘. CLI 부재도 같이 확인해줘 — 조회 정본이 빠진 상태야."
 else
-    printf '%s\n' "$head_msg 조회 CLI도 오늘 jsonl도 없어서 따라잡을 소스가 없어. memory/current-tasks.md 읽고 이어서 진행하고, 기록 경로가 왜 비었는지 확인해줘."
+    printf '%s\n' "${head_msg}조회 CLI도 오늘 jsonl도 없어서 따라잡을 소스가 없어. memory/current-tasks.md 읽고 이어서 진행하고, 기록 경로가 왜 비었는지 확인해줘."
 fi
