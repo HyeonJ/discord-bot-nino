@@ -53,7 +53,7 @@ RSYNC_OPTS=(-r --no-perms --no-owner --no-group --delete)
 #   `.partial` 이면 실패해도 기존 사본 무사 + 껍데기도 안 남고 + 교체가 원자적이다.
 snapshot_db() {
     local src="$1" dst="$2" tmp="$2.partial"
-    rm -f "$tmp"
+    rm -f "$tmp" "$tmp-wal" "$tmp-shm"
     if python3 - "$src" "$tmp" <<'PY'
 import sqlite3, sys
 src, dst = sys.argv[1], sys.argv[2]
@@ -63,6 +63,15 @@ try:
     try:
         with target:
             source.backup(target)
+        # backup() 은 원본의 journal_mode 까지 물려준다 — 원본이 WAL 이라 사본도 WAL 이 되고,
+        # 그러면 사본은 **자기완결 파일이 아니다**(읽기만 해도 -wal/-shm 이 생기고, 본체만
+        # mv 하면 짝이 안 맞는 sidecar 가 남는다). 백업 산출물은 단일 파일이어야 하므로
+        # 체크포인트로 WAL 내용을 본체에 밀어넣고 journal_mode 를 DELETE 로 되돌린다.
+        # 두 PRAGMA 는 트랜잭션 밖에서 실행해야 한다(그래서 with 블록 뒤).
+        target.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        mode = target.execute("PRAGMA journal_mode=DELETE").fetchone()[0]
+        if mode.lower() != "delete":
+            raise RuntimeError(f"journal_mode 전환 실패: {mode}")
     finally:
         target.close()
 finally:
@@ -70,9 +79,13 @@ finally:
 PY
     then
         mv -f "$tmp" "$dst"
+        # 이전 스냅샷(WAL 시절)이 남긴 sidecar 정리 — 옛 DB의 것이 새 본체 옆에 남으면
+        # sqlite 가 짝이 안 맞는 wal 을 적용하려 들 수 있다. mv 는 본체 하나만 옮기므로
+        # "교체를 원자적으로"의 단위가 파일 하나가 아니었던 자리다.
+        rm -f "$dst-wal" "$dst-shm"
         return 0
     fi
-    rm -f "$tmp"
+    rm -f "$tmp" "$tmp-wal" "$tmp-shm"
     return 1
 }
 
