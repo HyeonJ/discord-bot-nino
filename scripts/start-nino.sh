@@ -38,13 +38,9 @@ systemctl --user restart nino-relay.service
 echo "[start] relay 시작됨 (systemd)"
 
 # Claude Code가 준비될 때까지 대기 후 초기 메시지 전송
+# 따라잡기 지시문은 catchup-hint.sh 한 곳에서 만든다(restart-nino.sh와 공유 — 사본 두 벌이던 걸 합쳤다).
 sleep 8
-TODAY=$(TZ=Asia/Seoul date +%Y-%m-%d)
-HISTORY_FILE="$BOT_DIR/memory/discord-history/$TODAY.jsonl"
-if [[ -f "$HISTORY_FILE" ]]; then
-  tmux send-keys -t "$SESSION_NAME" "새 세션 시작됐어. 봇-놀이터(1480479067881865347)에 '니노 재부팅했어' 보내줘. 그리고 memory/discord-history/$TODAY.jsonl 읽고 못 봤던 대화 파악해줘." C-m
-else
-  tmux send-keys -t "$SESSION_NAME" "새 세션 시작됐어. 봇-놀이터(1480479067881865347)에 '니노 재부팅했어' 보내줘. 그리고 memory/current-tasks.md 읽고 이어서 진행해줘." C-m
-fi
+HINT="$("$SCRIPT_DIR/catchup-hint.sh")"
+tmux send-keys -t "$SESSION_NAME" "새 세션 시작됐어. 봇-놀이터(1480479067881865347)에 '니노 재부팅했어' 보내줘. 그리고 $HINT" C-m
 
 echo "[start] 니노 시작 완료! tmux session: $SESSION_NAME"
