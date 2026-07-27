@@ -1,0 +1,199 @@
+#!/usr/bin/env bash
+# backup-to-nas.sh 계약 테스트 (실제 NAS·실제 원격 안 씀 — 전부 임시 루트)
+#
+# 왜: 니노 memory 디렉토리가 **두 곳**인데 한쪽(auto-memory)만 백업되고 있었다.
+#   `~/discord-bot-nino/memory/`(WAL·알람·리서치)는 NAS·git 어디에도 없었고,
+#   auto-memory는 백업 레포가 있는데 **자동 push가 없어** 5일치 21개가 미커밋으로 방치됐다.
+#   (룬드도 같은 클래스를 자기 쪽에서 밟음 — `~/.claude`만 대상, `~/Assistant`는 밖)
+#   백업은 **실패해도 알려줄 주체가 없으므로** 배선을 테스트로 고정한다.
+#
+# 설계: 스크립트가 경로·시각을 env로 받는다(기본값은 프로덕션). 그래야 부작용 없이 검증 가능.
+#   [[feedback_vault_script_test_isolation]] — 실제 봇 트리·NAS를 건드리면 격리가 깨진다.
+set -uo pipefail
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+BOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+SCRIPT="$BOT_DIR/scripts/backup-to-nas.sh"
+
+pass=0; fail=0
+ok()  { echo "  ✅ $1"; pass=$((pass + 1)); }
+bad() { echo "  ❌ $1"; fail=$((fail + 1)); [[ -n "${2:-}" ]] && echo "$2" | sed 's/^/     /'; }
+
+[[ -f "$SCRIPT" ]] || { echo "❌ 대상 스크립트 없음: $SCRIPT"; exit 1; }
+
+ROOT=""
+setup() {
+  ROOT="$(mktemp -d)"
+  mkdir -p "$ROOT/nas" "$ROOT/auto-memory" "$ROOT/bot-memory" "$ROOT/logs"
+  echo "auto" > "$ROOT/auto-memory/MEMORY.md"
+  echo "wal"  > "$ROOT/bot-memory/current-tasks.md"
+  mkdir -p "$ROOT/bot-memory/alarms"
+  echo "alarm" > "$ROOT/bot-memory/alarms/a.md"
+  # 경계 확인용: memory/ 밖(코드 위치) 파일 — 절대 백업되면 안 됨
+  mkdir -p "$ROOT/outside-src"
+  echo "code" > "$ROOT/outside-src/relay.js"
+}
+teardown() { [[ -n "$ROOT" && -d "$ROOT" ]] && rm -rf "$ROOT"; ROOT=""; }
+
+# auto-memory를 git 레포로 만들고 bare 원격을 붙인다 (push 실측용)
+init_git_repo() {
+  git -C "$ROOT/auto-memory" init -q -b main
+  git -C "$ROOT/auto-memory" config user.email "t@t"
+  git -C "$ROOT/auto-memory" config user.name "t"
+  git -C "$ROOT/auto-memory" add -A
+  git -C "$ROOT/auto-memory" commit -qm init
+  # bare 원격도 -b main — 기본 HEAD가 master면 `git log`가 빈 값을 반환해
+  # "푸시 실패"로 오판한다(실제로 한 번 밟음: 배관 버그를 구현 버그로 읽을 자리)
+  git init -q --bare -b main "$ROOT/remote.git"
+  git -C "$ROOT/auto-memory" remote add origin "$ROOT/remote.git"
+  # -u 로 upstream 설정 — 프로덕션(origin/main 추적)과 같은 모양이어야 미푸시 카운트 경로가 검증된다
+  git -C "$ROOT/auto-memory" push -qu origin main
+}
+
+run_backup() {
+  env \
+    BACKUP_NAS_DIR="$ROOT/nas" \
+    BACKUP_NAS_ROOT="$ROOT" \
+    BACKUP_MEMORY_SRC="$ROOT/auto-memory" \
+    BACKUP_BOT_MEMORY_SRC="$ROOT/bot-memory" \
+    BACKUP_HISTORY_DB="$ROOT/nonexistent.db" \
+    BACKUP_ENV_FILE="$ROOT/nonexistent.env" \
+    BACKUP_LOG_FILE="$ROOT/logs/backup.log" \
+    "$@" bash "$SCRIPT" 2>&1
+}
+logtext() { cat "$ROOT/logs/backup.log" 2>/dev/null; }
+
+echo "=== backup-to-nas.sh 계약 ==="
+
+# ① 봇 memory/ 가 NAS로 간다 (이번 PR의 본체)
+setup
+run_backup >/dev/null
+[[ -f "$ROOT/nas/bot-memory/current-tasks.md" && -f "$ROOT/nas/bot-memory/alarms/a.md" ]] \
+  && ok "봇 memory/ rsync (WAL·하위 디렉토리 포함)" \
+  || bad "봇 memory/ 가 NAS에 없음" "$(find "$ROOT/nas" -type f | sed "s|$ROOT||")"
+
+# ② 기존 auto-memory 백업 회귀 없음
+[[ -f "$ROOT/nas/memory/MEMORY.md" ]] \
+  && ok "auto-memory rsync 유지(회귀 없음)" \
+  || bad "auto-memory 백업이 깨졌다"
+
+# ③ 경계: memory/ 밖(코드)은 백업되지 않는다
+#    "memory가 백업되는가"만 보면 코드까지 딸려가도 통과한다 → 제외 대상을 심어 확인(룬드 방식)
+#    ⚠️ **선행 조건을 먼저 확인**: 백업이 아무것도 안 했으면 이 케이스는 공허하게 통과한다
+#       (구현 전 red에서 실제로 그렇게 통과했다 — 통과 케이스를 의심하라)
+if [[ ! -f "$ROOT/nas/bot-memory/current-tasks.md" ]]; then
+  bad "경계 검사 불가 — 백업 자체가 안 돌아 판정 무의미(공허한 통과 방지)"
+elif grep -rq "code" "$ROOT/nas" 2>/dev/null; then
+  bad "memory/ 밖 파일이 백업됐다(경계 붕괴)" "$(grep -rl code "$ROOT/nas")"
+else
+  ok "경계 유지 — memory/ 밖은 백업 안 됨"
+fi
+
+# ④ 미러링: 원본에서 지운 파일은 백업에서도 사라진다
+#    여기도 "지우기 전에 있었는가"를 먼저 봐야 판정이 성립한다
+if [[ ! -f "$ROOT/nas/bot-memory/alarms/a.md" ]]; then
+  bad "미러링 검사 불가 — 대상 파일이 애초에 백업되지 않았다(공허한 통과 방지)"
+else
+  rm "$ROOT/bot-memory/alarms/a.md"
+  run_backup >/dev/null
+  [[ ! -f "$ROOT/nas/bot-memory/alarms/a.md" ]] \
+    && ok "--delete 미러링 동작" \
+    || bad "삭제가 반영되지 않음"
+fi
+teardown
+
+# ⑤ 03시가 아니면 git push 시도 안 함
+setup; init_git_repo
+echo "변경" >> "$ROOT/auto-memory/MEMORY.md"
+run_backup BACKUP_FORCE_HOUR=09 >/dev/null
+# ⚠️ "auto-memory" 로만 grep하면 1단계 rsync 로그("auto-memory synced")에 걸린다 —
+#    실제로 한 번 오탐했다. git 단계 고유 문구(커밋/push)로 좁혀야 판정이 성립한다.
+if logtext | grep -qE "auto-memory (커밋|push|변경 없음)"; then
+  bad "03시 아닌데 auto-memory git 단계가 돌았다" "$(logtext)"
+else
+  ok "비-03시엔 git push 미시도"
+fi
+
+# ⑥ 03시엔 커밋+push 되고 원격에 도달한다
+run_backup BACKUP_FORCE_HOUR=03 >/dev/null
+REMOTE_MSG="$(git -C "$ROOT/remote.git" log --oneline -1 2>/dev/null || echo "")"
+if [[ "$REMOTE_MSG" == *"init"* || -z "$REMOTE_MSG" ]]; then
+  bad "원격에 새 커밋이 도달하지 않았다" "remote=$REMOTE_MSG / log=$(logtext)"
+else
+  ok "03시 커밋+push → 원격 도달 실측"
+fi
+
+# ⑦ 변경이 없으면 조용히 통과 (빈 커밋 만들지 않음)
+BEFORE="$(git -C "$ROOT/remote.git" rev-parse HEAD)"
+run_backup BACKUP_FORCE_HOUR=03 >/dev/null
+AFTER="$(git -C "$ROOT/remote.git" rev-parse HEAD)"
+[[ "$BEFORE" == "$AFTER" ]] \
+  && ok "변경 없으면 빈 커밋 안 만듦" \
+  || bad "변경 없는데 커밋이 생겼다"
+teardown
+
+# ⑧ push 실패는 CI(백업) 결과를 덮지 않지만 **조용하지도 않다**
+#    로그에 미커밋/실패가 남아야 한다 — 알림 경로가 죽은 걸 알려줄 주체가 없기 때문
+setup; init_git_repo
+git -C "$ROOT/auto-memory" remote set-url origin "$ROOT/does-not-exist.git"
+echo "변경2" >> "$ROOT/auto-memory/MEMORY.md"
+run_backup BACKUP_FORCE_HOUR=03 >/dev/null; RC=$?
+if [[ $RC -ne 0 ]]; then
+  bad "push 실패가 스크립트 전체를 실패시켰다(rc=$RC) — 백업 결과를 덮어쓰면 안 됨"
+elif logtext | grep -qE "WARN.*push"; then
+  ok "push 실패를 WARN으로 남기고 rc는 0 유지"
+else
+  bad "push 실패가 조용히 묻혔다" "$(logtext)"
+fi
+teardown
+
+# ⑨ NAS 접근 불가 → rc는 1로 알리되 **git 축은 계속 돈다** (축 독립성)
+#    ⚠️ "NAS 불가 → exit 1"만 보면 **현재 구현을 명세로 굳혀** 결함을 승인해버린다(룬드 지적).
+#    이 PR의 명제가 "NAS는 --delete 미러라 실수 삭제를 복구 못 하니 git이 그 축을 덮는다"인데,
+#    NAS 장애로 git 축이 같이 멈추면 두 축은 독립이 아니고 명제가 성립하지 않는다.
+#    한 축을 죽였을 때 다른 축이 사는지를 봐야 독립이 증명된다.
+setup; init_git_repo
+echo "변경3" >> "$ROOT/auto-memory/MEMORY.md"
+BEFORE="$(git -C "$ROOT/remote.git" rev-parse HEAD)"
+OUT="$(env BACKUP_NAS_ROOT="$ROOT/no-such-mount" \
+  BACKUP_NAS_DIR="$ROOT/nas" BACKUP_MEMORY_SRC="$ROOT/auto-memory" \
+  BACKUP_BOT_MEMORY_SRC="$ROOT/bot-memory" BACKUP_LOG_FILE="$ROOT/logs/backup.log" \
+  BACKUP_FORCE_HOUR=03 bash "$SCRIPT" 2>&1)"; RC=$?
+AFTER="$(git -C "$ROOT/remote.git" rev-parse HEAD)"
+if [[ $RC -eq 0 ]]; then
+  bad "NAS 없는데 성공으로 끝났다(조용한 skip)" "$OUT"
+elif [[ "$BEFORE" == "$AFTER" ]]; then
+  bad "NAS 장애가 git 축까지 멈췄다 — 두 축이 독립이 아님" "$(logtext)"
+else
+  ok "NAS 불가 → rc=$RC 로 알리면서 git 축은 계속 수행(축 독립)"
+fi
+
+# ⑩ 역방향: git 축이 죽어도 NAS 축은 살아야 한다
+git -C "$ROOT/auto-memory" remote set-url origin "$ROOT/gone.git"
+echo "변경4" >> "$ROOT/bot-memory/current-tasks.md"
+run_backup BACKUP_FORCE_HOUR=03 >/dev/null; RC=$?
+if ! grep -q "변경4" "$ROOT/nas/bot-memory/current-tasks.md" 2>/dev/null; then
+  bad "push 실패가 NAS 축까지 멈췄다 — 역방향 독립 깨짐" "$(logtext)"
+else
+  ok "git push 실패 → NAS 축은 정상 수행(역방향 독립)"
+fi
+teardown
+
+# ⑪ 백업 소스가 사라지면 조용한 WARN이 아니라 rc로 알린다 + **기존 백업을 지우지 않는다**
+#    소스 부재는 "백업이 아무것도 못 덮고 있다"는 뜻 = 이 PR이 없애려던 상태 그대로다.
+#    동시에 --delete 로 rsync 하면 남아 있던 백업까지 날아가므로 rsync는 건너뛴다.
+setup
+run_backup >/dev/null   # 정상 1회로 백업 적재
+rm -rf "$ROOT/bot-memory"
+run_backup >/dev/null; RC=$?
+if [[ $RC -eq 0 ]]; then
+  bad "봇 memory 소스가 사라졌는데 rc=0 (조용한 통과)" "$(logtext)"
+elif [[ ! -f "$ROOT/nas/bot-memory/current-tasks.md" ]]; then
+  bad "소스 부재인데 기존 백업이 삭제됐다(--delete 로 날아감)" "$(logtext)"
+else
+  ok "소스 부재 → rc=$RC 로 알리고 기존 백업은 보존"
+fi
+teardown
+
+echo
+echo "=== 결과: $pass pass / $fail fail ==="
+[[ $fail -eq 0 ]] || exit 1
