@@ -40,6 +40,32 @@ RSYNC_OPTS=(-r --no-perms --no-owner --no-group --delete)
 # 소스 부재는 조용한 WARN이 아니라 ERROR다 — "백업이 아무것도 못 덮고 있다"는 뜻이고,
 # 그게 이 스크립트가 없애려던 상태다(봇 memory/가 어디에도 백업되지 않던 6주).
 # 단, 부재일 때 rsync 하면 --delete 로 **남아 있던 백업까지 날아가므로** 건너뛴다.
+# yaksu-history DB 스냅샷.
+#
+# ⚠️ **외부 `sqlite3` CLI 를 쓰지 않는다.** 이 컴에 미설치인데 `set -e` 와 겹쳐서
+#   4개월간(3/23~7/27) 매일 03시 이 지점에서 죽고, **완료 로그도 실패 로그도 안 남았다**.
+#   피해: 스냅샷 0개 + 뒤에 있던 .env 암호화 백업까지 동반 미실행(env.age 가 7/27 에 처음 생성).
+#   교훈은 "설치하면 된다"가 아니라 **시스템 패키지 의존 자체가 조용한 단일 실패점**이라는 것.
+#
+# python3 내장 sqlite3 의 `Connection.backup` 은 `.backup` 명령과 같은 **온라인 백업 API** 라
+# relay 가 DB에 쓰는 중에도 일관된 사본을 만든다. 원본은 `mode=ro` 로 열어 절대 변형하지 않는다.
+snapshot_db() {
+    python3 - "$1" "$2" <<'PY'
+import sqlite3, sys
+src, dst = sys.argv[1], sys.argv[2]
+source = sqlite3.connect(f"file:{src}?mode=ro", uri=True)
+try:
+    target = sqlite3.connect(dst)
+    try:
+        with target:
+            source.backup(target)
+    finally:
+        target.close()
+finally:
+    source.close()
+PY
+}
+
 sync_dir() {
     local label="$1" src="$2" dst="$3"
     if [ ! -d "$src" ]; then
@@ -101,11 +127,15 @@ if [ "$NAS_OK" = "1" ] && [ "$HOUR" = "03" ]; then
     if [ -f "$HISTORY_DB" ]; then
         mkdir -p "$NAS_DIR/yaksu-history"
         SNAP="$NAS_DIR/yaksu-history/messages-$(date +%Y%m%d).db"
-        if sqlite3 "$HISTORY_DB" ".backup '$SNAP'"; then
+        if snapshot_db "$HISTORY_DB" "$SNAP"; then
+            # retention 은 **성공 분기 안에** 둔다 — 스냅샷이 실패한 날 옛 스냅샷을 지우면
+            # 마지막 정상 사본까지 날아간다(백업 없는 상태로 수렴).
             find "$NAS_DIR/yaksu-history/" -name "messages-*.db" -mtime +14 -delete
-            log "OK: yaksu-history snapshot created"
+            log "OK: yaksu-history snapshot created ($(stat -c%s "$SNAP" 2>/dev/null || echo '?') bytes)"
         else
-            fail "yaksu-history 스냅샷 실패 ($HISTORY_DB)"
+            # 부분 생성된 껍데기를 남기면 "파일 있음"으로 백업된 줄 오독된다
+            rm -f "$SNAP"
+            fail "yaksu-history 스냅샷 실패 ($HISTORY_DB) — python3/DB 상태 확인"
         fi
     fi
 
