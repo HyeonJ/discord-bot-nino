@@ -115,9 +115,34 @@ todo_section() {
   [[ -n "$tail" ]] && printf '       (%s)\n' "$tail"
 }
 
-MSG="$HEADER
+# ── 인사 ────────────────────────────────────────────────────────────────────
+# Darren 요청(2026-07-28 M:44r9). 매일 같은 문장이면 안 읽게 되므로 **요일·날씨로 갈린다**.
+# ⚠️ 인사는 정보가 아니다 — 날씨/할 일을 못 읽어도 인사는 나온다. 그래서 인사의 유무로
+#    상태를 판단하면 안 되고, 판단은 위 두 섹션의 경고 줄이 한다.
+greeting() {
+  local dow="$1" rain="$2"
+  case "$dow" in
+    1) echo "월요일이다… 천천히 시작하자" ;;
+    5) echo "금요일! 오늘만 버티면 돼" ;;
+    6|7) echo "주말이야, 푹 쉬어~" ;;
+    *) if [[ -n "$rain" ]] && (( rain >= 60 )); then
+         echo "오늘 비 많이 온대. 조심해서 다녀와"
+       elif [[ -n "$rain" ]] && (( rain >= 40 )); then
+         echo "오늘 비 올 수도 있어"
+       else
+         echo "좋은 아침~ 오늘도 화이팅"
+       fi ;;
+  esac
+}
 
-$(weather_section)
+WEATHER="$(weather_section)"
+# 인사 분기에 쓸 강수확률 — 못 읽었으면 빈 값이고, 그러면 날씨 기반 분기를 안 탄다
+RAIN_PCT="$(sed -n 's/.*강수 최대 \([0-9]\+\)%.*/\1/p' <<<"$WEATHER" | head -1)"
+
+MSG="$HEADER
+$(greeting "$(TZ=Asia/Seoul date +%u)" "$RAIN_PCT")
+
+$WEATHER
 
 $(todo_section)"
 

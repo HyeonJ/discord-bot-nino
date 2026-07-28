@@ -91,7 +91,26 @@ sed 's/Cloudy/Blood rain of frogs/' "$ROOT/weather.json" > "$ROOT/unknown.json"
 out="$(run "$ROOT/todo.md" "$ROOT/unknown.json")"
 if grep -q 'Blood rain of frogs' <<<"$out"; then ok "모르는 값 원문 노출"; else bad "미지의 값이 사라졌다" "$out"; fi
 
-echo "⑦ DRY_RUN 은 전송하지 않는다"
+echo "⑦ wttr.in 은 설명 끝에 **공백을 붙여** 준다 (룬드 실측: \"Partly Cloudy \")"
+sed 's/"Cloudy"/"Cloudy "/' "$ROOT/weather.json" > "$ROOT/trailing.json"
+out="$(run "$ROOT/todo.md" "$ROOT/trailing.json")"
+if grep -q '흐림' <<<"$out"; then ok "공백 붙어도 매핑된다(strip)"; else bad "공백 때문에 매핑 미스" "$out"; fi
+
+echo "⑧ 인사줄 — 요일·강수로 갈리고, **정보가 아니라 인사다**"
+out="$(run "$ROOT/todo.md" "$ROOT/weather.json")"
+if [[ "$(sed -n '2p' <<<"$out")" != "" ]]; then ok "둘째 줄에 인사가 있다"; else bad "인사줄 없음" "$out"; fi
+# 강수 54% → "비 올 수도" (평일 기준). 주말이면 주말 인사가 이기므로 요일로 기대값을 나눈다
+dow="$(TZ=Asia/Seoul date +%u)"
+case "$dow" in
+  1) want="월요일" ;; 5) want="금요일" ;; 6|7) want="주말" ;; *) want="비 올 수도" ;;
+esac
+if grep -q "$want" <<<"$out"; then ok "요일/날씨 분기 일치($want)"; else bad "분기 불일치(기대 $want)" "$out"; fi
+# 인사는 소스가 죽어도 나온다 — 인사의 유무로 상태를 판단하면 안 된다는 규약
+out="$(run "$ROOT/없는파일.md" "$ROOT/없는날씨.json")"
+if [[ "$(sed -n '2p' <<<"$out")" != "" ]] && grep -q '못 읽음' <<<"$out"; then
+  ok "소스 실패해도 인사는 나오고, 판단은 경고 줄이 한다"; else bad "실패 시 인사/경고 조합이 깨짐" "$out"; fi
+
+echo "⑨ DRY_RUN 은 전송하지 않는다"
 if [[ ! -e "$ROOT/should-not-be-called" ]]; then ok "discord-send 미호출"; else bad "전송이 일어났다"; fi
 
 echo
