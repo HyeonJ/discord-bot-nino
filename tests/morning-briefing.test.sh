@@ -210,6 +210,23 @@ out="$(PATH="$ROOT/bsdlike:$PATH" run "$ROOT/todo.md" "$ROOT/weather.json")"
 if grep -q '10일째 안 바뀜' <<<"$out"; then ok "date -r 이 막혀도 폴백으로 mtime 을 읽는다(BSD 갈래)"; else bad "BSD 갈래에서 정지 기간을 잃었다" "$out"; fi
 touch "$ROOT/todo.md"
 
+# ⑤-5 **bash 3.2 에서도 돈다** — macOS 기본 /bin/bash 가 3.2 다
+#   왜: `mapfile` 은 bash 4 전용이라 3.2 에선 목록 읽기가 죽고 **섹션이 통째로 사라진다.**
+#   룬드 맥 실측 8 fail 중 6건이 그 한 줄에서 나왔다(2026-07-28) — 8개가 아니라 한 뿌리였다.
+#   ⚠️ 문구를 grep 하지 않고 **동작으로 판정**한다: bash 4 전용 빌트인을 꺼서 실제로 돌려본다.
+#      (grep 은 `mapfile` 만 잡지만, 이 검사는 그 경로에 들어오는 3.2 미지원 빌트인을 다 잡는다)
+cat > "$ROOT/no-bash4" <<'NB4'
+enable -n mapfile 2>/dev/null
+enable -n readarray 2>/dev/null
+NB4
+out="$(BASH_ENV="$ROOT/no-bash4" run "$ROOT/todo.md" "$ROOT/weather.json")"
+if grep -q '첫째 항목' <<<"$out"; then ok "bash 4 빌트인 없이도 할 일 섹션이 나온다(3.2 호환)"; else bad "bash 3.2 에서 섹션이 사라진다" "$out"; fi
+
+# ⑤-6 날짜 헤더에 **포맷 문자가 새어나오지 않는다** — `%-m` 은 GNU 전용이라 BSD 에선 안 풀린다
+out="$(run "$ROOT/todo.md" "$ROOT/weather.json")"
+hdr="$(printf '%s\n' "$out" | head -1)"
+if ! grep -q '%' <<<"$hdr"; then ok "헤더에 미해석 포맷 문자가 없다"; else bad "헤더에 % 가 남았다(GNU 전용 포맷)" "$hdr"; fi
+
 # ⑩-2 낡으면 반드시 줄을 낸다 + 얼마나 낡았는지
 touch_ago $(( 5 * HOUR )) "$ROOT/hb-fresh.stale"
 printf 'old rc=0\n' >> /dev/null

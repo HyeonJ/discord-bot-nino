@@ -35,7 +35,9 @@ HEARTBEAT_STALE_HOURS="${HEARTBEAT_STALE_HOURS:-2}"   # 이 시간을 **넘으�
 TODAY="$(TZ=Asia/Seoul date +%Y-%m-%d)"
 DAY_NAMES=("" "월요일" "화요일" "수요일" "목요일" "금요일" "토요일" "일요일")
 DAY_NAME="${DAY_NAMES[$(TZ=Asia/Seoul date +%u)]}"
-HEADER="☀️ $(TZ=Asia/Seoul date +%-m/%-d) $DAY_NAME"
+# ⚠️ `%-m`(0 제거)는 GNU 전용 — BSD strftime 은 안 받는다. 0 을 셸에서 떼면 양쪽에서 같다.
+_MON="$(TZ=Asia/Seoul date +%m)"; _DAY="$(TZ=Asia/Seoul date +%d)"
+HEADER="☀️ ${_MON#0}/${_DAY#0} $DAY_NAME"
 
 # ── 날씨 ────────────────────────────────────────────────────────────────────
 # 수치가 필요하므로 j1(JSON)을 쓴다. 짧은 format 문자열은 체감·최고최저·강수확률을 못 준다.
@@ -96,8 +98,14 @@ todo_section() {
     return
   fi
 
-  local items total
-  mapfile -t items < <(grep '^- \[ \] ' "$TODO_FILE" 2>/dev/null | sed 's/^- \[ \] //')
+  # ⚠️ `mapfile` 은 **bash 4 전용**이다. macOS 기본 `/bin/bash` 는 3.2 라 여기서 죽고,
+  #    죽는 자리가 목록 읽기라 **이 섹션 전체가 조용히 사라진다** — 룬드 맥 실측 8 fail 중
+  #    6건이 이 한 줄에서 나왔다(2026-07-28, `enable -n mapfile` 로 재현). 한 뿌리였다.
+  #    ⇒ while-read 로 읽는다. `IFS=` 와 `-r` 로 공백·역슬래시를 보존하는 건 mapfile 과 같다.
+  local items=() total line
+  while IFS= read -r line; do
+    items[${#items[@]}]="$line"     # bash 3.2 는 `+=` 가 배열에 없다
+  done < <(grep '^- \[ \] ' "$TODO_FILE" 2>/dev/null | sed 's/^- \[ \] //')
   total="${#items[@]}"
   (( total > 0 )) || return   # 확인된 빈 상태 → 줄을 뺀다
 
