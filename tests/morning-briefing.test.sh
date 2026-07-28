@@ -9,6 +9,11 @@
 # 규약: 확인된 빈 상태(할 일 0건) → 섹션을 뺀다 / 소스 실패 → 반드시 줄을 낸다.
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# ⚠️ 스텁이 PATH 를 가리기 **전에** 진짜 경로를 잡는다. 절대경로를 박으면 안 된다 —
+#    `/usr/bin/date` 는 리눅스에만 있고 macOS 는 `/bin/date` 라 스텁이 죽는다
+#    (룬드 맥 실측 2026-07-28 `폴백 실패` — 스크립트가 아니라 이 시험이 틀린 자리였다).
+REAL_DATE="$(command -v date)"
+export REAL_DATE
 source "$SCRIPT_DIR/lib/timeshift.sh"   # 시각 조작은 정본 하나를 지난다(GNU/BSD 공용)
 BOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 SCRIPT="$BOT_DIR/scripts/morning-briefing.sh"
@@ -110,6 +115,26 @@ case "$dow" in
   1) want="월요일" ;; 5) want="금요일" ;; 6|7) want="주말" ;; *) want="비 올 수도" ;;
 esac
 if grep -q "$want" <<<"$out"; then ok "요일/날씨 분기 일치($want)"; else bad "분기 불일치(기대 $want)" "$out"; fi
+
+# ⑧-2 **BSD sed 에서도 강수를 읽는다** — `\+` 는 GNU 확장이라 BSD 는 매칭 자체가 실패한다
+#   왜: 실패하면 RAIN_PCT 이 비고 인사가 강수 갈래를 못 타 **평일 기본 인사로 조용히 떨어진다.**
+#   룬드 맥 실측(2026-07-28)에서 `분기 불일치` 로 나온 자리다.
+#   ⚠️ 환경을 통째로 흉내 내지 않는다 — **가설 하나만 겨냥한다**(GNU 확장을 끈 sed).
+#      두 겹 스텁으로 BSD 를 흉내 냈다가 부분집합이 돼서 못 잡은 적이 있다(#50 ⑤-4).
+if sed --posix -n 's/x\([0-9][0-9]*\)y/\1/p' </dev/null >/dev/null 2>&1; then
+  REAL_SED="$(command -v sed)"; export REAL_SED
+  mkdir -p "$ROOT/posixsed"
+  printf '#!/bin/bash\nexec "$REAL_SED" --posix "$@"\n' > "$ROOT/posixsed/sed"
+  chmod +x "$ROOT/posixsed/sed"
+  if [[ "$dow" != "1" && "$dow" != "5" && "$dow" != "6" && "$dow" != "7" ]]; then
+    out="$(PATH="$ROOT/posixsed:$PATH" run "$ROOT/todo.md" "$ROOT/weather.json")"
+    if grep -q '비 올 수도' <<<"$out"; then ok "GNU 확장 없는 sed 로도 강수를 읽는다(BSD 갈래)"; else bad "BSD sed 에서 강수를 잃었다 — 인사가 갈래를 못 탔다" "$out"; fi
+  else
+    echo "  ⛔ 판정 불가 — 오늘은 요일 인사가 이겨서 강수 갈래를 못 잰다(평일에 재야 한다)"
+  fi
+else
+  echo "  ⛔ 판정 불가 — 이 기계의 sed 가 --posix 를 안 받아 GNU 확장을 끌 수 없다"
+fi
 # 인사는 소스가 죽어도 나온다 — 인사의 유무로 상태를 판단하면 안 된다는 규약
 out="$(run "$ROOT/없는파일.md" "$ROOT/없는날씨.json")"
 if [[ "$(sed -n '2p' <<<"$out")" != "" ]] && grep -q '못 읽음' <<<"$out"; then
@@ -126,7 +151,7 @@ cat > "$STUB/date" <<'EOF'
 if [[ "${1:-}" == "-r" && ! "${2:-}" =~ ^[0-9]+$ ]]; then
   echo "date: illegal time format" >&2; exit 1
 fi
-exec /usr/bin/date "$@"
+exec "$REAL_DATE" "$@"
 EOF
 chmod +x "$STUB/date"
 mk_stat() { printf '#!/bin/bash

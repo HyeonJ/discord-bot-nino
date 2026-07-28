@@ -212,7 +212,10 @@ greeting() {
 main() {
 WEATHER="$(weather_section)"
 # 인사 분기에 쓸 강수확률 — 못 읽었으면 빈 값이고, 그러면 날씨 기반 분기를 안 탄다
-RAIN_PCT="$(sed -n 's/.*강수 최대 \([0-9]\+\)%.*/\1/p' <<<"$WEATHER" | head -1)"
+# ⚠️ `\+` 는 **GNU sed 확장**이다 — BSD sed 는 BRE 에서 안 받아 매칭이 통째로 실패한다.
+#    그러면 RAIN_PCT 이 비고, 인사가 강수 갈래를 못 타고 평일 기본 인사로 조용히 떨어진다
+#    (룬드 맥 실측 2026-07-28 `분기 불일치`). `[0-9][0-9]*` 는 POSIX BRE 라 양쪽에서 같다.
+RAIN_PCT="$(sed -n 's/.*강수 최대 \([0-9][0-9]*\)%.*/\1/p' <<<"$WEATHER" | head -1)"
 
 MSG="$HEADER
 $(greeting "$(TZ=Asia/Seoul date +%u)" "$RAIN_PCT")
