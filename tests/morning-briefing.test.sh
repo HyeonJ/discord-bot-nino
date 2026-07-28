@@ -155,6 +155,16 @@ if grep -qE '멈췄|시간째' <<<"$(grep '드리프트 감시' <<<"$stale_out")
 out="$(HEARTBEAT_STALE_HOURS=2 run "$ROOT/todo.md" "$ROOT/weather.json" "$ROOT/hb-edge")"
 if ! grep -q '드리프트 감시' <<<"$out"; then ok "경계값은 아직 신선(초과만 낡음)"; else bad "경계에서 오탐" "$out"; fi
 
+# ⑩-6 mtime 을 **못 읽으면** 조용히 "신선"이 되면 안 된다 (판정 불가는 세 번째 상태)
+# 실제 실패를 만든다: 디렉터리를 탐색 불가로 만들면 그 안 파일의 mtime 을 못 구한다.
+# (스텁이 아니라 진짜 실패 — 오늘 배운 "재는 채널이 막혀 있으면 안 된다"를 지킨다)
+mkdir -p "$ROOT/locked"; : > "$ROOT/locked/hb"; chmod 000 "$ROOT/locked"
+out="$(run "$ROOT/todo.md" "$ROOT/weather.json" "$ROOT/locked/hb")"
+chmod 755 "$ROOT/locked"
+if grep -q '판정 불가' <<<"$out"; then ok "못 읽으면 '판정 불가'를 낸다"; else bad "못 읽었는데 조용하다" "$out"; fi
+if grep -qE '시간째|한 번도' <<<"$(grep '드리프트' <<<"$out")"; then
+  bad "못 쟀는데 낡음/없음으로 단정했다" "$out"; else ok "못 쟀을 때 원인을 단정하지 않는다"; fi
+
 # ⑩-5 한 축이 죽어도 다른 축은 그대로 보고한다 (오늘 반복된 원칙)
 out="$(run "$ROOT/todo.md" "$ROOT/weather.json" "$ROOT/hb-stale")"
 if grep -q '27°C' <<<"$out" && grep -q '첫째 항목' <<<"$out"; then

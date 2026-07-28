@@ -27,6 +27,9 @@ DRY_RUN="${DRY_RUN:-0}"                   # 1이면 전송하지 않고 stdout �
 TODO_TOP="${TODO_TOP:-3}"                 # 상위 몇 개를 읽어줄지
 STALE_DAYS="${STALE_DAYS:-3}"             # 며칠 이상 안 바뀌면 그 사실을 덧붙인다
 DRIFT_HEARTBEAT="${DRIFT_HEARTBEAT:-$BOT_DIR/logs/core-drift.heartbeat}"
+# cron 은 `15 * * * *` = **매시 1회**. 임계 2시간은 곧 "두 번 연속 놓쳐야 경고" 다 —
+# 1회 실패로는 안 울린다(단일 blip 오탐 방지 · health-checker 디바운스와 같은 이유).
+# ⚠️ 이 값은 cron 주기와 짝이다. 주기를 바꾸면 여기도 같이 봐야 한다.
 HEARTBEAT_STALE_HOURS="${HEARTBEAT_STALE_HOURS:-2}"   # 이 시간을 **넘으면** 낡은 것으로 본다
 
 TODAY="$(TZ=Asia/Seoul date +%Y-%m-%d)"
@@ -125,13 +128,41 @@ todo_section() {
 # ⚠️ "없음"과 "낡음"은 원인이 다르다: 없음=한 번도 안 돎(cron 미등록) · 낡음=돌다 멈춤.
 #    조치가 다르므로 문구를 갈라야 한다. 합치면 "왜 안 도는지"를 매번 다시 조사하게 된다.
 # 신선하면 아무 것도 출력하지 않는다 — 위의 출력 규약(확인된 정상은 섹션을 뺀다) 그대로.
+# 파일 mtime(epoch) — GNU/BSD 양쪽 (룬드 리뷰 2026-07-28).
+#   GNU  `date -r FILE`  = 파일 mtime
+#   BSD  `date -r SECS`  = epoch 를 날짜로   ← **인자 의미가 다르다**(파일명을 주면 에러)
+# ⚠️ 폴백 `stat -f` 는 GNU 에선 --file-system 이라 **다른 걸 조용히 찍는다**. 그래서
+#    값이 정수인지 검사하고 아니면 **실패로 낸다** — 못 쟀는데 0 을 돌려주면 "방금 갱신됨"이
+#    되어 죽은 cron 이 신선하게 보인다.
+file_mtime() {
+  local m
+  m="$(date -r "$1" +%s 2>/dev/null)" || m=""
+  [[ "$m" =~ ^[0-9]+$ ]] || m="$(stat -f %m "$1" 2>/dev/null)"
+  [[ "$m" =~ ^[0-9]+$ ]] || return 1
+  printf '%s' "$m"
+}
+
 drift_heartbeat_section() {
+  # 🔑 순서가 중요하다: **볼 수 있나 → 있나 → 언제인가**.
+  #    처음엔 `[[ ! -f ]]` 를 먼저 봤는데, 디렉터리를 못 뒤지면 `-f` 도 실패해서
+  #    **"한 번도 안 돌았다"로 단정**했다 — *없는 것*과 *못 보는 것*을 합친 것이다.
+  #    같은 날 `check-core-drift.sh` 에서 `?`(못 쟀다)를 STALE(미달)로 접었던 것과
+  #    같은 부류이고, 시험 ⑩-6 이 잡았다.
+  local dir mt age_h
+  dir="$(dirname "$DRIFT_HEARTBEAT")"
+  if [[ ! -r "$dir" || ! -x "$dir" ]]; then
+    echo "⚠️ 코어 드리프트 하트비트를 볼 수 없다 — 신선한지 판정 불가 (디렉터리 접근 불가)"
+    return
+  fi
   if [[ ! -f "$DRIFT_HEARTBEAT" ]]; then
     echo "⚠️ 코어 드리프트 감시가 한 번도 안 돌았다 — cron 미등록일 수 있어 (하트비트 없음)"
     return
   fi
-  local age_h
-  age_h=$(( ( $(date +%s) - $(date -r "$DRIFT_HEARTBEAT" +%s) ) / 3600 ))
+  if ! mt="$(file_mtime "$DRIFT_HEARTBEAT")"; then
+    echo "⚠️ 코어 드리프트 하트비트의 시각을 못 읽었다 — 신선한지 판정 불가"
+    return
+  fi
+  age_h=$(( ( $(date +%s) - mt ) / 3600 ))
   if (( age_h > HEARTBEAT_STALE_HOURS )); then
     echo "⚠️ 코어 드리프트 감시가 ${age_h}시간째 안 돌았다 — cron 이 멈췄을 수 있어"
   fi
