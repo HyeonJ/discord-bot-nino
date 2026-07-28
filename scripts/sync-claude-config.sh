@@ -41,7 +41,7 @@ for d in "$CLAUDE_DIR/skills"/*/; do
         mkdir -p "$CONFIG_DIR/skills/$name"
         rsync -a "${RSYNC_EXCLUDE[@]}" "$d" "$CONFIG_DIR/skills/$name/"
         log "SYNC: skill/$name"
-        ((CHANGED++))
+        CHANGED=$((CHANGED + 1))
     fi
 done
 
@@ -52,7 +52,7 @@ for f in "$CLAUDE_DIR/hooks"/*; do
     if ! diff -q "$f" "$CONFIG_DIR/hooks/$name" &>/dev/null 2>&1; then
         cp "$f" "$CONFIG_DIR/hooks/"
         log "SYNC: hooks/$name"
-        ((CHANGED++))
+        CHANGED=$((CHANGED + 1))
     fi
 done
 
@@ -60,7 +60,7 @@ done
 if ! diff -q "$CLAUDE_DIR/settings.json" "$CONFIG_DIR/user-settings.json" &>/dev/null 2>&1; then
     cp "$CLAUDE_DIR/settings.json" "$CONFIG_DIR/user-settings.json"
     log "SYNC: user-settings.json"
-    ((CHANGED++))
+    CHANGED=$((CHANGED + 1))
 fi
 
 # project settings.json 동기화
