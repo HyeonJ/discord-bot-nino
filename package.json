@@ -1,0 +1,19 @@
+{
+  "name": "discord-bot-nino",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "test": "jest --runInBand"
+  },
+  "dependencies": {
+    "discord.js": "^14.0.0",
+    "dotenv": "^16.0.0",
+    "lgtv2": "^1.6.3",
+    "playwright": "^1.60.0",
+    "puppeteer": "^25.0.4",
+    "ws": "^8.21.1"
+  },
+  "devDependencies": {
+    "jest": "^30.0.0"
+  }
+}
