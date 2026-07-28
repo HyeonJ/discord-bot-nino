@@ -39,11 +39,15 @@ cat > "$ROOT/todo.md" <<'MD'
 MD
 printf '# 할 일\n- [x] 끝난 것만 있음\n' > "$ROOT/empty-todo.md"
 
-run() {  # run <TODO_FILE> <WEATHER_JSON> — 항상 DRY_RUN
+run() {  # run <TODO_FILE> <WEATHER_JSON> [DRIFT_HEARTBEAT] — 항상 DRY_RUN
+  # 하트비트를 안 주면 **신선한 것**을 기본으로 깐다 — 안 그러면 기존 시험 전부가
+  # "하트비트 없음" 경고를 달고 나와서, 다른 섹션을 보는 단언이 흔들린다.
   DRY_RUN=1 TODO_FILE="$1" WEATHER_JSON="$2" \
+    DRIFT_HEARTBEAT="${3:-$ROOT/hb-fresh}" \
     DISCORD_SEND="$ROOT/should-not-be-called" \
     bash "$SCRIPT" 2>&1
 }
+printf '%s rc=0\n' "$(date '+%Y-%m-%d %H:%M:%S')" > "$ROOT/hb-fresh"
 
 echo "① 정상 — 날씨 수치와 상위 3개가 들어간다"
 out="$(run "$ROOT/todo.md" "$ROOT/weather.json")"
@@ -112,6 +116,44 @@ if [[ "$(sed -n '2p' <<<"$out")" != "" ]] && grep -q '못 읽음' <<<"$out"; the
 
 echo "⑨ DRY_RUN 은 전송하지 않는다"
 if [[ ! -e "$ROOT/should-not-be-called" ]]; then ok "discord-send 미호출"; else bad "전송이 일어났다"; fi
+
+echo "⑩ 코어 드리프트 하트비트 — cron 이 죽은 상태가 무음이면 안 된다 (승인 ③ 후속)"
+# 🔑 왜 여기 붙나: core-drift-cron.sh 는 rc=0 이면 **조용한 게 정상**이다. 그래서
+#    "cron 이 죽어서 아무 말이 없는 것"과 "이상이 없어서 조용한 것"이 같은 모양이 된다.
+#    하트비트는 그 둘을 가르려고 남기는데, **읽는 쪽이 없으면 파일만 쌓이고 구분이 안 선다.**
+#    이 브리핑이 그 읽는 쪽이다.
+
+# ⑩-1 신선하면 아무 말도 안 한다 (확인된 정상 → 섹션을 뺀다)
+out="$(run "$ROOT/todo.md" "$ROOT/weather.json" "$ROOT/hb-fresh")"
+if ! grep -q '드리프트 감시' <<<"$out"; then ok "신선하면 조용하다"; else bad "정상인데 떠들었다" "$out"; fi
+
+# ⑩-2 낡으면 반드시 줄을 낸다 + 얼마나 낡았는지
+touch -d '5 hours ago' "$ROOT/hb-fresh.stale" 2>/dev/null || touch -t "$(date -d '5 hours ago' +%Y%m%d%H%M)" "$ROOT/hb-fresh.stale"
+printf 'old rc=0\n' >> /dev/null
+: > "$ROOT/hb-stale"; printf '%s rc=0\n' "$(date -d '5 hours ago' '+%Y-%m-%d %H:%M:%S')" > "$ROOT/hb-stale"
+touch -d '5 hours ago' "$ROOT/hb-stale"
+out="$(run "$ROOT/todo.md" "$ROOT/weather.json" "$ROOT/hb-stale")"
+if grep -q '드리프트 감시' <<<"$out"; then ok "낡으면 줄을 낸다"; else bad "낡았는데 무음" "$out"; fi
+if grep -qE '5시간|[0-9]+시간' <<<"$out"; then ok "얼마나 낡았는지 수치가 나온다"; else bad "수치 없음" "$out"; fi
+
+# ⑩-3 파일이 아예 없으면 = cron 이 한 번도 안 돌았다. 이것도 시끄러워야 한다
+out="$(run "$ROOT/todo.md" "$ROOT/weather.json" "$ROOT/hb-none")"
+if grep -q '드리프트 감시' <<<"$out"; then ok "파일 없음도 알린다(한 번도 안 돎)"; else bad "무음" "$out"; fi
+# 🔑 "없음"과 "낡음"은 원인이 다르다(cron 미등록 vs 죽음) → 문구가 갈려야 조치가 갈린다
+none_line="$(grep '드리프트 감시' <<<"$out")"
+stale_out="$(run "$ROOT/todo.md" "$ROOT/weather.json" "$ROOT/hb-stale")"
+stale_line="$(grep '드리프트 감시' <<<"$stale_out")"
+if [[ "$none_line" != "$stale_line" ]]; then ok "'없음'과 '낡음'이 다른 문구다"; else bad "두 상태가 같은 문구" "$none_line"; fi
+
+# ⑩-4 경계값 — 정확히 임계면 아직 신선(초과만 낡음)
+: > "$ROOT/hb-edge"; touch -d '2 hours ago' "$ROOT/hb-edge"
+out="$(HEARTBEAT_STALE_HOURS=2 run "$ROOT/todo.md" "$ROOT/weather.json" "$ROOT/hb-edge")"
+if ! grep -q '드리프트 감시' <<<"$out"; then ok "경계값은 아직 신선(초과만 낡음)"; else bad "경계에서 오탐" "$out"; fi
+
+# ⑩-5 한 축이 죽어도 다른 축은 그대로 보고한다 (오늘 반복된 원칙)
+out="$(run "$ROOT/todo.md" "$ROOT/weather.json" "$ROOT/hb-stale")"
+if grep -q '27°C' <<<"$out" && grep -q '첫째 항목' <<<"$out"; then
+  ok "하트비트가 낡아도 날씨·할 일은 그대로"; else bad "다른 섹션이 같이 죽었다" "$out"; fi
 
 echo
 echo "  통과 $pass · 실패 $fail"

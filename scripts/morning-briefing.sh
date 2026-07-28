@@ -26,6 +26,8 @@ DISCORD_SEND="${DISCORD_SEND:-$BOT_DIR/src/discord-send}"
 DRY_RUN="${DRY_RUN:-0}"                   # 1이면 전송하지 않고 stdout 으로만 낸다
 TODO_TOP="${TODO_TOP:-3}"                 # 상위 몇 개를 읽어줄지
 STALE_DAYS="${STALE_DAYS:-3}"             # 며칠 이상 안 바뀌면 그 사실을 덧붙인다
+DRIFT_HEARTBEAT="${DRIFT_HEARTBEAT:-$BOT_DIR/logs/core-drift.heartbeat}"
+HEARTBEAT_STALE_HOURS="${HEARTBEAT_STALE_HOURS:-2}"   # 이 시간을 **넘으면** 낡은 것으로 본다
 
 TODAY="$(TZ=Asia/Seoul date +%Y-%m-%d)"
 DAY_NAMES=("" "월요일" "화요일" "수요일" "목요일" "금요일" "토요일" "일요일")
@@ -115,6 +117,26 @@ todo_section() {
   [[ -n "$tail" ]] && printf '       (%s)\n' "$tail"
 }
 
+# ── 코어 드리프트 감시 하트비트 ──────────────────────────────────────────────
+# 🔑 core-drift-cron.sh 는 이상이 없으면 **조용한 게 정상**이다. 그래서 *cron 이 죽어서
+#    아무 말이 없는 것*과 *이상이 없어서 조용한 것*이 같은 모양이 된다. 하트비트는 그
+#    둘을 가르려고 남기는 파일인데, **읽는 쪽이 없으면 파일만 쌓이고 구분이 안 선다.**
+#    (core-drift-cron.sh 의 `TODO(승인 ③ 후속)` 이 이것 — 여기서 닫는다.)
+# ⚠️ "없음"과 "낡음"은 원인이 다르다: 없음=한 번도 안 돎(cron 미등록) · 낡음=돌다 멈춤.
+#    조치가 다르므로 문구를 갈라야 한다. 합치면 "왜 안 도는지"를 매번 다시 조사하게 된다.
+# 신선하면 아무 것도 출력하지 않는다 — 위의 출력 규약(확인된 정상은 섹션을 뺀다) 그대로.
+drift_heartbeat_section() {
+  if [[ ! -f "$DRIFT_HEARTBEAT" ]]; then
+    echo "⚠️ 코어 드리프트 감시가 한 번도 안 돌았다 — cron 미등록일 수 있어 (하트비트 없음)"
+    return
+  fi
+  local age_h
+  age_h=$(( ( $(date +%s) - $(date -r "$DRIFT_HEARTBEAT" +%s) ) / 3600 ))
+  if (( age_h > HEARTBEAT_STALE_HOURS )); then
+    echo "⚠️ 코어 드리프트 감시가 ${age_h}시간째 안 돌았다 — cron 이 멈췄을 수 있어"
+  fi
+}
+
 # ── 인사 ────────────────────────────────────────────────────────────────────
 # Darren 요청(2026-07-28 M:44r9). 매일 같은 문장이면 안 읽게 되므로 **요일·날씨로 갈린다**.
 # ⚠️ 인사는 정보가 아니다 — 날씨/할 일을 못 읽어도 인사는 나온다. 그래서 인사의 유무로
@@ -144,7 +166,9 @@ $(greeting "$(TZ=Asia/Seoul date +%u)" "$RAIN_PCT")
 
 $WEATHER
 
-$(todo_section)"
+$(todo_section)
+
+$(drift_heartbeat_section)"
 
 # 섹션이 빠지면서 생긴 3줄 이상의 빈 줄을 정리한다(내용이 없는 건 티 안 나야 한다)
 MSG="$(printf '%s\n' "$MSG" | cat -s)"
