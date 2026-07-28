@@ -67,6 +67,30 @@ ln -s "$ROOT/live/skills/demo" "$ROOT/live/skills/linked"
 run >/dev/null
 [ ! -e "$ROOT/repo/claude-config/skills/linked" ] && ok "symlink 은 복사 안 함" || bad "symlink 을 따라갔다"
 
+echo "⑥ 🔴 **변경이 있으면 커밋 단계까지 도달한다** (2026-07-29 — 67회 복사·0회 커밋)"
+# 🔑 이 시험이 없던 동안 스크립트는 **첫 변경 하나를 복사한 직후 매번 죽었다.**
+#    로그에 SYNC 67줄 · "synced and pushed" 0줄 · 자동동기화 커밋 0개.
+#    원인: `set -e` + `((CHANGED++))` — **후위 증가는 옛 값을 반환**하므로 0→1 에서
+#    `((...))` 가 0(거짓)을 내고 set -e 가 죽인다. `C=1` 이면 살아남아 *가끔 되는 것처럼* 보인다.
+#    ⚠️ 복사는 눈에 보이고(파일이 생긴다) 커밋은 안 보인다 — **절반이 성공하면 성공처럼 보인다.**
+#       그래서 ①~⑤(복사 결과)만으로는 이 결함을 영원히 못 잡는다. 마지막 단계를 봐야 한다.
+GITREPO="$ROOT/repo"
+( cd "$GITREPO" && git init -q 2>/dev/null && git config user.email t@t && git config user.name t \
+  && mkdir -p .claude && printf '{}\n' > .claude/settings.json \
+  && git add -A >/dev/null 2>&1 && git commit -qm init 2>/dev/null ) || true
+printf '# demo v3\n' > "$ROOT/live/skills/demo/SKILL.md"
+out="$(run)"; rc=$?
+grep -q 'synced and pushed' "$ROOT/repo/logs/sync.log" \
+  && ok "커밋 단계 로그에 도달한다" \
+  || bad "복사만 하고 죽었다 — 마지막 줄에 도달 못 함" "$(tail -3 "$ROOT/repo/logs/sync.log")"
+[ "$rc" -eq 0 ] && ok "종료코드 0" || bad "종료코드 $rc — 중간에 죽었다" "$out"
+
+echo "⑦ 변경이 없을 때도 정상 종료한다 (대조군 — ⑥이 그냥 항상 참이 아님을 보인다)"
+run >/dev/null; rc2=$?
+[ "$rc2" -eq 0 ] && ok "무변경 종료코드 0" || bad "무변경인데 종료코드 $rc2"
+tail -1 "$ROOT/repo/logs/sync.log" | grep -q 'no changes' && ok "무변경 경로는 다른 줄을 남긴다" \
+  || bad "무변경 로그가 다르지 않다" "$(tail -1 "$ROOT/repo/logs/sync.log")"
+
 echo
 echo "  통과 $pass · 실패 $fail"
 [ "$fail" -eq 0 ]
