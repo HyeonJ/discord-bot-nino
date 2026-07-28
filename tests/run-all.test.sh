@@ -22,14 +22,21 @@ printf '%s\n' "$@" > "${STUB_ARGV_OUT:?}"
 STUB
 chmod +x "$STUB_DIR/stub.sh"
 
+# ⚠️ **호출 환경을 지우고 부른다** — `UNMEASURED_STATE`·`CI` 가 밖에서 설정돼 있으면
+#    시험 내부의 셔틀 호출까지 상속돼 ②의 기대값(`*/state/*`)이 그 값으로 바뀐다.
+#    실측(2026-07-28): `UNMEASURED_STATE=/tmp/elsewhere/x.tsv bash tests/run-all.test.sh`
+#    → 7 pass · **1 fail**. 룬드가 자기 셔틀에서 먼저 밟았고(`assistant#23`) 내 것도 같았다.
+#    🔑 *시험이 환경 따라 갈리면 초록도 빨강도 신뢰할 수 없다.* `-u` 로 지운 뒤,
+#       그 갈래를 **일부러** 태우는 경우(④)만 인자로 다시 준다 — 나중 지정이 이긴다.
 run_shuttle() {  # $1=argv 파일명, 나머지는 env
     local out="$STUB_DIR/$1"; shift
-    env "$@" STUB_ARGV_OUT="$out" RUNNER="$STUB_DIR/stub.sh" bash "$SHUTTLE" >/dev/null 2>&1
+    env -u UNMEASURED_STATE -u CI "$@" \
+        STUB_ARGV_OUT="$out" RUNNER="$STUB_DIR/stub.sh" bash "$SHUTTLE" >/dev/null 2>&1
     printf '%s' "$out"
 }
 
 echo "① 러너를 부르고 시험 목록을 넘긴다"
-A="$(run_shuttle argv.txt CI=)"
+A="$(run_shuttle argv.txt)"
 grep -qx -- '--shell-glob' "$A" && ok "--shell-glob 을 준다" || bad "--shell-glob" "있음" "없음"
 grep -qx -- 'npx jest --runInBand' "$A" && ok "jest 를 준다" || bad "--cmd jest" "있음" "$(tr '\n' ' ' < "$A")"
 
@@ -54,7 +61,7 @@ echo "④ 🔑 상태 경로에 **공백이 있어도 한 토큰**으로 넘어�
 # 🔴 `$ARGS` 를 안 감싸고 펼치면 공백에서 쪼개져 러너가 `모르는 인자` 로 죽는다(rc=2).
 #    조용히 죽진 않지만 원인은 *공백* 인데 메시지는 *모르는 인자* 라 엉뚱한 데를 판다.
 #    내가 룬드 `assistant#22` 에서 지적한 자리 — 내 코드에선 처음부터 잠근다.
-C="$(run_shuttle argv_sp.txt CI= UNMEASURED_STATE="$STUB_DIR/my state/unm.tsv")"
+C="$(run_shuttle argv_sp.txt UNMEASURED_STATE="$STUB_DIR/my state/unm.tsv")"
 got="$(grep -A1 -x -- '--unmeasured-state' "$C" | tail -1)"
 [ "$got" = "$STUB_DIR/my state/unm.tsv" ] && ok "공백 경로가 안 쪼개진다" \
   || bad "공백 경로" "$STUB_DIR/my state/unm.tsv" "$got"
