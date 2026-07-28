@@ -41,6 +41,21 @@ chmod +x "$ROOT/home/.nvm/versions/node/v24.14.0/bin/nvmtool"
 out="$(PATH=/usr/bin:/bin HOME="$ROOT/home" bash -c '. "$1"; resolve_bin nvmtool' _ "$LIB")"; rc=$?
 [ "$rc" -eq 0 ] && ok "nvm 버전 디렉터리를 훑는다" || bad "nvm 해석" "경로 (rc=0)" "$out (rc=$rc)"
 
+echo "③-b 🔑 nvm 버전이 여럿이면 **가장 높은 것**을 고른다(문자열 순이 아니라 숫자 순)"
+# ⚠️ glob 확장은 문자열 순이라 그냥 첫 값을 쓰면 최신을 안 고른다 — 룬드 실측(2026-07-28):
+#    `v18.19.0 · v20.11.0 · v8.17.0` 이 있으면 **v18 을 고른다**. `v8` 이 문자열 순으로 맨
+#    뒤라 최악(가장 낮은 버전)은 피했지만, 고른 값이 `nvm use` 로 정한 것과 다를 수 있다.
+#    ⇒ 픽스처에 `v8` 을 넣는 게 중요하다. 없으면 문자열 순과 숫자 순이 **같은 답**을 내서
+#      갈래가 안 갈린다(오늘 ⑫에서 밟은 그 자리).
+for v in v18.19.0 v20.11.0 v8.17.0; do
+  mkdir -p "$ROOT/nvmhome/.nvm/versions/node/$v/bin"
+  printf '#!/bin/sh\necho %s\n' "$v" > "$ROOT/nvmhome/.nvm/versions/node/$v/bin/multinode"
+  chmod +x "$ROOT/nvmhome/.nvm/versions/node/$v/bin/multinode"
+done
+got="$(PATH=/usr/bin:/bin HOME="$ROOT/nvmhome" bash -c '. "$1"; n="$(resolve_bin multinode)" && "$n"' _ "$LIB" 2>&1)"
+[ "$got" = "v20.11.0" ] && ok "v18·v20·v8 중 v20 을 고른다" \
+  || bad "버전 정렬" "v20.11.0" "$got"
+
 echo "④ 못 찾으면 **rc=1 이고 아무것도 안 낸다**(빈 문자열을 돌려주지 않는다)"
 out="$(PATH=/usr/bin:/bin HOME="$ROOT/home" bash -c '. "$1"; resolve_bin no-such-tool-xyz' _ "$LIB")"; rc=$?
 [ "$rc" -ne 0 ] && ok "rc≠0" || bad "부재 종료코드" "1" "$rc"
