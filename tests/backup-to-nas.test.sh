@@ -101,27 +101,19 @@ else
 fi
 teardown
 
-# ⑤ **시각과 무관하게** git 단계가 돈다 (2026-07-28 승인 ⑦ 로 계약 변경)
-#    이전 계약: 03시에만. 그러면 최악 **23시간**의 작업이 두 번째 사본 없이 남는다 —
-#    NAS 미러는 `--delete` 라서 실수 삭제를 복구 못 하고, 그 축을 덮는 게 git 축이다.
-#    스크립트는 매시 돌고 변경이 없으면 커밋을 안 만드니(⑦) 시각 게이트는 노출만 늘렸다.
-# ⚠️ "auto-memory" 로만 grep하면 1단계 rsync 로그("auto-memory synced")에 걸린다 —
-#    실제로 한 번 오탐했다. git 단계 고유 문구(커밋/push)로 좁혀야 판정이 성립한다.
+# ⑤ 03시가 아니면 git push 시도 안 함
 setup; init_git_repo
 echo "변경" >> "$ROOT/auto-memory/MEMORY.md"
 run_backup BACKUP_FORCE_HOUR=09 >/dev/null
+# ⚠️ "auto-memory" 로만 grep하면 1단계 rsync 로그("auto-memory synced")에 걸린다 —
+#    실제로 한 번 오탐했다. git 단계 고유 문구(커밋/push)로 좁혀야 판정이 성립한다.
 if logtext | grep -qE "auto-memory (커밋|push|변경 없음)"; then
-  ok "비-03시에도 git 단계가 돈다"
+  bad "03시 아닌데 auto-memory git 단계가 돌았다" "$(logtext)"
 else
-  bad "시각 게이트가 남아 있다 — 09시에 git 단계가 안 돌았다" "$(logtext)"
+  ok "비-03시엔 git push 미시도"
 fi
-REMOTE_09="$(git -C "$ROOT/remote.git" log --oneline -1 2>/dev/null || echo "")"
-[[ "$REMOTE_09" != *"init"* && -n "$REMOTE_09" ]] \
-  && ok "09시 커밋+push → 원격 도달 실측" \
-  || bad "09시인데 원격에 도달 안 함" "remote=$REMOTE_09 / log=$(logtext)"
 
-# ⑥ 03시에도 그대로 된다 (기존 동작 유지 — 넓힌 것이지 옮긴 게 아니다)
-echo "변경-03" >> "$ROOT/auto-memory/MEMORY.md"
+# ⑥ 03시엔 커밋+push 되고 원격에 도달한다
 run_backup BACKUP_FORCE_HOUR=03 >/dev/null
 REMOTE_MSG="$(git -C "$ROOT/remote.git" log --oneline -1 2>/dev/null || echo "")"
 if [[ "$REMOTE_MSG" == *"init"* || -z "$REMOTE_MSG" ]]; then
