@@ -1,10 +1,37 @@
 {
   "env": {
-    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
-    "CLAUDE_CODE_TEAMMATE_MODE": "tmux"
+    "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "400000"
   },
   "permissions": {
     "defaultMode": "bypassPermissions"
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /home/bpx27/.claude/hooks/darren-mention-guard.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /home/bpx27/.claude/hooks/claudemd-gist-sync.sh"
+          },
+          {
+            "type": "command",
+            "command": "bash /home/bpx27/discord-bot-nino/hooks/cascade-queue.sh"
+          }
+        ]
+      }
+    ]
   },
   "enabledPlugins": {
     "cc-creator@yaksu-claude-plugins": true,
@@ -19,5 +46,7 @@
       "autoUpdate": true
     }
   },
-  "skipDangerousModePermissionPrompt": true
+  "showThinkingSummaries": true,
+  "skipDangerousModePermissionPrompt": true,
+  "tui": "fullscreen"
 }
