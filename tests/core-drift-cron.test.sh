@@ -101,6 +101,60 @@ out="$(BOT_DIR="$BOT" CHECK="$ROOT/sig.sh" DRY_RUN=1 HEARTBEAT="$ROOT/hb" LOG="$
 [ "$rc" -eq 2 ] && ok "rc=143 → 판정 불가(2)" || bad "rc=$rc 로 나갔다" "$out"
 grep -q "시그널 15" <<<"$out" && ok "  → 시그널 번호를 계산해서 준다(143-128)" || bad "  시그널 번호가 없다" "$out"
 
+echo "⑩ 🔑 **로그가 판정의 근거를 버리지 않는다** — 헤드라인만 남으면 왜 를 못 되짚는다"
+# 🔴 `head -1` 만 남기고 있었다. 실측(4줄 중 3줄이 버려졌다):
+#      DRIFT: repo_behind=1커밋 · process_behind=0파일   ← 남음
+#        cc2c43a feat(ci): …                              ← 버림
+#        런타임 파일 변경: 0건                             ← 버림  **재시작 필요 여부의 근거**
+#        ✅ 받아도 설정 요건 충족                          ← 버림  **최종 판정**
+#    2026-07-28 Darren 승인을 받을 때 내가 댄 근거(*"런타임 변경 0건이라 재시작 불필요"*)가
+#    정확히 그 버려지는 줄이다 — 로그만으로는 *"그때 왜 재시작 안 했지"* 를 못 되짚는다.
+# ⚠️ 헤드라인 **형식은 그대로 둔다.** 기존 로그를 날짜로 세는 grep 이 깨지면 "언제부터
+#    밀렸나" 를 못 세게 되고, 그건 이 수정이 지키려는 것과 같은 것을 부순다.
+mkmulti() {  # $1=rc  $2..=줄들
+    local rc="$1"; shift
+    { printf '#!/usr/bin/env bash\n'
+      for l in "$@"; do printf 'printf %%s\\\\n %s\n' "$(printf '%q' "$l")"; done
+      printf 'exit %s\n' "$rc"
+    } > "$ROOT/check.sh"; chmod +x "$ROOT/check.sh"
+}
+: > "$ROOT/log"
+# 🔑 픽스처에 **날짜로 시작하는 줄**을 넣는다. 커밋 목록엔 실제로 날짜가 섞이고, 무엇보다
+#    이 값이 없으면 들여쓰기 단언이 **어떤 변이로도 안 갈린다**(실측: 들여쓰기를 빼도
+#    `head -2` 로 바꿔도 전부 초록이었다). 원래 결함을 재현한 값이 아니라 **구조를 깨는 값**
+#    이 필요한 자리 — `#53` ③-c 와 같다.
+mkmulti 1 "DRIFT: repo_behind=1커밋 · process_behind=0파일" "  abc1234 feat(ci): 뭔가" "  2026-01-02 03:04:05 커밋된 항목" "  런타임 파일 변경: 0건" "  ✅ 받아도 설정 요건 충족"
+run
+head1="$(head -1 "$ROOT/log")"
+printf '%s' "$head1" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2} rc=1 DRIFT: repo_behind=1커밋' \
+  && ok "헤드라인 형식이 그대로다(기존 grep 안 깨짐)" || bad "헤드라인" "STAMP rc=1 DRIFT…" "$head1"
+for want in "런타임 파일 변경: 0건" "받아도 설정 요건 충족" "abc1234"; do
+    grep -qF "$want" "$ROOT/log" && ok "  → 근거가 남는다: $want" || bad "  버려졌다: $want" "$(cat "$ROOT/log")"
+done
+# 🔑 이어지는 줄은 **들여쓰기**로 헤드라인과 갈린다 — 헤드라인 개수 세기가 안 깨지게.
+n_head="$(grep -cE '^[0-9]{4}-[0-9]{2}-[0-9]{2} ' "$ROOT/log")"
+[ "$n_head" -eq 1 ] && ok "  → 헤드라인은 여전히 1건으로 세어진다(이어지는 줄은 들여쓰기)" \
+  || bad "  헤드라인이 $n_head 건으로 세어진다 — 이력 집계가 깨진다" "$(cat "$ROOT/log")"
+# 🔑 그리고 **2번째 줄부터는 전부 접두사를 가진다.** 위 개수 단언만으로는 부족하다 —
+#    헤드라인 printf 가 여러 줄을 삼켜도(예: `head -2`) 새어나온 줄이 날짜로 시작하진
+#    않아서 개수가 안 변한다(실측: `head -1`→`head -2` 변이가 안 걸렸다).
+#    "한 실행 = 헤드라인 한 줄 + 접두사 붙은 근거들" 이 규칙이므로 그걸 직접 단언한다.
+stray="$(tail -n +2 "$ROOT/log" | grep -vcE '^    · ' || true)"
+[ "$stray" -eq 0 ] && ok "  → 2번째 줄부터는 전부 '    · ' 접두사를 가진다" \
+  || bad "  접두사 없는 줄이 $stray 건 — 헤드라인 경계가 흐려진다" "$(cat "$ROOT/log")"
+
+echo "⑩-b 출력이 **한 줄이면** 이어지는 줄을 안 붙인다 (조용한 게 정상인 자리에 잡음 금지)"
+: > "$ROOT/log"; mkfake 0 "OK: repo_behind=0 · process_behind=0"; run
+[ "$(wc -l < "$ROOT/log")" -eq 1 ] && ok "한 줄짜리는 한 줄로 남는다" \
+  || bad "잡음이 붙었다" "$(cat "$ROOT/log")"
+
+echo "⑩-c 판정 불가·셸 코드일 때도 **근거가 남는다** (원인 조사가 제일 필요한 자리다)"
+: > "$ROOT/log"
+mkmulti 2 "WARN: fetch 실패 — 뒤처짐 판정 불가" "  흔한 원인: 네트워크·인증"
+run
+grep -qF "흔한 원인: 네트워크·인증" "$ROOT/log" && ok "판정 불가의 근거도 남는다" \
+  || bad "판정 불가인데 근거가 버려졌다" "$(cat "$ROOT/log")"
+
 echo "⑦ DRY_RUN 은 전송하지 않는다"
 [ ! -e "$ROOT/should-not-exist" ] && ok "discord-send 미호출" || bad "전송이 일어났다"
 
