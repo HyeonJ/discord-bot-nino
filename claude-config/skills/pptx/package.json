@@ -1,0 +1,13 @@
+{
+  "name": "claude-skill-pptx",
+  "private": true,
+  "description": "pptx 스킬이 쓰는 의존성 선언 — 스킬은 자기 실행 환경을 소유한다",
+  "dependencies": {
+    "playwright": "^1.62.0",
+    "pptxgenjs": "^4.0.1",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-icons": "^5.7.0",
+    "sharp": "^0.35.3"
+  }
+}
