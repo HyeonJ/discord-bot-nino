@@ -72,9 +72,23 @@ done
 FAKEAGE
 chmod +x "$FAKE_AGE"
 
+# 같은 병 두 번째 자리 — **crontab**.
+#    기본값이 `crontab -l` 이라 crontab 이 없는 기계(CI 러너)에서는 CRON_OUT 이 비고,
+#    그러면 스크립트가 **마지막 단계에서 rc=1** 이 된다. 그 결과 crontab 과 무관한
+#    `push 실패` · `스냅샷` 케이스가 빨개진다 — age 때와 **똑같이** 오진을 부르는 실패다.
+#    실측(2026-07-28): crontab 만 없는 척 → 21 pass / 2 fail, CI 숫자와 정확히 일치.
+#    ⇒ 기본값으로 가짜를 물린다. crontab 을 **직접 겨냥한** ⑳㉑ 은 호출부에서 덮어쓴다.
+FAKE_CRONTAB="$(mktemp)"
+cat > "$FAKE_CRONTAB" <<'FAKECRON'
+#!/bin/bash
+printf '0 3 * * * default-a\n*/5 * * * * default-b\n'
+FAKECRON
+chmod +x "$FAKE_CRONTAB"
+
 run_backup() {
   env \
     BACKUP_AGE_BIN="$FAKE_AGE" \
+    BACKUP_CRONTAB_CMD="$FAKE_CRONTAB" \
     BACKUP_NAS_DIR="$ROOT/nas" \
     BACKUP_NAS_ROOT="$ROOT" \
     BACKUP_MEMORY_SRC="$ROOT/auto-memory" \
