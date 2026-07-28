@@ -65,6 +65,13 @@ C="$(run_shuttle argv_sp.txt UNMEASURED_STATE="$STUB_DIR/my state/unm.tsv")"
 got="$(grep -A1 -x -- '--unmeasured-state' "$C" | tail -1)"
 [ "$got" = "$STUB_DIR/my state/unm.tsv" ] && ok "공백 경로가 안 쪼개진다" \
   || bad "공백 경로" "$STUB_DIR/my state/unm.tsv" "$got"
+# 🔑 **값만 비교하면 부족하다**(룬드 assistant#23): 값이 맞아도 앞뒤에 **빈 토큰**이 끼면
+#    러너가 `⛔ 모르는 인자: ` 로 죽는다(실측 — 메시지에 이름조차 없어 더 안 읽힌다).
+#    실측: `set -- … ""` 변이가 값 비교만으로는 **8 pass 로 그대로 통과**했다.
+#    ⇒ *무엇을 비교하느냐도 축이다.* 값 + **토큰의 성질**을 같이 잰다.
+n_empty="$(grep -c '^$' "$C" || true)"
+[ "$n_empty" -eq 0 ] && ok "  → 빈 토큰이 하나도 안 섞인다" \
+  || bad "빈 토큰" "0개" "${n_empty}개"
 
 echo "⑤ 러너 계약을 **여기서 다시 구현하지 않는다** — 그게 사본이다"
 grep -qE 'unk=|pass=|판정 불가 [0-9]' "$SHUTTLE" \
