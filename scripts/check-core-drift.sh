@@ -14,6 +14,12 @@
 #        오히려 위험(옛 코드로 계속 돎)을 늘린다.
 set -uo pipefail
 
+# 🔴 cron 에서 돌 때 `systemctl --user` 는 이게 없으면 실패한다:
+#    "Failed to connect to bus: No medium found" (2026-07-28 실측)
+#    그러면 MainPID 를 못 구하고 process_behind 가 `?` 가 된다 — 실제로 첫 실전 발동에서 그랬다.
+#    로그인 셸에는 있고 cron 에는 없는 값이라, **손으로 돌리면 되고 cron 에서만 깨진다**.
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+
 CORE_REPO="${CORE_REPO:-$HOME/yaksu-bot-core-live}"
 BOT_ENV="${BOT_ENV:-$HOME/discord-bot-nino/.env}"
 RELAY_UNIT="${RELAY_UNIT:-nino-relay.service}"
@@ -51,6 +57,17 @@ process_behind() {
 BEHIND="$(git -C "$CORE_REPO" rev-list --count HEAD..@{u} 2>/dev/null)" || BEHIND=""
 [ -n "$BEHIND" ] || { echo "WARN: @{u} 없음 — upstream 미설정"; exit 1; }
 PBEHIND="$(process_behind)"
+
+# 🔑 `?` 는 **0 도 N 도 아닌 세 번째 상태**다 — "못 쟀다".
+#    이걸 STALE 로 접으면 *값이 없는데 조치(재시작)를 지시*하게 된다. 실제로 첫 실전 발동에서
+#    `process_behind=?파일 — 재시작 안 됨` 이 나갔다: 판정은 우연히 맞았고 근거는 비어 있었다.
+#    종료코드 계약대로 **1(판정 불가)** 로 낸다 — 2(미달)와 갈려야 래퍼가 다른 문장을 쓴다.
+if [ "$PBEHIND" = "?" ]; then
+  echo "WARN: process_behind 판정 불가 — $RELAY_UNIT 의 MainPID/시작시각을 못 구했다"
+  echo "  repo_behind=${BEHIND}커밋 (이 값은 유효)"
+  echo "  흔한 원인: cron 에 XDG_RUNTIME_DIR 이 없어 systemctl --user 가 버스에 못 붙음 · 유닛 미기동"
+  exit 1
+fi
 
 if [ "$BEHIND" = "0" ]; then
   if [ "$PBEHIND" = "0" ]; then
