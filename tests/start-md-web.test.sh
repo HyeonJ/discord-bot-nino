@@ -16,8 +16,12 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 SCRIPT="$BOT/scripts/start-md-web.sh"
 
-pass=0; fail=0
+pass=0; fail=0; unk=0
 ok()  { echo "  ✅ $1"; pass=$((pass + 1)); }
+# 🔑 판정 불가는 통과도 실패도 아니다 — 이 시험은 **설치된 유닛**을 보는 갈래가 있어서,
+#    정본 체크아웃이 아니거나 유닛이 없으면 *못 쟀다* 가 정답이다. 실패로 접으면 worktree 에서
+#    헛빨간불이 뜨고(실측: 2026-07-28), 통과로 접으면 배선이 끊겨도 초록이 된다.
+unmeasured() { echo "  ⛔ 판정 불가 — $1"; unk=$((unk + 1)); }
 bad() { echo "  ❌ $1"; fail=$((fail + 1)); [ -n "${2:-}" ] && printf '%s\n' "$2" | sed 's/^/     /'; }
 
 [ -f "$SCRIPT" ] || { echo "❌ 없음: $SCRIPT"; exit 1; }
@@ -60,15 +64,32 @@ out="$(run "$ROOT/md-web" "$ROOT/absent-bun" "$ROOT/none.env")"; rc=$?
 grep -q 'bun 실행 파일 없음' <<<"$out" && ok "이유를 말한다(bun)" || bad "이유가 없다" "$out"
 
 echo "④ 유닛 파일이 이 래퍼를 부른다 (배선이 실제로 이어져 있나)"
-UNIT="$HOME/.config/systemd/user/nino-mdweb.service"
+# 주입 가능하게 둔다 — 이 갈래(유닛 배선)를 값으로 재려면 세 경우를 다 먹여봐야 한다:
+#   정본 일치 / 다른 체크아웃(worktree) / 엉뚱한 대상. 기본값은 실제 유닛이다.
+UNIT="${MDWEB_UNIT:-$HOME/.config/systemd/user/nino-mdweb.service}"
 if [ -f "$UNIT" ]; then
-  grep -q "ExecStart=$BOT/scripts/start-md-web.sh" "$UNIT" && ok "ExecStart 가 이 래퍼를 가리킨다" \
-    || bad "ExecStart 가 다른 것을 가리킨다" "$(grep ExecStart "$UNIT")"
+  EXEC_PATH="$(sed -n 's/^ExecStart=//p' "$UNIT" | head -1 | awk '{print $1}')"
+  if [ "$EXEC_PATH" = "$BOT/scripts/start-md-web.sh" ]; then
+    ok "ExecStart 가 이 래퍼를 가리킨다"
+  elif [ "${EXEC_PATH%/scripts/start-md-web.sh}" != "$EXEC_PATH" ] && [ -x "$EXEC_PATH" ]; then
+    # 같은 이름의 래퍼를 가리키지만 **다른 체크아웃**이다 — worktree 에서 돌리면 항상 이렇게 된다.
+    # 여기서 "실패"라고 하면 정본이 멀쩡한데도 빨간불이 뜬다. 정답은 *못 쟀다* 다.
+    unmeasured "유닛은 다른 체크아웃의 래퍼를 가리킨다(정본에서 재야 한다)
+     유닛: $EXEC_PATH
+     지금: $BOT/scripts/start-md-web.sh"
+  else
+    bad "ExecStart 가 이 래퍼가 아닌 것을 가리킨다" "$(grep ExecStart "$UNIT")"
+  fi
   grep -q '^Restart=always' "$UNIT" && ok "Restart=always" || bad "Restart 설정 없음"
 else
-  echo "  ⏭️  건너뜀 — 이 기계에 유닛이 설치돼 있지 않다(레포만 clone 한 경우)"
+  # ⏭️ 로 조용히 넘기면 "배선을 안 쟀다"가 "배선이 정상"으로 읽힌다
+  unmeasured "이 기계에 유닛이 설치돼 있지 않다(레포만 clone 한 경우) — 배선을 못 쟀다"
 fi
 
 echo
-echo "  통과 $pass · 실패 $fail"
-[ "$fail" -eq 0 ]
+echo "  통과 $pass · 실패 $fail · 판정 불가 $unk"
+# 종료코드 3층 (check-core-drift.sh · check-relay-present.sh 와 같은 계약)
+#   0 전부 쟀고 통과 · 1 실패 · 2 **못 쟀다**(0/1 로 접지 않는다)
+[ "$fail" -gt 0 ] && exit 1
+[ "$unk" -gt 0 ] && exit 2
+exit 0
