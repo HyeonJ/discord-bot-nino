@@ -4,7 +4,8 @@
   "type": "commonjs",
   "scripts": {
     "test": "jest --runInBand",
-    "lint": "bash scripts/lint-js.sh"
+    "lint": "bash scripts/lint-js.sh",
+    "test:all": "bash scripts/run-tests.sh --shell-glob 'tests/*.test.sh' --cmd 'npx jest --runInBand'"
   },
   "dependencies": {
     "discord.js": "^14.0.0",

@@ -1,0 +1,50 @@
+# CI — Darren 승인 2026-07-28 M:d4ao "CI 켜"
+#
+# ⚠️ 이 레포는 Free 플랜 + private 이라 브랜치 보호를 못 쓴다 → **advisory** 다.
+#    빨간불이어도 머지가 막히지 않는다. 얻는 것은 "자동 실행 + 결과 가시화" 이고,
+#    강제는 사람이 빨간불을 존중하는 것에 달렸다 ⇒ **헛빨간불을 만들지 않는 것이 전부다.**
+#
+# 🔴 왜 이 파일이 미추적으로 있었나: `.github/workflows/` push 가 OAuth 스코프 부재로
+#    거부됐다는 기억이 있었는데, 2026-07-28 재측정하니 **스코프는 붙어 있었다**
+#    (`gh auth status` → repo, workflow, …). 막혀 있던 게 아니라 커밋한 적이 없었다.
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]   # PR 마다 초록이어도 머지 후 main 이 빨강일 수 있다(서로 다른 PR 조합)
+
+# 같은 브랜치에 연속 푸시하면 이전 런을 취소한다 — 안 하면 3커밋 = 3런이 끝까지 다 돈다.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read   # checkout 만 필요
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15   # 러너 기본이 6시간 — 매달리면 한 번에 월 한도를 크게 먹는다
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      # `npm ci` — lockfile 을 무시하면 "로컬 초록 ↔ CI 초록" 이 서로 다른 의존성 위에서 난다
+      - run: npm ci
+
+      - run: npm run lint
+
+      # 🔑 시험은 러너로 **한 번에** 돈다 — `npm test`(jest) 만 부르면 `tests/*.test.sh`
+      #    16개가 빠진다(2026-07-28 실측). 러너는 0/1/**2(판정 불가)** 를 내고, 그 셋을
+      #    CI 의 둘로 옮기는 정책은 `scripts/ci-verdict.sh` **한 곳**에만 있다(시험 21개로 잠김).
+      #    여기 인라인으로 쓰면 시험할 수 없고, 조용히 틀려도 아무도 모른다.
+      - name: 시험 전체 (셸 + jest)
+        run: |
+          set +e
+          npm run test:all 2>&1 | tee /tmp/test-all.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          bash scripts/ci-verdict.sh --rc "$rc" --out /tmp/test-all.log --min-green 10
