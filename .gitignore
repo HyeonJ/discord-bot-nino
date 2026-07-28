@@ -50,3 +50,6 @@ nino_avatar.png
 
 # 도구 로컬 설정
 .python-version
+
+# 판정 불가 추세 상태(코어 #91) — 기계마다 다른 값이라 추적하지 않는다
+state/
