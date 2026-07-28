@@ -74,6 +74,37 @@ else
     || ok "MainPID 를 실제로 구했다"
 fi
 
+echo "⑤ 🔴 뒤처짐(DRIFT)은 **조치 필요(rc=2)** 다 — 0 으로 내면 래퍼가 알림 전에 빠져나간다"
+# 실전에서 조용히 새고 있었다(2026-07-28 13:5x 발견). 로그:
+#   12:08 rc=0 DRIFT: repo_behind=3커밋   ← 발견해놓고 rc=0
+#   13:15 rc=0 DRIFT: repo_behind=4커밋
+# core-drift-cron.sh 36행이 `[ "$RC" -eq 0 ] && exit 0` 이라 **알림이 한 번도 안 나갔다.**
+# 래퍼 헤더엔 이미 이렇게 적혀 있었다 — *"없는 경고는 pull 을 미루게 해서 옛 코드로 계속
+# 돌게 만든다"*. 래퍼는 이 사고를 예상했는데 **검사 쪽이 0을 내서 두 반쪽이 어긋났다.**
+# 그래서 라이브 코어가 5커밋 뒤처진 채였고 내 lint 셔틀은 스테일 정본을 실행하고 있었다.
+if [ -z "${LIVE_UNIT:-}" ]; then
+  echo "  ⏭️  건너뜀 — 살아있는 --user 유닛이 없어 process_behind 를 못 재고, 그러면 rc=1 로 먼저 빠진다"
+else
+  # ⚠️ `--branch main` 필수: bare 레포의 HEAD 는 `master` 라 그냥 clone 하면 **빈 master** 를
+  #    체크아웃하고, 거기서 커밋하면 새 루트 커밋이 되어 push 가 non-fast-forward 로 거절된다.
+  #    처음에 그렇게 짜서 repo_behind=0 이 나왔고 시험이 STALE 갈래로 새어버렸다.
+  git clone -q --branch main "$ROOT/remote.git" "$ROOT/pusher" 2>/dev/null
+  echo "새 변경" > "$ROOT/pusher/newfile.txt"
+  git -C "$ROOT/pusher" -c user.email=t@e -c user.name=t add -A
+  git -C "$ROOT/pusher" -c user.email=t@e -c user.name=t commit -qm "코어 신규 커밋"
+  git -C "$ROOT/pusher" push -q origin main 2>/dev/null
+  out5="$(run "$LIVE_UNIT")"; rc5=$?
+  # 🔑 DRIFT 와 rc=2 를 **한 쌍으로** 본다. 따로 보면 STALE(이것도 rc=2)이 rc 단언을 대신
+  #    통과시킨다 — 실제로 첫 판에 그랬다. 다른 갈래가 대신 통과시키는 형태(②).
+  if grep -q "^DRIFT" <<<"$out5"; then
+    ok "DRIFT 로 판정"
+    [ "$rc5" -eq 2 ] && ok "그 DRIFT 가 rc=2 로 나간다 — 래퍼가 알린다" \
+      || bad "DRIFT 인데 rc=$rc5 — 0 이면 래퍼가 36행에서 조용히 빠져나간다" "$out5"
+  else
+    bad "DRIFT 를 못 잡았다 (rc=$rc5) — 이 상태면 rc 단언은 의미가 없다" "$out5"
+  fi
+fi
+
 echo
 echo "  통과 $pass · 실패 $fail"
 [ "$fail" -eq 0 ]
