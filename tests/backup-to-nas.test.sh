@@ -14,7 +14,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 SCRIPT="$BOT_DIR/scripts/backup-to-nas.sh"
 
-pass=0; fail=0
+pass=0; fail=0; unk=0
 ok()  { echo "  ✅ $1"; pass=$((pass + 1)); }
 bad() { echo "  ❌ $1"; fail=$((fail + 1)); [[ -n "${2:-}" ]] && echo "$2" | sed 's/^/     /'; }
 
@@ -455,7 +455,10 @@ side_hash() { sha256sum "$1" 2>/dev/null | cut -d' ' -f1 || echo "none"; }
 #    실제 파괴 경로는 ㉕(파이프 중간 실패)뿐이다. 이 케이스는 **age 구현이 바뀌면 깨지도록**
 #    남기는 회귀 가드이고, 새 동작을 증명하는 테스트가 아니다.
 if [[ ! -x "$AGE_REAL" ]]; then
-  bad "age 없어 파괴 검사 불가 — 건너뛰지 않고 실패로 표시"
+  # 🔴 2026-07-28 정정: 실패(rc=1)로 접고 있었다. `age` 가 없는 것은 **위반이 아니라 못 쟀다** —
+  #    CI 러너엔 age 가 없어서 이 두 건이 CI 를 상시 빨강으로 만들었다(조용한 skip 도 금지, 그래서 rc=2).
+  unk=$((unk + 1))
+  echo "  ⛔ 판정 불가 — age 가 없어 파괴 검사를 못 했다(설치된 기계에서 재야 한다)"
 else
   setup
   mkdir -p "$ROOT/cdm"; echo "SECRET-KEY" > "$ROOT/cdm/device_private_key"
@@ -493,7 +496,10 @@ fi
 #    **포맷·평문 검사를 전부 통과하는 손상 파일**이 남는다. age 는 공개키 전용이라
 #    (개인키가 이 머신에 없어) **사후 내용 검증이 불가능**하므로 사전에 막아야 한다.
 if [[ ! -x "$AGE_REAL" ]]; then
-  bad "age 없어 tar 실패 검사 불가 — 건너뛰지 않고 실패로 표시"
+  # 🔴 2026-07-28 정정: 실패(rc=1)로 접고 있었다. `age` 가 없는 것은 **위반이 아니라 못 쟀다** —
+  #    CI 러너엔 age 가 없어서 이 두 건이 CI 를 상시 빨강으로 만들었다(조용한 skip 도 금지, 그래서 rc=2).
+  unk=$((unk + 1))
+  echo "  ⛔ 판정 불가 — age 가 없어 tar 실패 검사를 못 했다(설치된 기계에서 재야 한다)"
 else
   setup
   mkdir -p "$ROOT/cdm"; echo "SECRET-KEY" > "$ROOT/cdm/ok_file"
@@ -524,5 +530,6 @@ else
 fi
 
 echo
-echo "=== 결과: $pass pass / $fail fail ==="
+echo "=== 결과: $pass pass / $fail fail / 판정 불가 $unk ==="
 [[ $fail -eq 0 ]] || exit 1
+[[ $unk -eq 0 ]] || exit 2

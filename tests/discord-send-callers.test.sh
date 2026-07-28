@@ -17,7 +17,7 @@ cd "$BOT_DIR"
 # "코어 없음"을 조용히 통과시키면 가드가 사라진 걸 아무도 모른다.
 CORE_GUARD="${CORE_GUARD:-/home/bpx27/yaksu-bot-core-live/relay/discord-send/lint-callers.sh}"
 
-pass=0; fail=0
+pass=0; fail=0; unk=0
 ok()  { echo "  ✅ $1"; pass=$((pass + 1)); }
 bad() { echo "  ❌ $1"; fail=$((fail + 1)); [[ -n "${2:-}" ]] && echo "$2" | sed 's/^/     /'; }
 
@@ -33,7 +33,13 @@ live_files() {
 
 echo "① deprecated -c/--channel 잔존 검사 (코어 위임):"
 if [[ ! -x "$CORE_GUARD" ]]; then
-  bad "코어 가드 없음: $CORE_GUARD — yaksu-bot-core-live pull 확인 (머지≠반영)"
+  # 🔴 2026-07-28 정정: 이걸 **실패(rc=1)** 로 접고 있었다. CI 러너는 이 레포만 체크아웃하므로
+  #    코어가 **구조적으로 없다** — "위반이 있다" 와 "못 쟀다" 를 같은 칸에 두면 CI 가 첫날부터
+  #    빨간불이 되고, 그 빨간불이 상시가 되면 진짜 위반이 그 안에 묻힌다.
+  #    '머지≠반영' 감시는 내 기계의 check-core-drift.sh 가 맡는다(코어가 보이는 자리).
+  unk=$((unk + 1))
+  echo "  ⛔ 판정 불가 — 코어 가드를 못 봤다: $CORE_GUARD"
+  echo "     (CI 처럼 코어 체크아웃이 없는 곳이면 정상 · 내 기계면 yaksu-bot-core-live pull 확인)"
 else
   GUARD_OUT=$(CALLER_SCAN_DIR="$BOT_DIR" bash "$CORE_GUARD" 2>&1); GUARD_RC=$?
   if [[ $GUARD_RC -eq 0 ]]; then
@@ -62,5 +68,6 @@ else
 fi
 
 echo ""
-echo "결과: $pass pass, $fail fail"
-[[ $fail -eq 0 ]]
+echo "결과: $pass pass, $fail fail, 판정 불가 $unk"
+[[ $fail -eq 0 ]] || exit 1
+[[ $unk -eq 0 ]] || exit 2

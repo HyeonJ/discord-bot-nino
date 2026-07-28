@@ -15,6 +15,18 @@ CH=1479813609499394169  # 일반 (raw ID — channel-map 조회 우회)
 NODE_BIN="$(command -v node || true)"
 [[ -n "$NODE_BIN" ]] || NODE_BIN=/home/bpx27/.nvm/versions/node/v24.14.0/bin/node
 
+# 🔴 셔틀이 이 기계에서 돌 수 있는지 **먼저** 본다 (2026-07-28 CI 실측으로 추가)
+#    src/discord-send 은 니노 정체를 고정하려고 `/home/bpx27/discord-bot-nino/.env` 를 **절대경로로
+#    source** 한다. 그래서 다른 기계(CI 러너 등)에서는 첫 줄부터 죽고, 그때 **14건이 실패로** 찍혔다.
+#    "못 쟀다" 를 "깨졌다" 로 읽으면 CI 가 첫날부터 빨강이 되고 진짜 회귀가 그 안에 묻힌다.
+#    ⇒ 여기서 rc=2(판정 불가)로 끊는다. 케이스마다 같은 실패를 14번 찍는 것보다 원인 한 줄이 낫다.
+if ! ENV_PROBE="$(DISCORD_SEND_DRY_RUN=1 bash "$SEND" --help 2>&1)"; then
+  echo "⛔ 판정 불가 — 이 기계에서 discord-send 셔틀을 못 돌린다(멘션 계약을 하나도 못 쟀다)"
+  printf '%s\n' "$ENV_PROBE" | tail -2 | sed 's/^/   /'
+  echo "   (셔틀이 절대경로로 .env 를 source 한다 — 니노 기계에서 재야 한다)"
+  exit 2
+fi
+
 SHIM_TMP="$(mktemp)"
 trap 'rm -f "$SHIM_TMP"' EXIT
 export DISCORD_SEND_SHIM_LOG="$SHIM_TMP"
