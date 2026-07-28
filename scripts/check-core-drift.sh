@@ -9,9 +9,15 @@
 #     선언하면 **두 번째 소스**가 된다 → 대신 **입력 트리의 판정 코드를 dry-run** 한다.
 #   - 플래그로 값을 넘기지 않는다. `.env` 를 source 해서 process.env 로 넘긴다.
 #     명시 전달은 **내가 아는 값만** 검사하게 만들어, 코어에 검사가 추가돼도 안 덮인다.
-#   - 종료코드 계약(코어 PR #67): 0=충족 · 2=요건 미달 · 그 외=실행 실패(판정 불가)
+#   - 🔑 종료코드 계약 (2026-07-28 양봇 합의 — 코어 run-tests 계열로 통일):
+#       0 정상 · **1 위반(조치 있음)** · **2 판정 불가** · 그 외(126·127·128+) ⇒ 판정 불가로 접는다
 #     ⚠️ "판정 불가" 를 "미달" 로 보고하지 않는다 — 없는 경고는 pull 을 미루게 해
 #        오히려 위험(옛 코드로 계속 돎)을 늘린다.
+#     🔴 **이전엔 1·2 가 반대였다**(0=충족 · 2=요건 미달 · 그 외=실행 실패). 같은 레포의
+#        check-runner-drift.sh 는 이미 `2=판정 불가` 였다 — 한 디렉터리에 두 규약이 있었고,
+#        둘 다 자기 헤더에 "계약대로" 라고 적혀 있어서 각 파일만 읽으면 충돌이 안 보였다.
+#     🔑 옛 형태가 갖고 있던 건 **"그 외" 뭉치**다(126·127 을 삼킴). 숫자는 다수파로 가되
+#        그 뭉치는 계약 마지막 항으로 남긴다 — 버리면 셸이 내는 코드가 갈래 밖으로 샌다.
 set -uo pipefail
 
 # 🔴 cron 에서 돌 때 `systemctl --user` 는 이게 없으면 실패한다:
@@ -30,12 +36,12 @@ cleanup() { [ -n "$WORKTREE" ] && git -C "$CORE_REPO" worktree remove --force "$
 trap cleanup EXIT
 
 for f in "$CORE_REPO/.git" "$BOT_ENV"; do
-  [ -e "$f" ] || { echo "ERROR: 없음 — $f"; exit 1; }
+  [ -e "$f" ] || { echo "ERROR: 없음 — $f"; exit 2; }
 done
 
 # ⚠️ fetch 없이 @{u} 를 읽으면 **항상 0** 이 나온다(조용한 성공). 반드시 선행.
 if ! git -C "$CORE_REPO" fetch -q origin 2>/dev/null; then
-  echo "WARN: fetch 실패 — 뒤처짐 판정 불가(네트워크·인증)"; exit 1
+  echo "WARN: fetch 실패 — 뒤처짐 판정 불가(네트워크·인증)"; exit 2
 fi
 
 # ── 두 축을 **이름으로 갈라** 잰다 (2026-07-28 룬드 M:wy0a 로 발견한 구멍) ──
@@ -55,18 +61,18 @@ process_behind() {
 }
 
 BEHIND="$(git -C "$CORE_REPO" rev-list --count HEAD..@{u} 2>/dev/null)" || BEHIND=""
-[ -n "$BEHIND" ] || { echo "WARN: @{u} 없음 — upstream 미설정"; exit 1; }
+[ -n "$BEHIND" ] || { echo "WARN: @{u} 없음 — upstream 미설정"; exit 2; }
 PBEHIND="$(process_behind)"
 
 # 🔑 `?` 는 **0 도 N 도 아닌 세 번째 상태**다 — "못 쟀다".
 #    이걸 STALE 로 접으면 *값이 없는데 조치(재시작)를 지시*하게 된다. 실제로 첫 실전 발동에서
 #    `process_behind=?파일 — 재시작 안 됨` 이 나갔다: 판정은 우연히 맞았고 근거는 비어 있었다.
-#    종료코드 계약대로 **1(판정 불가)** 로 낸다 — 2(미달)와 갈려야 래퍼가 다른 문장을 쓴다.
+#    종료코드 계약대로 **2(판정 불가)** 로 낸다 — 1(위반)과 갈려야 래퍼가 다른 문장을 쓴다.
 if [ "$PBEHIND" = "?" ]; then
   echo "WARN: process_behind 판정 불가 — $RELAY_UNIT 의 MainPID/시작시각을 못 구했다"
   echo "  repo_behind=${BEHIND}커밋 (이 값은 유효)"
   echo "  흔한 원인: cron 에 XDG_RUNTIME_DIR 이 없어 systemctl --user 가 버스에 못 붙음 · 유닛 미기동"
-  exit 1
+  exit 2
 fi
 
 if [ "$BEHIND" = "0" ]; then
@@ -77,7 +83,7 @@ if [ "$BEHIND" = "0" ]; then
   # 레포는 최신인데 프로세스가 낡음 = pull 은 했고 재시작을 안 한 상태
   echo "STALE: repo_behind=0 · **process_behind=${PBEHIND}파일** — 코드는 받았고 **재시작 안 됨**"
   echo "  조치: systemctl --user restart $RELAY_UNIT (pull 불필요)"
-  exit 2
+  exit 1
 fi
 
 echo "DRIFT: repo_behind=${BEHIND}커밋 · process_behind=${PBEHIND}파일 ($(git -C "$CORE_REPO" rev-parse --short HEAD) → $(git -C "$CORE_REPO" rev-parse --short @{u}))"
@@ -90,12 +96,12 @@ echo "  런타임 파일 변경: ${RUNTIME}건"
 # ── 받았을 때의 영향: 입력 트리의 판정 코드를 내 설정에 대고 dry-run ──
 WORKTREE="$(mktemp -d)"
 if ! git -C "$CORE_REPO" worktree add -q --detach "$WORKTREE" @{u} 2>/dev/null; then
-  echo "  ⚠️ 영향 판정 불가 — 워크트리 생성 실패"; exit 1
+  echo "  ⚠️ 영향 판정 불가 — 워크트리 생성 실패"; exit 2
 fi
 
 if [ ! -f "$WORKTREE/$CHECK_REL" ]; then
   echo "  ⚠️ 영향 판정 불가 — 입력 트리에 $CHECK_REL 없음(코어 PR #67 이전 버전)"
-  exit 1
+  exit 2
 fi
 
 set -a; . "$BOT_ENV"; set +a
@@ -109,7 +115,7 @@ set -a; . "$BOT_ENV"; set +a
 if ! NODE="$(resolve_bin node "${NODE_BIN:-}")"; then
   echo "  ⚠️ 영향 판정 불가 — node 를 못 찾았다(cron PATH 는 /usr/bin:/bin)"
   echo "     NODE_BIN 으로 경로를 주거나 nvm/~/.local/bin 설치를 확인할 것"
-  exit 1
+  exit 2
 fi
 OUT="$("$NODE" "$WORKTREE/$CHECK_REL" 2>&1)"; RC=$?
 case "$RC" in
@@ -120,7 +126,7 @@ case "$RC" in
      echo "$OUT" | sed 's/^/     /' ;;
 esac
 
-# 🔴 여기는 **DRIFT 갈래**다 — 조치(pull)가 있으므로 2 로 나간다.
+# 🔴 여기는 **DRIFT 갈래**다 — 조치(pull)가 있으므로 **1(위반)** 로 나간다.
 #    2026-07-28 13:5x 까지 `exit 0` 이었고, 그래서 `core-drift-cron.sh:36`
 #    (`[ "$RC" -eq 0 ] && exit 0`)이 알림 전에 빠져나갔다. 실제 로그:
 #      12:08 rc=0 DRIFT: repo_behind=3커밋   ← 발견해놓고 조용
@@ -130,4 +136,6 @@ esac
 #       적혀 있었다. **래퍼는 이 사고를 예상했는데 검사 쪽이 0을 내서 두 반쪽이 어긋났다** —
 #       계약을 양쪽에 적어놓고 한쪽만 지킨 것이라, 문서가 아니라 시험으로 잠근다(⑤).
 #    위 case 의 `2`(받으면 요건 미달)도 여기로 온다 — 그것도 조치가 필요한 상태다.
-exit 2
+#    ⚠️ 저 `case` 가 읽는 건 **코어 쪽 node 검사기의 rc** 이고 그건 아직 옛 계약(0/2/그 외)이다.
+#       코어 파일이라 이 PR 범위 밖 — 룬드 승인 후 별건. 여기서는 `*` 뭉치가 있어 안 샌다.
+exit 1
