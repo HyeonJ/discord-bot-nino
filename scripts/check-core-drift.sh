@@ -99,7 +99,17 @@ if [ ! -f "$WORKTREE/$CHECK_REL" ]; then
 fi
 
 set -a; . "$BOT_ENV"; set +a
-OUT="$(node "$WORKTREE/$CHECK_REL" 2>&1)"; RC=$?
+# 🔴 맨 `node` 를 부르면 **cron 에서 매번 rc=127** 이다 — cron 의 PATH 는 `/usr/bin:/bin`
+#    뿐이라 nvm·~/.local/bin 이 안 보인다(2026-07-28 룬드 드리프트 알림으로 발견).
+#    판정 불가로 떨어지니 거짓말은 아니었지만 **이 검사가 cron 에서 한 번도 안 돌았다.**
+#    *정직한 무능도 무능이다.* 해석은 scripts/lib/resolve-bin.sh 한 곳을 지난다.
+. "$(dirname "$0")/lib/resolve-bin.sh"
+if ! NODE="$(resolve_bin node "${NODE_BIN:-}")"; then
+  echo "  ⚠️ 영향 판정 불가 — node 를 못 찾았다(cron PATH 는 /usr/bin:/bin)"
+  echo "     NODE_BIN 으로 경로를 주거나 nvm/~/.local/bin 설치를 확인할 것"
+  exit 1
+fi
+OUT="$("$NODE" "$WORKTREE/$CHECK_REL" 2>&1)"; RC=$?
 case "$RC" in
   0) echo "  ✅ 받아도 설정 요건 충족" ;;
   2) echo "  🔴 받으면 설정 요건 미달 — **먼저 .env 를 고치고 받을 것**"
