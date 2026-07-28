@@ -56,6 +56,29 @@ got="$(PATH=/usr/bin:/bin HOME="$ROOT/nvmhome" bash -c '. "$1"; n="$(resolve_bin
 [ "$got" = "v20.11.0" ] && ok "v18·v20·v8 중 v20 을 고른다" \
   || bad "버전 정렬" "v20.11.0" "$got"
 
+echo "③-c 🔑 **마이너 자리**가 진짜 시험이다 — 그리고 고르는 짝이 중요하다"
+# 룬드가 짚었다: `v8` 은 문자열 순으로 맨 뒤라 *최악을 피하는* 자리인데, 마이너는 `9 > 11` 로
+# 정면으로 뒤집힌다. 맞는 말인데 — **재보니 `20.9 vs 20.11` 로는 변이가 안 잡힌다.**
+#
+# 🔴 실측(2026-07-28): 정렬 키를 `-k1,1nr` (메이저만) 로 깎아도
+#      v20.9.0 vs v20.11.0   → v20.11.0  (정답! 안 갈린다)
+#      v20.2.0 vs v20.10.0   → v20.10.0  (정답! 안 갈린다)
+#      v20.1.0 vs v20.9.0    → v20.1.0   🔴 **여기서만 갈린다**
+#    이유: `sort` 는 지정한 키가 동률이면 **줄 전체를 최후수단으로** 비교한다. 그 비교는
+#    문자열 오름차순이라 `20.11.0` < `20.9.0` 이 되어 head -1 이 **우연히 정답을 집는다.**
+#    ⇒ 뒤집힌 자리를 골라도, 최후수단이 반대 방향으로 뒤집어 **두 번 뒤집혀 맞는다.**
+#
+# 🔑 그래서 픽스처는 *직관적으로 세 보이는 값*이 아니라 **변이를 실제로 죽이는 값**이어야 한다.
+#    "이 값이면 갈리겠지" 는 짐작이고, 갈리는지는 **변이를 태워봐야** 안다(오늘 세 번째다).
+for v in v20.1.0 v20.9.0; do
+  mkdir -p "$ROOT/minorhome/.nvm/versions/node/$v/bin"
+  printf '#!/bin/sh\necho %s\n' "$v" > "$ROOT/minorhome/.nvm/versions/node/$v/bin/minornode"
+  chmod +x "$ROOT/minorhome/.nvm/versions/node/$v/bin/minornode"
+done
+got="$(PATH=/usr/bin:/bin HOME="$ROOT/minorhome" bash -c '. "$1"; n="$(resolve_bin minornode)" && "$n"' _ "$LIB" 2>&1)"
+[ "$got" = "v20.9.0" ] && ok "v20.1.0 vs v20.9.0 → v20.9.0 (마이너를 숫자로 본다)" \
+  || bad "마이너 자리 정렬" "v20.9.0" "$got"
+
 echo "④ 못 찾으면 **rc=1 이고 아무것도 안 낸다**(빈 문자열을 돌려주지 않는다)"
 out="$(PATH=/usr/bin:/bin HOME="$ROOT/home" bash -c '. "$1"; resolve_bin no-such-tool-xyz' _ "$LIB")"; rc=$?
 [ "$rc" -ne 0 ] && ok "rc≠0" || bad "부재 종료코드" "1" "$rc"
