@@ -27,10 +27,24 @@ cat > "$ROOT/fake-lint.sh" <<'FAKE'
 #!/usr/bin/env bash
 echo "== 1. 어떤 섹션 =="
 while IFS= read -r l; do [ -n "$l" ] && echo "  ⚠️  $l"; done < "$FAKE_ITEMS"
-echo "== 결과: $(grep -c . "$FAKE_ITEMS" 2>/dev/null || echo 0)건 =="
+n=$(grep -c . "$FAKE_ITEMS" 2>/dev/null | head -1)
+echo "== 결과: ${n:-0}건 =="
 exit "$(cat "$FAKE_RC")"
 FAKE
 chmod +x "$ROOT/fake-lint.sh"
+
+# 🔑 **계측기를 먼저 먹인다** — 정답을 아는 최소 입력(빈 ITEMS = 0건)으로 *가짜 lint 자체*를 검사한다.
+#    이 줄은 원래 `grep -c … || echo 0` 이었다. grep -c 는 무매치에도 "0" 을 찍으면서 rc=1 이라
+#    `||` 가 또 실행돼 요약 줄이 **두 줄로 쪼개졌다**("== 결과: 0" / "0건 =="). 하네스가 틀린
+#    형태라 어떤 케이스도 빨개지지 않았고, 그래서 몇 시간 동안 안 보였다.
+#    ⇒ 대상만 검사하고 계측기는 안 검사하는 시험은 자기 오류를 못 본다. 하네스에도 시험을 붙인다.
+: > "$ROOT/items.txt"; printf '0\n' > "$ROOT/rc.txt"
+harness_out="$(FAKE_ITEMS="$ROOT/items.txt" FAKE_RC="$ROOT/rc.txt" bash "$ROOT/fake-lint.sh")"
+if [ "$(printf '%s\n' "$harness_out" | grep -c '^== 결과: 0건 ==$' | head -1)" -eq 1 ]; then
+  ok "하네스 자기검사 — 빈 입력에서 요약 줄이 한 줄로 나온다"
+else
+  bad "하네스 자기검사 — 요약 줄이 쪼개졌다(grep -c 함정)" "$harness_out"
+fi
 
 # 가짜 discord-send — 보낸 본문을 파일에 적는다. FAKE_SEND_RC 로 실패도 재현한다
 cat > "$ROOT/fake-send" <<'FAKE'
