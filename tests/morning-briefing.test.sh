@@ -114,6 +114,41 @@ out="$(run "$ROOT/없는파일.md" "$ROOT/없는날씨.json")"
 if [[ "$(sed -n '2p' <<<"$out")" != "" ]] && grep -q '못 읽음' <<<"$out"; then
   ok "소스 실패해도 인사는 나오고, 판단은 경고 줄이 한다"; else bad "실패 시 인사/경고 조합이 깨짐" "$out"; fi
 
+echo "⑪ file_mtime 이식성 — BSD 흉내 + 쓰레기값 (변이 M7·M8 이 살아남아서 추가)"
+# 🔑 왜 스텁이 필요한가: 이 기계는 GNU 라 `date -r FILE` 이 그냥 성공한다. 즉 **폴백
+#    경로와 실패 경로에 닿는 시험이 없었고**, 그래서 정수 검사를 지우는 변이가 살아남았다.
+#    로케일·OS 처럼 "여기선 안 밟히는 갈래"는 스텁으로 밟아줘야 잠긴다.
+STUB="$ROOT/stub"; mkdir -p "$STUB"
+cat > "$STUB/date" <<'EOF'
+#!/bin/bash
+# BSD 흉내 — `date -r` 는 epoch 를 받는다. 파일명을 주면 실패.
+if [[ "${1:-}" == "-r" && ! "${2:-}" =~ ^[0-9]+$ ]]; then
+  echo "date: illegal time format" >&2; exit 1
+fi
+exec /usr/bin/date "$@"
+EOF
+chmod +x "$STUB/date"
+mk_stat() { printf '#!/bin/bash
+echo %q
+' "$1" > "$STUB/stat"; chmod +x "$STUB/stat"; }
+
+# ⑪-1 BSD 에서 폴백(stat)이 정수를 주면 성공한다
+mk_stat "1785400000"
+out="$(PATH="$STUB:$PATH" bash -c 'source "$1"; file_mtime "$2"' _ "$SCRIPT" "$ROOT/hb-fresh" 2>&1)"
+if [[ "$out" == "1785400000" ]]; then ok "BSD 흉내 — stat 폴백으로 mtime 을 얻는다"; else bad "폴백 실패" "$out"; fi
+
+# ⑪-2 🔑 폴백이 **정수가 아닌 값**을 주면 실패로 낸다 (GNU 의 stat -f 는 딴 걸 찍는다)
+mk_stat "?"
+if PATH="$STUB:$PATH" bash -c 'source "$1"; file_mtime "$2"' _ "$SCRIPT" "$ROOT/hb-fresh" >/dev/null 2>&1; then
+  bad "쓰레기값을 성공으로 돌려줬다 — 0 으로 계산되면 '방금 갱신됨'이 된다"
+else ok "정수가 아니면 실패(rc≠0)로 낸다"; fi
+
+# ⑪-3 그 실패가 브리핑에서 **조용히 신선**이 되면 안 된다
+out="$(PATH="$STUB:$PATH" DRY_RUN=1 TODO_FILE="$ROOT/todo.md" WEATHER_JSON="$ROOT/weather.json" \
+        DRIFT_HEARTBEAT="$ROOT/hb-fresh" DISCORD_SEND="$ROOT/should-not-be-called" \
+        bash "$SCRIPT" 2>&1)"
+if grep -q '판정 불가' <<<"$out"; then ok "못 읽으면 '판정 불가'가 브리핑에 뜬다"; else bad "조용히 넘어갔다" "$out"; fi
+
 echo "⑨ DRY_RUN 은 전송하지 않는다"
 if [[ ! -e "$ROOT/should-not-be-called" ]]; then ok "discord-send 미호출"; else bad "전송이 일어났다"; fi
 

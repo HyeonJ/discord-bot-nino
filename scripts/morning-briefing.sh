@@ -188,6 +188,11 @@ greeting() {
   esac
 }
 
+# 🔑 아래를 main() 으로 묶고 소스 가드를 둔다 — 그래야 file_mtime 같은 순수 함수를
+#    **단위로 부를 수 있다**. 묶기 전에는 `file_mtime` 의 실패 경로(정수 아님 → rc=1)에
+#    닿는 시험이 없어서 변이가 살아남았다(M7·M8). 실행 경로는 그대로다:
+#    `bash morning-briefing.sh` 면 BASH_SOURCE[0] == $0 이라 main 이 돈다.
+main() {
 WEATHER="$(weather_section)"
 # 인사 분기에 쓸 강수확률 — 못 읽었으면 빈 값이고, 그러면 날씨 기반 분기를 안 탄다
 RAIN_PCT="$(sed -n 's/.*강수 최대 \([0-9]\+\)%.*/\1/p' <<<"$WEATHER" | head -1)"
@@ -210,3 +215,8 @@ if [[ "$DRY_RUN" == "1" ]]; then
 fi
 
 "$DISCORD_SEND" "$CHANNEL_ID" "$MSG"
+}
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  main "$@"
+fi
