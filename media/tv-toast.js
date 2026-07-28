@@ -25,7 +25,7 @@ lgtv.on('error', (err) => {
 });
 
 lgtv.on('connect', () => {
-  lgtv.request('ssap://system.notifications/createToast', { message }, (err, res) => {
+  lgtv.request('ssap://system.notifications/createToast', { message }, (err) => {
     if (err) {
       console.error('토스트 실패:', err.message);
       lgtv.disconnect();

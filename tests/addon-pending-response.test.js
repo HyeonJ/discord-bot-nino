@@ -5,7 +5,8 @@ const {
 } = addon;
 
 // 테스트용 msg 팩토리
-function msg({ id = 'm1', channelId = 'c1', thread = null, botId = 'BOT', mentions = [] } = {}) {
+// botId 는 여기 없다 — mentionsOtherUser(msg, botId) 로 **따로** 넘긴다(호출부가 정본)
+function msg({ id = 'm1', channelId = 'c1', thread = null, mentions = [] } = {}) {
   return {
     id,
     channelId: thread ? undefined : channelId,

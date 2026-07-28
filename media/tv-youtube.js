@@ -5,13 +5,9 @@
 
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 const lgtv2 = require('lgtv2');
-const WebSocket = require('ws');
 
 const TV_IP = '192.168.68.73';
 const YOUTUBE_APP_ID = 'youtube.leanback.v4';
-// darren 프로필 좌표 (1920x1080 기준, 픽셀 단위 이동으로 정확히 클릭)
-const PROFILE_X = 200;
-const PROFILE_Y = 526;
 
 const rawUrl = process.argv[2];
 if (!rawUrl) {
@@ -30,32 +26,11 @@ try {
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-// darren 프로필 선택 (픽셀 단위 이동)
-function selectDarrenProfile(lgtv) {
-  return new Promise((resolve, reject) => {
-    lgtv.request('ssap://com.webos.service.networkinput/getPointerInputSocket', {}, async (err, res) => {
-      if (err || !res || !res.socketPath) { resolve(); return; }
-      const ws = new WebSocket(res.socketPath, { rejectUnauthorized: false });
-      ws.on('open', async () => {
-        // 커서 리셋
-        for (let i = 0; i < 300; i++) ws.send(JSON.stringify({ type: 'move', dx: -1, dy: -1, down: 0 }));
-        await sleep(200);
-        // darren 위치로 이동
-        for (let i = 0; i < PROFILE_X; i++) ws.send(JSON.stringify({ type: 'move', dx: 1, dy: 0, down: 0 }));
-        for (let i = 0; i < PROFILE_Y; i++) ws.send(JSON.stringify({ type: 'move', dx: 0, dy: 1, down: 0 }));
-        await sleep(300);
-        // 클릭
-        ws.send(JSON.stringify({ type: 'down' }));
-        await sleep(100);
-        ws.send(JSON.stringify({ type: 'up' }));
-        await sleep(1000);
-        ws.close();
-        resolve();
-      });
-      ws.on('error', () => resolve()); // 실패해도 계속
-    });
-  });
-}
+// 🗑 `selectDarrenProfile()`(포인터를 픽셀 단위로 옮겨 프로필을 클릭) 를 지웠다 —
+//    아래 Step 1 의 `params: { accountIndex: 0 }` 로 **프로필 선택창 자체를 건너뛰게** 바뀐
+//    뒤로 한 번도 호출되지 않는 죽은 코드였다(좌표 상수 PROFILE_X/Y, `ws` 의존도 같이 감).
+//    eslint 도입(2026-07-28) 때 처음 드러났다. 포인터 방식이 다시 필요하면 같은 구현이
+//    살아 있는 media/tv-select-profile.js 를 쓴다(grep getPointerInputSocket → 그 파일 하나).
 
 const lgtv = lgtv2({
   url: `wss://${TV_IP}:3001`,
