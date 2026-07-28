@@ -104,6 +104,20 @@ grep -qE '안 바뀌|같은가' <<<"$out" && ok "이유를 말한다" || bad "�
 [[ ! -f "$RAN" ]] && ok "테스트 명령이 안 돌았다 — 원본을 변이로 착각할 여지를 없앤다" || bad "돌았다"
 [[ -z "$(git -C "$REPO" status --porcelain)" ]] && ok "작업트리 깨끗" || bad "잔재 있음"
 
+echo "⑨ 복구가 실패하면 판정과 **다른 층**의 종료코드(4)를 낸다 (룬드 지적, PR #37 리뷰)"
+# 0/1 은 "시험이 잡았나"의 답, 3 은 "못 쟀다". 복구 실패는 **레포가 변이된 채 남았다** —
+# 다음 사람이 당장 손대야 하는 유일한 경우라 3 에 묶으면 안 된다.
+# 재현: 시험 명령이 대상 파일을 읽기전용으로 만들어 복구(cp)를 실패시킨다.
+printf 'VALUE=정답\n' > "$REPO/target.sh"
+git -C "$REPO" -c user.email=t@e -c user.name=t commit -qam reset9 >/dev/null 2>&1 || true
+out="$(run --file target.sh --test "chmod 444 '$REPO/target.sh'; true" --name R8 --old '정답' --new '오답')"; rc=$?
+chmod 644 "$REPO/target.sh"
+[[ "$rc" -eq 4 ]] && ok "종료코드 4 (복구 실패) — 0·1·3 과 갈린다" || bad "rc=$rc — 4여야" "$out"
+grep -q '복구 실패' <<<"$out" && ok "복구 실패를 명시" || bad "문구 없음" "$out"
+grep -q '판정보다 이게 먼저' <<<"$out" && ok "무엇이 우선인지 말한다" || bad "우선순위 안내 없음" "$out"
+grep -q 'git checkout' <<<"$out" && ok "복구 방법을 준다" || bad "복구 방법 없음" "$out"
+git -C "$REPO" checkout -q -- target.sh
+
 echo
 echo "  통과 $pass · 실패 $fail"
 [[ "$fail" -eq 0 ]]

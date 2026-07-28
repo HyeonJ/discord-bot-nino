@@ -20,8 +20,9 @@
 # 종료코드 — 세 상태를 접지 않는다(check-core-drift.sh 와 같은 계약):
 #   0  잡힘     — 변이를 넣으니 시험이 빨개졌다. 그 줄은 실제로 지켜지고 있다.
 #   1  살아남음 — 변이를 넣었는데도 초록. 구멍이거나 등가변이다. **왜 등가인지까지 적을 것.**
-#   3  판정 불가 — 아예 재지 못했다(미커밋 · 주입 MISS · 다중 매치 · 미추적).
+#   3  판정 불가 — 아예 재지 못했다(미커밋 · 주입 MISS · 다중 매치 · 미추적 · old==new).
 #      ⚠️ 3을 1로 접으면 "못 쟀다"가 "구멍 없다"로 읽힌다. 0/1 과 반드시 갈라야 한다.
+#   4  복구 실패 — **판정이 아니라 상태**다. 레포에 변이가 남았다. 판정보다 이게 먼저다.
 set -uo pipefail
 
 die_unmeasurable() { echo "⛔ 판정 불가 — $1"; shift; for l in "$@"; do echo "   $l"; done; exit 3; }
@@ -89,11 +90,20 @@ fi
 BACKUP="$(mktemp)"
 cp -p "$FILE" "$BACKUP"
 restore() {
-  cp -p "$BACKUP" "$FILE"; rm -f "$BACKUP"
+  set +e   # 복구는 무슨 일이 있어도 끝까지 간다 — 여기서 죽으면 변이가 레포에 남는다
   # 되돌림이 진짜 됐는지까지 본다 — 복구 실패를 조용히 넘기면 다음 시험이 오염된다
-  if [[ -n "$(git status --porcelain -- "$FILE")" ]]; then
-    echo "🔴 복구 실패 — $FILE 이 원본과 다르다. 직접 확인할 것: git diff -- $FILE"
-  fi
+  cp -p "$BACKUP" "$FILE" 2>/dev/null
+  local dirty; dirty="$(git status --porcelain -- "$FILE")"
+  rm -f "$BACKUP"
+  [[ -z "$dirty" ]] && return
+  # 🔴 복구 실패는 **판정이 아니라 상태**다 (룬드 지적, PR #37 리뷰).
+  #    0/1 은 "시험이 잡았나"의 답이고, 3 은 "못 쟀다". 이건 **레포가 변이된 채 남았다** —
+  #    층이 다르다. 3 으로 묶으면 "못 쟀다"와 "못 쟀는데 파일도 망가졌다"가 같아진다.
+  #    다음 사람이 **당장 손대야 하는 유일한 경우**라 코드를 따로 준다.
+  echo "🔴🔴 복구 실패 — $FILE 이 변이된 채로 남았다. 판정보다 이게 먼저다."
+  echo "     확인:  git diff -- $FILE"
+  echo "     복구:  git checkout -- $FILE   (이 파일에 다른 미커밋 수정은 없다 — 시작 전에 확인했다)"
+  exit 4
 }
 trap restore EXIT INT TERM
 
@@ -112,10 +122,12 @@ else
   die_unmeasurable "치환했는데 파일이 안 바뀌었다 — --old 와 --new 가 같은가?"
 fi
 
-set +e
+# ⚠️ 여기서 `set +e` … `set -e` 로 감싸지 말 것. 이 스크립트는 처음부터 errexit 이 **없다**
+#    (`set -uo pipefail`). `set -e` 는 되돌리는 게 아니라 **켜는** 것이고, 그러면 EXIT 트랩
+#    안에서 `cp` 가 실패하는 순간 셸이 트랩째로 죽는다 — **복구 코드가 정확히 복구가 필요한
+#    상황에서만 안 돈다.** 시험 ⑨ 를 쓰기 전까지 안 밟히는 갈래였다(룬드 지적 덕에 드러남).
 bash -c "$TESTCMD"
 TEST_RC=$?
-set -e
 
 echo "── 시험 종료코드: $TEST_RC"
 if [[ "$TEST_RC" -ne 0 ]]; then
