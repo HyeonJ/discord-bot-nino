@@ -39,11 +39,15 @@ cat > "$ROOT/todo.md" <<'MD'
 MD
 printf '# 할 일\n- [x] 끝난 것만 있음\n' > "$ROOT/empty-todo.md"
 
-run() {  # run <TODO_FILE> <WEATHER_JSON> — 항상 DRY_RUN
+run() {  # run <TODO_FILE> <WEATHER_JSON> [DRIFT_HEARTBEAT] — 항상 DRY_RUN
+  # 하트비트를 안 주면 **신선한 것**을 기본으로 깐다 — 안 그러면 기존 시험 전부가
+  # "하트비트 없음" 경고를 달고 나와서, 다른 섹션을 보는 단언이 흔들린다.
   DRY_RUN=1 TODO_FILE="$1" WEATHER_JSON="$2" \
+    DRIFT_HEARTBEAT="${3:-$ROOT/hb-fresh}" \
     DISCORD_SEND="$ROOT/should-not-be-called" \
     bash "$SCRIPT" 2>&1
 }
+printf '%s rc=0\n' "$(date '+%Y-%m-%d %H:%M:%S')" > "$ROOT/hb-fresh"
 
 echo "① 정상 — 날씨 수치와 상위 3개가 들어간다"
 out="$(run "$ROOT/todo.md" "$ROOT/weather.json")"
@@ -110,8 +114,96 @@ out="$(run "$ROOT/없는파일.md" "$ROOT/없는날씨.json")"
 if [[ "$(sed -n '2p' <<<"$out")" != "" ]] && grep -q '못 읽음' <<<"$out"; then
   ok "소스 실패해도 인사는 나오고, 판단은 경고 줄이 한다"; else bad "실패 시 인사/경고 조합이 깨짐" "$out"; fi
 
+echo "⑪ file_mtime 이식성 — BSD 흉내 + 쓰레기값 (변이 M7·M8 이 살아남아서 추가)"
+# 🔑 왜 스텁이 필요한가: 이 기계는 GNU 라 `date -r FILE` 이 그냥 성공한다. 즉 **폴백
+#    경로와 실패 경로에 닿는 시험이 없었고**, 그래서 정수 검사를 지우는 변이가 살아남았다.
+#    로케일·OS 처럼 "여기선 안 밟히는 갈래"는 스텁으로 밟아줘야 잠긴다.
+STUB="$ROOT/stub"; mkdir -p "$STUB"
+cat > "$STUB/date" <<'EOF'
+#!/bin/bash
+# BSD 흉내 — `date -r` 는 epoch 를 받는다. 파일명을 주면 실패.
+if [[ "${1:-}" == "-r" && ! "${2:-}" =~ ^[0-9]+$ ]]; then
+  echo "date: illegal time format" >&2; exit 1
+fi
+exec /usr/bin/date "$@"
+EOF
+chmod +x "$STUB/date"
+mk_stat() { printf '#!/bin/bash
+echo %q
+' "$1" > "$STUB/stat"; chmod +x "$STUB/stat"; }
+
+# ⑪-1 BSD 에서 폴백(stat)이 정수를 주면 성공한다
+mk_stat "1785400000"
+out="$(PATH="$STUB:$PATH" bash -c 'source "$1"; file_mtime "$2"' _ "$SCRIPT" "$ROOT/hb-fresh" 2>&1)"
+if [[ "$out" == "1785400000" ]]; then ok "BSD 흉내 — stat 폴백으로 mtime 을 얻는다"; else bad "폴백 실패" "$out"; fi
+
+# ⑪-2 🔑 폴백이 **정수가 아닌 값**을 주면 실패로 낸다 (GNU 의 stat -f 는 딴 걸 찍는다)
+mk_stat "?"
+if PATH="$STUB:$PATH" bash -c 'source "$1"; file_mtime "$2"' _ "$SCRIPT" "$ROOT/hb-fresh" >/dev/null 2>&1; then
+  bad "쓰레기값을 성공으로 돌려줬다 — 0 으로 계산되면 '방금 갱신됨'이 된다"
+else ok "정수가 아니면 실패(rc≠0)로 낸다"; fi
+
+# ⑪-3 그 실패가 브리핑에서 **조용히 신선**이 되면 안 된다
+out="$(PATH="$STUB:$PATH" DRY_RUN=1 TODO_FILE="$ROOT/todo.md" WEATHER_JSON="$ROOT/weather.json" \
+        DRIFT_HEARTBEAT="$ROOT/hb-fresh" DISCORD_SEND="$ROOT/should-not-be-called" \
+        bash "$SCRIPT" 2>&1)"
+if grep -q '판정 불가' <<<"$out"; then ok "못 읽으면 '판정 불가'가 브리핑에 뜬다"; else bad "조용히 넘어갔다" "$out"; fi
+
 echo "⑨ DRY_RUN 은 전송하지 않는다"
 if [[ ! -e "$ROOT/should-not-be-called" ]]; then ok "discord-send 미호출"; else bad "전송이 일어났다"; fi
+
+echo "⑩ 코어 드리프트 하트비트 — cron 이 죽은 상태가 무음이면 안 된다 (승인 ③ 후속)"
+# 🔑 왜 여기 붙나: core-drift-cron.sh 는 rc=0 이면 **조용한 게 정상**이다. 그래서
+#    "cron 이 죽어서 아무 말이 없는 것"과 "이상이 없어서 조용한 것"이 같은 모양이 된다.
+#    하트비트는 그 둘을 가르려고 남기는데, **읽는 쪽이 없으면 파일만 쌓이고 구분이 안 선다.**
+#    이 브리핑이 그 읽는 쪽이다.
+
+# ⑩-1 신선하면 아무 말도 안 한다 (확인된 정상 → 섹션을 뺀다)
+out="$(run "$ROOT/todo.md" "$ROOT/weather.json" "$ROOT/hb-fresh")"
+if ! grep -q '드리프트 감시' <<<"$out"; then ok "신선하면 조용하다"; else bad "정상인데 떠들었다" "$out"; fi
+
+# ⑩-2 낡으면 반드시 줄을 낸다 + 얼마나 낡았는지
+touch -d '5 hours ago' "$ROOT/hb-fresh.stale" 2>/dev/null || touch -t "$(date -d '5 hours ago' +%Y%m%d%H%M)" "$ROOT/hb-fresh.stale"
+printf 'old rc=0\n' >> /dev/null
+: > "$ROOT/hb-stale"; printf '%s rc=0\n' "$(date -d '5 hours ago' '+%Y-%m-%d %H:%M:%S')" > "$ROOT/hb-stale"
+touch -d '5 hours ago' "$ROOT/hb-stale"
+out="$(run "$ROOT/todo.md" "$ROOT/weather.json" "$ROOT/hb-stale")"
+if grep -q '드리프트 감시' <<<"$out"; then ok "낡으면 줄을 낸다"; else bad "낡았는데 무음" "$out"; fi
+if grep -qE '5시간|[0-9]+시간' <<<"$out"; then ok "얼마나 낡았는지 수치가 나온다"; else bad "수치 없음" "$out"; fi
+
+# ⑩-3 파일이 아예 없으면 = cron 이 한 번도 안 돌았다. 이것도 시끄러워야 한다
+out="$(run "$ROOT/todo.md" "$ROOT/weather.json" "$ROOT/hb-none")"
+if grep -q '드리프트 감시' <<<"$out"; then ok "파일 없음도 알린다(한 번도 안 돎)"; else bad "무음" "$out"; fi
+# 🔑 "없음"과 "낡음"은 원인이 다르다(cron 미등록 vs 죽음) → 문구가 갈려야 조치가 갈린다
+# ⚠️ 처음엔 `none_line != stale_line` 으로 썼는데 **숫자만 달라도 통과**했다 —
+#    "N시간째 안 돌았다" 를 없음 쪽에 그대로 붙이는 변이가 살아남았다. 문구가 다른지가
+#    아니라 **원인을 맞게 말하는지**를 봐야 한다: 없음은 "돌다 멈췄다"가 아니다.
+none_line="$(grep '드리프트 감시' <<<"$out")"
+if grep -qE '미등록|한 번도' <<<"$none_line"; then ok "'없음'은 미등록/한 번도 안 돎으로 말한다"; else bad "원인이 안 드러남" "$none_line"; fi
+if grep -q '시간째' <<<"$none_line"; then bag=1; else bag=0; fi
+if [[ "$bag" -eq 0 ]]; then ok "'없음'을 '시간째 안 돌았다'로 말하지 않는다(돌다 멈춘 게 아니다)"; else bad "없음을 낡음처럼 말했다" "$none_line"; fi
+stale_out="$(run "$ROOT/todo.md" "$ROOT/weather.json" "$ROOT/hb-stale")"
+if grep -qE '멈췄|시간째' <<<"$(grep '드리프트 감시' <<<"$stale_out")"; then ok "'낡음'은 멈춤으로 말한다"; else bad "낡음 문구 이상" "$stale_out"; fi
+
+# ⑩-4 경계값 — 정확히 임계면 아직 신선(초과만 낡음)
+: > "$ROOT/hb-edge"; touch -d '2 hours ago' "$ROOT/hb-edge"
+out="$(HEARTBEAT_STALE_HOURS=2 run "$ROOT/todo.md" "$ROOT/weather.json" "$ROOT/hb-edge")"
+if ! grep -q '드리프트 감시' <<<"$out"; then ok "경계값은 아직 신선(초과만 낡음)"; else bad "경계에서 오탐" "$out"; fi
+
+# ⑩-6 mtime 을 **못 읽으면** 조용히 "신선"이 되면 안 된다 (판정 불가는 세 번째 상태)
+# 실제 실패를 만든다: 디렉터리를 탐색 불가로 만들면 그 안 파일의 mtime 을 못 구한다.
+# (스텁이 아니라 진짜 실패 — 오늘 배운 "재는 채널이 막혀 있으면 안 된다"를 지킨다)
+mkdir -p "$ROOT/locked"; : > "$ROOT/locked/hb"; chmod 000 "$ROOT/locked"
+out="$(run "$ROOT/todo.md" "$ROOT/weather.json" "$ROOT/locked/hb")"
+chmod 755 "$ROOT/locked"
+if grep -q '판정 불가' <<<"$out"; then ok "못 읽으면 '판정 불가'를 낸다"; else bad "못 읽었는데 조용하다" "$out"; fi
+if grep -qE '시간째|한 번도' <<<"$(grep '드리프트' <<<"$out")"; then
+  bad "못 쟀는데 낡음/없음으로 단정했다" "$out"; else ok "못 쟀을 때 원인을 단정하지 않는다"; fi
+
+# ⑩-5 한 축이 죽어도 다른 축은 그대로 보고한다 (오늘 반복된 원칙)
+out="$(run "$ROOT/todo.md" "$ROOT/weather.json" "$ROOT/hb-stale")"
+if grep -q '27°C' <<<"$out" && grep -q '첫째 항목' <<<"$out"; then
+  ok "하트비트가 낡아도 날씨·할 일은 그대로"; else bad "다른 섹션이 같이 죽었다" "$out"; fi
 
 echo
 echo "  통과 $pass · 실패 $fail"

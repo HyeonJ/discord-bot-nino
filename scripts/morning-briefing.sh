@@ -26,6 +26,11 @@ DISCORD_SEND="${DISCORD_SEND:-$BOT_DIR/src/discord-send}"
 DRY_RUN="${DRY_RUN:-0}"                   # 1이면 전송하지 않고 stdout 으로만 낸다
 TODO_TOP="${TODO_TOP:-3}"                 # 상위 몇 개를 읽어줄지
 STALE_DAYS="${STALE_DAYS:-3}"             # 며칠 이상 안 바뀌면 그 사실을 덧붙인다
+DRIFT_HEARTBEAT="${DRIFT_HEARTBEAT:-$BOT_DIR/logs/core-drift.heartbeat}"
+# cron 은 `15 * * * *` = **매시 1회**. 임계 2시간은 곧 "두 번 연속 놓쳐야 경고" 다 —
+# 1회 실패로는 안 울린다(단일 blip 오탐 방지 · health-checker 디바운스와 같은 이유).
+# ⚠️ 이 값은 cron 주기와 짝이다. 주기를 바꾸면 여기도 같이 봐야 한다.
+HEARTBEAT_STALE_HOURS="${HEARTBEAT_STALE_HOURS:-2}"   # 이 시간을 **넘으면** 낡은 것으로 본다
 
 TODAY="$(TZ=Asia/Seoul date +%Y-%m-%d)"
 DAY_NAMES=("" "월요일" "화요일" "수요일" "목요일" "금요일" "토요일" "일요일")
@@ -115,6 +120,54 @@ todo_section() {
   [[ -n "$tail" ]] && printf '       (%s)\n' "$tail"
 }
 
+# ── 코어 드리프트 감시 하트비트 ──────────────────────────────────────────────
+# 🔑 core-drift-cron.sh 는 이상이 없으면 **조용한 게 정상**이다. 그래서 *cron 이 죽어서
+#    아무 말이 없는 것*과 *이상이 없어서 조용한 것*이 같은 모양이 된다. 하트비트는 그
+#    둘을 가르려고 남기는 파일인데, **읽는 쪽이 없으면 파일만 쌓이고 구분이 안 선다.**
+#    (core-drift-cron.sh 의 `TODO(승인 ③ 후속)` 이 이것 — 여기서 닫는다.)
+# ⚠️ "없음"과 "낡음"은 원인이 다르다: 없음=한 번도 안 돎(cron 미등록) · 낡음=돌다 멈춤.
+#    조치가 다르므로 문구를 갈라야 한다. 합치면 "왜 안 도는지"를 매번 다시 조사하게 된다.
+# 신선하면 아무 것도 출력하지 않는다 — 위의 출력 규약(확인된 정상은 섹션을 뺀다) 그대로.
+# 파일 mtime(epoch) — GNU/BSD 양쪽 (룬드 리뷰 2026-07-28).
+#   GNU  `date -r FILE`  = 파일 mtime
+#   BSD  `date -r SECS`  = epoch 를 날짜로   ← **인자 의미가 다르다**(파일명을 주면 에러)
+# ⚠️ 폴백 `stat -f` 는 GNU 에선 --file-system 이라 **다른 걸 조용히 찍는다**. 그래서
+#    값이 정수인지 검사하고 아니면 **실패로 낸다** — 못 쟀는데 0 을 돌려주면 "방금 갱신됨"이
+#    되어 죽은 cron 이 신선하게 보인다.
+file_mtime() {
+  local m
+  m="$(date -r "$1" +%s 2>/dev/null)" || m=""
+  [[ "$m" =~ ^[0-9]+$ ]] || m="$(stat -f %m "$1" 2>/dev/null)"
+  [[ "$m" =~ ^[0-9]+$ ]] || return 1
+  printf '%s' "$m"
+}
+
+drift_heartbeat_section() {
+  # 🔑 순서가 중요하다: **볼 수 있나 → 있나 → 언제인가**.
+  #    처음엔 `[[ ! -f ]]` 를 먼저 봤는데, 디렉터리를 못 뒤지면 `-f` 도 실패해서
+  #    **"한 번도 안 돌았다"로 단정**했다 — *없는 것*과 *못 보는 것*을 합친 것이다.
+  #    같은 날 `check-core-drift.sh` 에서 `?`(못 쟀다)를 STALE(미달)로 접었던 것과
+  #    같은 부류이고, 시험 ⑩-6 이 잡았다.
+  local dir mt age_h
+  dir="$(dirname "$DRIFT_HEARTBEAT")"
+  if [[ ! -r "$dir" || ! -x "$dir" ]]; then
+    echo "⚠️ 코어 드리프트 하트비트를 볼 수 없다 — 신선한지 판정 불가 (디렉터리 접근 불가)"
+    return
+  fi
+  if [[ ! -f "$DRIFT_HEARTBEAT" ]]; then
+    echo "⚠️ 코어 드리프트 감시가 한 번도 안 돌았다 — cron 미등록일 수 있어 (하트비트 없음)"
+    return
+  fi
+  if ! mt="$(file_mtime "$DRIFT_HEARTBEAT")"; then
+    echo "⚠️ 코어 드리프트 하트비트의 시각을 못 읽었다 — 신선한지 판정 불가"
+    return
+  fi
+  age_h=$(( ( $(date +%s) - mt ) / 3600 ))
+  if (( age_h > HEARTBEAT_STALE_HOURS )); then
+    echo "⚠️ 코어 드리프트 감시가 ${age_h}시간째 안 돌았다 — cron 이 멈췄을 수 있어"
+  fi
+}
+
 # ── 인사 ────────────────────────────────────────────────────────────────────
 # Darren 요청(2026-07-28 M:44r9). 매일 같은 문장이면 안 읽게 되므로 **요일·날씨로 갈린다**.
 # ⚠️ 인사는 정보가 아니다 — 날씨/할 일을 못 읽어도 인사는 나온다. 그래서 인사의 유무로
@@ -135,6 +188,11 @@ greeting() {
   esac
 }
 
+# 🔑 아래를 main() 으로 묶고 소스 가드를 둔다 — 그래야 file_mtime 같은 순수 함수를
+#    **단위로 부를 수 있다**. 묶기 전에는 `file_mtime` 의 실패 경로(정수 아님 → rc=1)에
+#    닿는 시험이 없어서 변이가 살아남았다(M7·M8). 실행 경로는 그대로다:
+#    `bash morning-briefing.sh` 면 BASH_SOURCE[0] == $0 이라 main 이 돈다.
+main() {
 WEATHER="$(weather_section)"
 # 인사 분기에 쓸 강수확률 — 못 읽었으면 빈 값이고, 그러면 날씨 기반 분기를 안 탄다
 RAIN_PCT="$(sed -n 's/.*강수 최대 \([0-9]\+\)%.*/\1/p' <<<"$WEATHER" | head -1)"
@@ -144,7 +202,9 @@ $(greeting "$(TZ=Asia/Seoul date +%u)" "$RAIN_PCT")
 
 $WEATHER
 
-$(todo_section)"
+$(todo_section)
+
+$(drift_heartbeat_section)"
 
 # 섹션이 빠지면서 생긴 3줄 이상의 빈 줄을 정리한다(내용이 없는 건 티 안 나야 한다)
 MSG="$(printf '%s\n' "$MSG" | cat -s)"
@@ -155,3 +215,8 @@ if [[ "$DRY_RUN" == "1" ]]; then
 fi
 
 "$DISCORD_SEND" "$CHANNEL_ID" "$MSG"
+}
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  main "$@"
+fi
