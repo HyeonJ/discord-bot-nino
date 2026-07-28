@@ -76,7 +76,7 @@ extract_count() {
 
 run_one() {  # $1=표시이름 $2...=명령
     local name="$1"; shift
-    local out rc n
+    local out rc n marks
     out="$("$@" 2>&1)"; rc=$?
     if [ "$rc" -eq 0 ]; then
         pass=$((pass + 1))
@@ -91,7 +91,23 @@ run_one() {  # $1=표시이름 $2...=명령
     else
         fail=$((fail + 1)); failed="$failed $name"
         printf '  🔴 %-38s rc=%s\n' "$name" "$rc"
-        printf '%s\n' "$out" | tail -8 | sed 's/^/       /'
+        # 🔴 실패는 **꼬리가 아니라 표식 줄**을 먼저 보여준다(2026-07-28 니노 CI 실사고).
+        #    `tail -8` 만 찍으면 마지막 8줄이 ⛔·요약으로 채워질 때 ❌ 줄이 **잘린다** —
+        #    실제로 CI 에서 `backup-to-nas 3 fail` 이 떴는데 **무엇이 실패했는지 로그에 없었다.**
+        #    "빨간불은 보이는데 왜인지는 안 보이는" 상태고, 그건 빨간불이 없는 것과 크게 다르지 않다.
+        #    ⚠️ 이 규칙은 `.claude/rules/shell-scripts.md`(룬드) 에 *성공이면 꼬리, 실패면 머리* 로
+        #       이미 적혀 있었다 — 적어두고 러너에선 안 지킨 자리다.
+        #    ⚠️ 표식을 **못 찾은 경우를 빈칸으로 두지 않는다**(니노 사전 지적): 시험마다 표식이
+        #       다르므로 이 grep 은 언제든 0건이 될 수 있고, 그때 꼬리까지 짧게 주면 **정보가
+        #       전보다 줄어든다**(8줄 → 3줄). 못 찾았다고 말하고 **꼬리를 더 길게** 준다.
+        marks="$(printf '%s\n' "$out" | grep -nE '❌|✗|FAIL|want:|got:|[Ee]rror|assert' | head -6)"
+        if [ -n "$marks" ]; then
+            printf '%s\n' "$marks" | sed 's/^/       /'
+            printf '%s\n' "$out" | tail -3 | sed 's/^/       … /'
+        else
+            printf '       (실패 표식 줄을 못 찾았다 — 꼬리 12줄)\n'
+            printf '%s\n' "$out" | tail -12 | sed 's/^/       /'
+        fi
     fi
 }
 
