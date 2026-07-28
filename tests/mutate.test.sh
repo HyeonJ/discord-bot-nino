@@ -91,6 +91,19 @@ grep -qE '추적|tracked' <<<"$out" && ok "이유를 말한다" || bad "이유 �
 grep -q 'x=1' "$REPO/untracked.sh" && ok "파일을 안 건드렸다" || bad "건드렸다"
 rm -f "$REPO/untracked.sh"
 
+echo "⑧ --old 와 --new 가 같으면 거부 (아무것도 안 바뀐 실행을 '변이시험'으로 세지 않는다)"
+# 변이 M8(`git diff --quiet` 검사 제거)이 살아남아서 찾은 구멍이다.
+# 등가변이가 아니라 **안 밟히는 갈래**였다 — 코드는 닿을 수 있는데 시험에 그 입력이 없었다.
+# 이 갈래가 뚫리면 "치환이 조용히 실패했는데 원본 결과를 변이 결과로 읽는" 최악이 통과한다.
+printf 'VALUE=정답\n' > "$REPO/target.sh"
+git -C "$REPO" -c user.email=t@e -c user.name=t commit -qam reset8
+rm -f "$RAN"
+out="$(run --file target.sh --test "$TESTCMD" --name R7 --old '정답' --new '정답')"; rc=$?
+[[ "$rc" -gt 1 ]] && ok "거부 종료코드($rc)" || bad "rc=$rc" "$out"
+grep -qE '안 바뀌|같은가' <<<"$out" && ok "이유를 말한다" || bad "이유 없음" "$out"
+[[ ! -f "$RAN" ]] && ok "테스트 명령이 안 돌았다 — 원본을 변이로 착각할 여지를 없앤다" || bad "돌았다"
+[[ -z "$(git -C "$REPO" status --porcelain)" ]] && ok "작업트리 깨끗" || bad "잔재 있음"
+
 echo
 echo "  통과 $pass · 실패 $fail"
 [[ "$fail" -eq 0 ]]
