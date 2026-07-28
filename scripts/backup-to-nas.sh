@@ -159,11 +159,15 @@ else
     sync_dir "bot memory" "$BOT_MEMORY_SRC" "$NAS_DIR/bot-memory"
 fi
 
-# ── 축 2: auto-memory git 원격 (매일 03시) ───────────────────────
+# ── 축 2: auto-memory git 원격 (**매시** — 2026-07-28 승인 ⑦ 로 03시에서 넓힘) ──
 # NAS 미러 외 두 번째 사본. NAS는 삭제까지 미러링(--delete)하므로 실수 삭제는 복구가 안 된다.
 # git이 그 축을 덮는다 — 그래서 **NAS 상태를 조건에 넣지 않는다**(넣으면 두 축이 같이 죽는다).
 # push 실패는 rc를 올리지 않는다(NAS 백업 성공 결과를 덮어쓰면 안 됨) — 대신 조용히 넘기지도 않는다.
-if [ "$HOUR" = "03" ] && [ -d "$MEMORY_SRC/.git" ]; then
+#
+# 왜 시각 게이트를 뺐나: 03시에만 돌면 최악 **23시간**치가 두 번째 사본 없이 남는다.
+#   게이트가 줄여주는 건 커밋 수인데, 아래에서 **변경이 없으면 커밋을 안 만들므로**
+#   게이트 없이도 커밋 수는 실제 작업량에 비례한다. 즉 게이트는 비용을 안 줄이고 노출만 늘렸다.
+if [ -d "$MEMORY_SRC/.git" ]; then
     PENDING="$(git -C "$MEMORY_SRC" status --porcelain | wc -l)"
     if [ "$PENDING" -eq 0 ]; then
         log "OK: auto-memory 변경 없음 (커밋 생략)"
