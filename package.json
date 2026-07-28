@@ -3,7 +3,8 @@
   "private": true,
   "type": "commonjs",
   "scripts": {
-    "test": "jest --runInBand"
+    "test": "jest --runInBand",
+    "lint": "bash scripts/lint-js.sh"
   },
   "dependencies": {
     "discord.js": "^14.0.0",
@@ -14,6 +15,8 @@
     "ws": "^8.21.1"
   },
   "devDependencies": {
+    "eslint": "^10.8.0",
+    "globals": "^17.8.0",
     "jest": "^30.0.0"
   }
 }
