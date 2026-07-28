@@ -6,8 +6,13 @@
 #   `?` 는 "못 쟀다"인데 STALE(=미달, 조치는 재시작)로 접혀서, **값이 없는데 조치를 지시**했다.
 #   판정은 우연히 맞았고(코어가 실제로 움직였다) 근거는 비어 있었다 — 그래서 안 들켰다.
 #
-# 종료코드 계약: 0=충족 · 2=요건 미달/재시작 필요 · 1=**판정 불가**
+# 🔑 종료코드 계약 (2026-07-28 양봇 합의 — 코어 run-tests 계열로 통일):
+#     0 정상 · **1 위반**(조치 있음: pull/재시작) · **2 판정 불가**(못 쟀다)
+#     그 외(126·127·128+) ⇒ 판정 불가로 접는다 — 래퍼가 정규화한다(core-drift-cron 시험 ⑧)
 #   1과 2가 갈려야 래퍼가 다른 문장을 쓴다("조치 필요" vs "검사가 못 돌았다").
+#   🔴 이전엔 1·2 가 반대였다. 같은 디렉터리의 check-runner-drift.sh 는 이미 `2=판정 불가`
+#      였어서 한 레포에 두 규약이 있었다 — **이 시험 파일도 옛 계약의 독자였다**(㊽).
+#      계약을 바꾸면 코드·래퍼·시험 셋이 같이 움직인다. 하나만 고치면 초록인 채로 어긋난다.
 #
 # 네트워크 안 쓴다: 로컬 bare 원격을 만들어 CORE_REPO 의 upstream 으로 붙인다.
 set -uo pipefail
@@ -38,9 +43,9 @@ printf 'LONG_MESSAGE_THRESHOLD=2200\n' > "$ROOT/.env"
 
 run() { CORE_REPO="$ROOT/core" BOT_ENV="$ROOT/.env" RELAY_UNIT="$1" bash "$SCRIPT" 2>&1; }
 
-echo "① 판정 불가 — 유닛을 못 찾으면 rc=1 이고 **재시작을 지시하지 않는다**"
+echo "① 판정 불가 — 유닛을 못 찾으면 rc=2 이고 **재시작을 지시하지 않는다**"
 out="$(run "does-not-exist-$$.service")"; rc=$?
-[ "$rc" -eq 1 ] && ok "rc=1 (판정 불가)" || bad "rc=$rc — 1이어야 한다" "$out"
+[ "$rc" -eq 2 ] && ok "rc=2 (판정 불가)" || bad "rc=$rc — 2여야 한다" "$out"
 grep -q "판정 불가" <<<"$out" && ok "판정 불가를 명시" || bad "판정 불가 문구 없음" "$out"
 # 🔑 이 시험의 본체: 값이 없는데 조치를 지시하면 안 된다
 grep -q "재시작 안 됨" <<<"$out" && bad "못 쟀는데 '재시작 안 됨'으로 단정했다" "$out" \
@@ -59,7 +64,7 @@ echo "④ cron 환경 재현 — XDG_RUNTIME_DIR 이 없어도 **실제로 잰�
 # ⚠️ 처음엔 "'No medium found' 가 출력에 없다"로 썼는데 **절대 실패할 수 없는 시험**이었다.
 #    스크립트가 systemctl 의 stderr 를 `2>/dev/null` 로 죽이므로 그 문자열은 애초에 안 나온다.
 #    export 를 통째로 지우는 변이(R2)가 7/7 통과로 살아남아서 들켰다.
-#    → 문자열이 아니라 **값**으로 가른다: 못 재면 "판정 불가"(rc=1), 재면 다른 상태가 된다.
+#    → 문자열이 아니라 **값**으로 가른다: 못 재면 "판정 불가"(rc=2), 재면 다른 상태가 된다.
 LIVE_UNIT="$(systemctl --user list-units --type=service --state=running --no-legend 2>/dev/null \
              | awk '{print $1}' | head -1)"
 if [ -z "$LIVE_UNIT" ]; then
@@ -68,13 +73,13 @@ else
   out2="$(env -u XDG_RUNTIME_DIR -u DBUS_SESSION_BUS_ADDRESS \
           CORE_REPO="$ROOT/core" BOT_ENV="$ROOT/.env" RELAY_UNIT="$LIVE_UNIT" \
           bash "$SCRIPT" 2>&1)"; rc2=$?
-  [ "$rc2" -ne 1 ] && ok "cron 환경에서도 판정이 선다 (rc=$rc2, $LIVE_UNIT)" \
+  [ "$rc2" -ne 2 ] && ok "cron 환경에서도 판정이 선다 (rc=$rc2, $LIVE_UNIT)" \
     || bad "cron 환경에서 판정 불가로 떨어졌다 — XDG_RUNTIME_DIR 미설정" "$out2"
   grep -q "판정 불가" <<<"$out2" && bad "살아있는 유닛인데 못 쟀다" "$out2" \
     || ok "MainPID 를 실제로 구했다"
 fi
 
-echo "⑤ 🔴 뒤처짐(DRIFT)은 **조치 필요(rc=2)** 다 — 0 으로 내면 래퍼가 알림 전에 빠져나간다"
+echo "⑤ 🔴 뒤처짐(DRIFT)은 **위반(rc=1)** 이다 — 0 으로 내면 래퍼가 알림 전에 빠져나간다"
 # 실전에서 조용히 새고 있었다(2026-07-28 13:5x 발견). 로그:
 #   12:08 rc=0 DRIFT: repo_behind=3커밋   ← 발견해놓고 rc=0
 #   13:15 rc=0 DRIFT: repo_behind=4커밋
@@ -83,7 +88,7 @@ echo "⑤ 🔴 뒤처짐(DRIFT)은 **조치 필요(rc=2)** 다 — 0 으로 내�
 # 돌게 만든다"*. 래퍼는 이 사고를 예상했는데 **검사 쪽이 0을 내서 두 반쪽이 어긋났다.**
 # 그래서 라이브 코어가 5커밋 뒤처진 채였고 내 lint 셔틀은 스테일 정본을 실행하고 있었다.
 if [ -z "${LIVE_UNIT:-}" ]; then
-  echo "  ⏭️  건너뜀 — 살아있는 --user 유닛이 없어 process_behind 를 못 재고, 그러면 rc=1 로 먼저 빠진다"
+  echo "  ⏭️  건너뜀 — 살아있는 --user 유닛이 없어 process_behind 를 못 재고, 그러면 rc=2 로 먼저 빠진다"
 else
   # ⚠️ `--branch main` 필수: bare 레포의 HEAD 는 `master` 라 그냥 clone 하면 **빈 master** 를
   #    체크아웃하고, 거기서 커밋하면 새 루트 커밋이 되어 push 가 non-fast-forward 로 거절된다.
@@ -94,16 +99,66 @@ else
   git -C "$ROOT/pusher" -c user.email=t@e -c user.name=t commit -qm "코어 신규 커밋"
   git -C "$ROOT/pusher" push -q origin main 2>/dev/null
   out5="$(run "$LIVE_UNIT")"; rc5=$?
-  # 🔑 DRIFT 와 rc=2 를 **한 쌍으로** 본다. 따로 보면 STALE(이것도 rc=2)이 rc 단언을 대신
+  # 🔑 DRIFT 와 rc=1 을 **한 쌍으로** 본다. 따로 보면 STALE(이것도 rc=1)이 rc 단언을 대신
   #    통과시킨다 — 실제로 첫 판에 그랬다. 다른 갈래가 대신 통과시키는 형태(②).
   if grep -q "^DRIFT" <<<"$out5"; then
     ok "DRIFT 로 판정"
-    [ "$rc5" -eq 2 ] && ok "그 DRIFT 가 rc=2 로 나간다 — 래퍼가 알린다" \
+    [ "$rc5" -eq 1 ] && ok "그 DRIFT 가 rc=1 로 나간다 — 래퍼가 알린다" \
       || bad "DRIFT 인데 rc=$rc5 — 0 이면 래퍼가 36행에서 조용히 빠져나간다" "$out5"
   else
     bad "DRIFT 를 못 잡았다 (rc=$rc5) — 이 상태면 rc 단언은 의미가 없다" "$out5"
   fi
 fi
+
+echo "⑥ 🔑 **모든 판정 불가 갈래가 2로 나간다** — 갈래마다 시험을 붙일 수 없으니 성질로 잠근다"
+# 🔴 이 스크립트엔 판정 불가 갈래가 일곱 곳이다. ①은 그중 **하나**(유닛 부재)만 지난다 —
+#    나머지 여섯은 시험이 안 닿는다. 실측: `워크트리 생성 실패` 갈래를 옛 코드(1)로 되돌려도
+#    **10 pass 초록**이었다. 같은 계약이 여러 자리에서 실현되면 **한 자리만 덮고도 초록**이 된다
+#    (2026-07-28 assistant#24 P1 과 같은 형태 — 그땐 내가 룬드 코드에서 잡았고 이번엔 내 코드다).
+# ⇒ 갈래마다 케이스를 만드는 대신 **출력 문구와 종료코드의 짝**을 정적으로 본다.
+#    ⚠️ `printf|echo` 같은 **통로를 열거하지 않는다** — 그건 자기 printer 를 정의하는 순간
+#       뚫린다(assistant#24 P2). 여기선 *어떤 말을 하면서 어떤 코드로 나가는가* 만 본다.
+viol="$(python3 - "$SCRIPT" <<'PYEOF'
+import re, sys
+lines = open(sys.argv[1]).read().split('\n')
+bad = []
+for i, ln in enumerate(lines):
+    m = re.search(r'\bexit ([0-9]+)', ln)
+    if not m or ln.lstrip().startswith('#'):
+        continue
+    code = m.group(1)
+    if code == '0':
+        continue
+    # 같은 줄 + 앞 4줄(주석 제외)에서 무슨 말을 하고 있었나
+    ctx = '\n'.join(x for x in lines[max(0, i-4):i+1] if not x.lstrip().startswith('#'))
+    unknown = re.search(r'판정 불가|WARN:|ERROR:', ctx)
+    violation = re.search(r'\bSTALE\b|\bDRIFT\b', ctx)
+    if unknown and not violation and code != '2':
+        bad.append(f"{i+1}행: 판정 불가인데 exit {code} (2여야 한다)")
+    if violation and not unknown and code != '1':
+        bad.append(f"{i+1}행: 위반(STALE/DRIFT)인데 exit {code} (1이어야 한다)")
+print('\n'.join(bad))
+PYEOF
+)"
+[ -z "$viol" ] && ok "판정 불가는 전부 2, 위반은 전부 1" || bad "계약 위반 갈래" "$viol"
+# 음성 검사 — 이 시험이 실제로 물 수 있는지(항상 초록인 시험이 아닌지)
+probe="$(mktemp)"; sed 's/echo "  ⚠️ 영향 판정 불가 — 워크트리 생성 실패"; exit 2/echo "  ⚠️ 영향 판정 불가 — 워크트리 생성 실패"; exit 1/' "$SCRIPT" > "$probe"
+probe_out="$(SCRIPT="$probe" bash -c 'python3 - "$SCRIPT" <<'"'"'PYEOF'"'"'
+import re, sys
+lines = open(sys.argv[1]).read().split("\n")
+bad = []
+for i, ln in enumerate(lines):
+    m = re.search(r"\bexit ([0-9]+)", ln)
+    if not m or ln.lstrip().startswith("#"): continue
+    code = m.group(1)
+    if code == "0": continue
+    ctx = "\n".join(x for x in lines[max(0,i-4):i+1] if not x.lstrip().startswith("#"))
+    if re.search(r"판정 불가|WARN:|ERROR:", ctx) and not re.search(r"\bSTALE\b|\bDRIFT\b", ctx) and code != "2":
+        bad.append(str(i+1))
+print(",".join(bad))
+PYEOF')"
+[ -n "$probe_out" ] && ok "  → 되돌림 변이를 실제로 잡는다(${probe_out}행)"   || bad "  이 시험은 어떤 변이로도 안 갈린다 — 빼는 게 맞다" "probe 무반응"
+rm -f "$probe"
 
 echo
 echo "  통과 $pass · 실패 $fail"
