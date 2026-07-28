@@ -283,7 +283,11 @@ fi
 step "Phase 9: 헬스체크"
 
 # 필수 파일 확인
-REQUIRED_FILES=(".env" "src/discord-relay.js" "src/discord-send" "CLAUDE.md" "scripts/start-nino.sh")
+# 🔴 relay 는 이 레포에 없다 — bot-core 전환(2026-07) 이후 systemd ExecStart 가 **코어 사본**을
+#    가리킨다. 예전엔 여기서 `src/discord-relay.js` 를 봤는데, 그 낡은 파일이 남아 있어서 점검이
+#    계속 초록이었고 **실제 relay 유무는 한 번도 안 재고 있었다**(거짓 초록, 2026-07-28 실측).
+#    ⇒ relay 점검은 scripts/check-relay-present.sh 가 맡는다(아래). 소스를 둘로 두지 않는다.
+REQUIRED_FILES=(".env" "src/discord-send" "CLAUDE.md" "scripts/start-nino.sh")
 for f in "${REQUIRED_FILES[@]}"; do
     if [[ -f "$BOT_DIR/$f" ]] || [[ -x "$BOT_DIR/$f" ]]; then
         ok "파일 존재: $f"
@@ -291,6 +295,15 @@ for f in "${REQUIRED_FILES[@]}"; do
         warn "파일 없음: $f"
     fi
 done
+
+# relay 실체 + 유닛이 가리키는 대상 (0 정상 / 1 문제 / 2 판정 불가)
+RELAY_OUT="$(bash "$BOT_DIR/scripts/check-relay-present.sh" 2>&1)"; RELAY_RC=$?
+printf '%s\n' "$RELAY_OUT" | sed 's/^/  /'
+case "$RELAY_RC" in
+    0) ok "relay 확인" ;;
+    1) warn "relay 를 지금 못 띄운다 — 위 경로를 확인할 것" ;;
+    *) warn "relay 상태 **판정 불가**(rc=$RELAY_RC) — 정상으로 읽지 말 것" ;;
+esac
 
 # 권한 확인
 if [[ -f "$BOT_DIR/.env" ]]; then
