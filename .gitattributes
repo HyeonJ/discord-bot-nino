@@ -1,0 +1,40 @@
+# 줄바꿈 통일 — Windows(WSL)·Mac 사이를 오가는 레포라 섞이면 diff 가 통째로 뜬다
+#
+# 왜 필요했나: tracked 34개가 CRLF 였다(2026-07-28 실측). 그중 셸 스크립트가 섞여 있는데
+#   CRLF 스크립트는 `#!/usr/bin/env bash\r` 로 읽혀 **실행 자체가 깨진다** — 줄바꿈은
+#   미관 문제가 아니라 동작 문제다.
+* text=auto
+
+# 텍스트로 확정하고 저장소·작업트리 모두 LF (실행 대상이라 CRLF 면 깨지는 것들 포함)
+*.sh    text eol=lf
+*.bash  text eol=lf
+*.js    text eol=lf
+*.mjs   text eol=lf
+*.cjs   text eol=lf
+*.ts    text eol=lf
+*.py    text eol=lf
+*.json  text eol=lf
+*.md    text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.txt   text eol=lf
+*.sql   text eol=lf
+*.env   text eol=lf
+
+# Windows 전용 — 여기만 CRLF 가 정답
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+*.ps1   text eol=crlf
+
+# 바이너리 — 변환 금지(변환하면 파일이 깨진다)
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.webp  binary
+*.pdf   binary
+*.zip   binary
+*.db    binary
+*.sqlite binary
+*.wvd   binary
+*.age   binary

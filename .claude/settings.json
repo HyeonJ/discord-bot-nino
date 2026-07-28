@@ -1,17 +1,4 @@
 {
-  "enabledPlugins": {
-    "cc-creator@yaksu-claude-plugins": true,
-    "notebooklm@yaksu-claude-plugins": true
-  },
-  "extraKnownMarketplaces": {
-    "yaksu-claude-plugins": {
-      "source": {
-        "source": "github",
-        "repo": "tim-watcha/yaksu-claude-plugins"
-      }
-    }
-  },
-  "pluginAutoUpdate": true,
   "hooks": {
     "PreCompact": [
       {
@@ -48,5 +35,17 @@
         ]
       }
     ]
-  }
+  },
+  "enabledPlugins": {
+    "notebooklm@yaksu-claude-plugins": true
+  },
+  "extraKnownMarketplaces": {
+    "yaksu-claude-plugins": {
+      "source": {
+        "source": "github",
+        "repo": "tim-watcha/yaksu-claude-plugins"
+      }
+    }
+  },
+  "pluginAutoUpdate": true
 }
