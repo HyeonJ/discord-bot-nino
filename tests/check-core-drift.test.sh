@@ -55,13 +55,24 @@ grep -q "^STALE" <<<"$out" && bad "판정 불가가 STALE 로 나갔다" "$out" 
 echo "③ repo_behind 는 유효하면 같이 낸다 (한 축이 죽어도 다른 축은 보고)"
 grep -q "repo_behind=0커밋" <<<"$out" && ok "유효한 축은 그대로 보고" || bad "repo_behind 미표시" "$out"
 
-echo "④ cron 환경 재현 — XDG_RUNTIME_DIR 이 없어도 스스로 채운다"
-out2="$(env -u XDG_RUNTIME_DIR -u DBUS_SESSION_BUS_ADDRESS \
-        CORE_REPO="$ROOT/core" BOT_ENV="$ROOT/.env" RELAY_UNIT="does-not-exist-$$.service" \
-        bash "$SCRIPT" 2>&1)"
-# 유닛이 없으니 판정 불가인 건 같지만, **버스 연결 실패가 원인이면 안 된다**
-grep -q "No medium found" <<<"$out2" && bad "XDG_RUNTIME_DIR 미설정이 새어나왔다" "$out2" \
-  || ok "버스 오류가 새지 않는다"
+echo "④ cron 환경 재현 — XDG_RUNTIME_DIR 이 없어도 **실제로 잰다**"
+# ⚠️ 처음엔 "'No medium found' 가 출력에 없다"로 썼는데 **절대 실패할 수 없는 시험**이었다.
+#    스크립트가 systemctl 의 stderr 를 `2>/dev/null` 로 죽이므로 그 문자열은 애초에 안 나온다.
+#    export 를 통째로 지우는 변이(R2)가 7/7 통과로 살아남아서 들켰다.
+#    → 문자열이 아니라 **값**으로 가른다: 못 재면 "판정 불가"(rc=1), 재면 다른 상태가 된다.
+LIVE_UNIT="$(systemctl --user list-units --type=service --state=running --no-legend 2>/dev/null \
+             | awk '{print $1}' | head -1)"
+if [ -z "$LIVE_UNIT" ]; then
+  echo "  ⏭️  건너뜀 — 살아있는 --user 유닛이 없어 '쟀다'를 관측할 수 없다"
+else
+  out2="$(env -u XDG_RUNTIME_DIR -u DBUS_SESSION_BUS_ADDRESS \
+          CORE_REPO="$ROOT/core" BOT_ENV="$ROOT/.env" RELAY_UNIT="$LIVE_UNIT" \
+          bash "$SCRIPT" 2>&1)"; rc2=$?
+  [ "$rc2" -ne 1 ] && ok "cron 환경에서도 판정이 선다 (rc=$rc2, $LIVE_UNIT)" \
+    || bad "cron 환경에서 판정 불가로 떨어졌다 — XDG_RUNTIME_DIR 미설정" "$out2"
+  grep -q "판정 불가" <<<"$out2" && bad "살아있는 유닛인데 못 쟀다" "$out2" \
+    || ok "MainPID 를 실제로 구했다"
+fi
 
 echo
 echo "  통과 $pass · 실패 $fail"
