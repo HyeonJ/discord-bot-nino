@@ -20,25 +20,36 @@ description: 봇 재시작·비정상 종료 후 대화 기록 DB를 상대 봇�
 "놓친 게 없다"로 끝난다. 실측된 형태다 — 2026-07-26 07~10시(KST)에 내 jsonl 0행,
 룬드는 2건. **혼자서는 볼 수 없는 종류의 구멍이라 상대의 기록만이 반증한다.**
 
-## ⚠️ 방향 제약 — 개시는 룬드만 가능하다 (2026-07-29 실측)
+## 접속 — 🔴 사용자명은 **`klaude`** 다 (2026-07-29 실측)
 
-```
-맥(룬드) → 니노   ✅ 열려 있음
-니노 → 맥(룬드)   ❌ Permission denied (publickey)
-```
-
-데이터는 양방향으로 흐르지만 **SSH 를 거는 쪽은 언제나 룬드**다:
+**니노에서 양방향 다 걸 수 있다.** 니노 혼자 자기 복구를 시작할 수 있다.
 
 ```bash
-# 룬드 → 니노 (룬드 기계에서 실행)
-yaksu-history export --since … --until … | ssh <니노> 'yaksu-history import'
+MAC=klaude@100.67.247.61          # tailscale 노드 `tim` · Mac-Studio.local
+PEER=/Users/klaude/.local/bin/yaksu-history      # 🔴 절대경로 필수 (아래)
 
-# 니노 → 룬드 (역시 룬드 기계에서 실행)
-ssh <니노> 'yaksu-history export --since … --until …' | yaksu-history import
+# 룬드 → 니노 (상대 기록으로 내 구멍을 메운다 — 재시작 후 기본 방향)
+ssh $MAC "$PEER export --since … --until …" | yaksu-history import
+
+# 니노 → 룬드
+yaksu-history export --since … --until … | ssh $MAC "$PEER import"
 ```
 
-⇒ **"니노가 죽었다 깼다"는 니노 혼자 복구를 시작할 수 없다.** 룬드에게 요청해야 한다.
-근본 해결은 니노→맥 SSH 키. 그때까지 이건 규칙의 미충족 전제이지 운영 편의가 아니다.
+⚠️ **`rund` 가 아니라 `klaude` 다.** 디스코드 개명(클로드→룬드)은 표시 이름만 바꿨고
+**맥 계정명은 `klaude` 로 남아 있다.** `bpx27` · `rund` · `me.bug` 는 전부
+`Permission denied (publickey,password,keyboard-interactive)` 를 낸다 — **키가 없어서가 아니라
+그 사용자가 없어서**다. 내 키(`nino-bot`, `SHA256:aCt0RSAwUseInFykhgbYvtbutjtdjZFuXASJ9HzenEc`)는
+이미 맥 `authorized_keys` 에 등록돼 있다(지문 대조 완료).
+
+⚠️ **`yaksu-history` 를 맨 이름으로 부르면 rc=127 이다.** 비대화형 SSH 의 PATH 에
+`~/.local/bin` 이 없다 — `command -v yaksu-history` 가 빈손, 파일은 있다.
+**cron PATH 와 똑같은 자리**이고 조용하지 않다(127 로 터진다).
+
+🔑 이 문단은 **2026-07-29 01:16 에 통째로 뒤집혔다.** 그전까지 이 스킬은
+*"니노 → 맥은 막혀 있고 개시는 언제나 룬드"* 라고 적고 있었다. 세 번 재고 세 번 다
+`Permission denied` 를 받았는데 **매번 사용자명은 안 바꿔봤다** — 내 키·네트워크 축만 다시 쟀다.
+룬드가 자기 쪽에서 *"키는 등록돼 있다"* 를 재준 뒤에야 남는 축이 사용자명뿐이 됐다.
+⇒ **"안 된다"를 반복해서 재는 건 축을 안 바꾸면 횟수만 늘 뿐이다.**
 
 ## 절차
 
