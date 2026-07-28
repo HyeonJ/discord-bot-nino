@@ -230,9 +230,32 @@ if [ -n "$UNMEASURED_STATE" ]; then
         had_state=0; [ -f "$UNMEASURED_STATE" ] && had_state=1
         prev=""
         [ "$had_state" -eq 1 ] && prev="$(cat "$UNMEASURED_STATE" 2>/dev/null)"
-        next=""
+
+        # 🔑 **어디서 쟀는지**를 같이 남긴다 (니노 발견 2026-07-28).
+        #    같은 코드인데 실행 위치가 다르면 판정 불가 **이름 집합이 갈린다** — 실측:
+        #      워크트리   판정 불가 1 (start-md-web: 유닛의 ExecStart 가 이 경로를 안 가리킨다)
+        #      main       판정 불가 0
+        #    ⇒ 위치를 오가면 `🔴 새로` 와 `✅ 벗어남` 이 번갈아 뜬다. **아무것도 안 변했는데.**
+        #      이 기능은 *지표는 유지되는데 안에서 갈린다* 를 잡으려고 만들었는데, 그 거울상을
+        #      같이 만든 셈이다.
+        #    🔸 **비교를 건너뛰지는 않는다** — 언제 건너뛰는 게 맞는지 잴 데이터가 아직 없다.
+        #      *말하기만* 한다. 실제로 섞이는 사례가 나오면 그때 붙인다(쓰는 데 없는 배선은 낡는다).
+        #    🔸 그리고 이 값은 오탐 방지보다 **진단**에 더 쓰인다 — 나중에 "이 숫자가 어디서
+        #      나온 거지" 를 물을 때, 안 적어두면 그때 못 답한다.
+        ROOT_KEY="#root"
+        prev_root="$(printf '%s\n' "$prev" | awk -F'\t' -v k="$ROOT_KEY" '$1==k {print $2; exit}')"
+        if [ -n "$prev_root" ] && [ "$prev_root" != "$ROOT" ]; then
+            echo "   ℹ️ 실행 위치가 바뀌었다($prev_root → $ROOT) — 이름 집합이 위치 따라 갈릴 수 있다"
+        fi
+        next="$ROOT_KEY$TAB$ROOT
+"
         while IFS= read -r u; do
             [ -n "$u" ] || continue
+            # 🔸 여기선 헤더를 따로 안 거른다. 이름이 root 경로와 똑같아 헤더가 매치돼도
+            #    `$1` 이 `#root` 라 아래 `case` 의 *비숫자* 갈래로 떨어져 같은 결과가 된다
+            #    (실측: 거르는 판/안 거르는 판의 출력이 **완전히 동일**). 거르는 줄을 넣었다가
+            #    **어떤 변이로도 안 갈려서** 뺐다 — 시험으로 구별 안 되는 방어는 낡기만 한다.
+            #    아래 ✅ 루프는 다르다. 거기선 헤더가 곧바로 *이름*으로 읽혀 ⑩-d 가 잡는다.
             first="$(printf '%s\n' "$prev" | awk -F'\t' -v n="$u" '$2==n {print $1; exit}')"
             case "$first" in
                 ''|*[!0-9]*)
@@ -260,6 +283,7 @@ UNMEOF
         # ✅ 사라진 이름은 **고쳐진 것**이다. 이것도 말해야 줄고 있다는 게 보인다.
         if [ -n "$prev" ]; then
             while IFS= read -r pl; do
+                case "$pl" in "$ROOT_KEY$TAB"*) continue ;; esac   # 헤더는 이름이 아니다
                 pn="${pl#*	}"
                 [ -n "$pn" ] && [ "$pn" != "$pl" ] || continue
                 printf '%s' "$unmeasured" | grep -qxF "$pn" || echo "   ✅ 판정 불가에서 벗어났다: $pn"
