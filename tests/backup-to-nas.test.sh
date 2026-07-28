@@ -49,8 +49,32 @@ init_git_repo() {
   git -C "$ROOT/auto-memory" push -qu origin main
 }
 
+# 🔴 가짜 age — **이 시험이 재려는 것이 아닌 의존을 고정한다** (2026-07-28 CI 실측으로 추가)
+#    backup-to-nas.sh 는 age 가 없으면 `fail` 로 **스크립트 전체 rc=1** 을 만든다. 그래서 age 가
+#    없는 기계(CI 러너)에서는 push·스냅샷처럼 **age 와 무관한 케이스까지 rc=1 로 깨졌다**
+#    — 원인은 그 케이스가 아닌데 그 케이스가 빨개진다(오진을 부르는 실패).
+#    ⇒ 기본값으로 가짜를 물려 결정적으로 만든다. **진짜 age 가 필요한 케이스는 호출부에서
+#      BACKUP_AGE_BIN="$AGE_REAL" 로 덮어쓴다**(뒤에 오는 값이 이긴다) — 그쪽은 그대로 둔다.
+FAKE_AGE="$(mktemp)"
+cat > "$FAKE_AGE" <<'FAKEAGE'
+#!/bin/bash
+# age 대역: `-r <pubkey> -o <out> <src>` 만 흉내낸다(암호화 성질은 흉내내지 않는다)
+out=""; src=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -r) shift 2 ;;
+    -o) out="$2"; shift 2 ;;
+    *)  src="$1"; shift ;;
+  esac
+done
+[ -n "$out" ] || exit 2
+{ printf 'FAKE-AGE\n'; [ -n "$src" ] && cat "$src"; } > "$out"
+FAKEAGE
+chmod +x "$FAKE_AGE"
+
 run_backup() {
   env \
+    BACKUP_AGE_BIN="$FAKE_AGE" \
     BACKUP_NAS_DIR="$ROOT/nas" \
     BACKUP_NAS_ROOT="$ROOT" \
     BACKUP_MEMORY_SRC="$ROOT/auto-memory" \
@@ -367,7 +391,9 @@ AGE_REAL="$HOME/.local/bin/age"
 
 # ⑲ cdm 이 **암호화되어** 백업된다 (평문 노출 금지)
 if [[ ! -x "$AGE_REAL" ]]; then
-  bad "age 바이너리가 없어 cdm 검사 불가 — 건너뛰지 않고 실패로 표시(조용한 skip 금지)"
+  # 🔴 2026-07-28 정정: 실패(rc=1)로 접고 있었다. 진짜 age 가 없는 것은 **위반이 아니라 못 쟀다**.
+  unk=$((unk + 1))
+  echo "  ⛔ 판정 불가 — age 가 없어 cdm 암호화 검사를 못 했다(설치된 기계에서 재야 한다)"
 else
   setup
   mkdir -p "$ROOT/cdm"
