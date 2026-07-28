@@ -32,7 +32,11 @@ print(json.dumps({"tool_input":{"command":sys.stdin.read()}}))
 echo "차단이 유지되는가 (거짓 음성 방지 — 이게 훅의 존재 이유):"
 check "이름 target + 멘션 없음 → 차단"            2 'discord-send 현인-업무 "보고"'
 check "채널ID target + 멘션 없음 → 차단"          2 'discord-send 1479813609499394171 "보고"'
-check "-c target + 멘션 없음 → 차단"              2 'discord-send -c 현인-업무 "보고"'
+# `-c` 는 deprecated 지만 **아직 동작한다**(§8 계측 중). 동작하는 한 가드도 그 경로를
+# 막아야 하므로 이 줄은 일부러 옛 문법을 쓴다 — 지우면 커버리지가 사라진다.
+# ⚠️ 면제 마커는 **매치된 줄 자체**에 있어야 한다(린트가 `grep -v` 로 그 줄을 거른다).
+#    앞줄 주석에 달면 안 먹는다 — 실제로 그렇게 달았다가 여전히 잡혔다.
+check "-c target + 멘션 없음 → 차단"              2 'discord-send -c 현인-업무 "보고"'  # lint-callers:allow
 check "--target 지정 + 멘션 없음 → 차단"          2 'discord-send --target 현인-업무 "보고"'
 check "-f 앞에 붙어 target이 밀림 → 차단"         2 'discord-send -f /tmp/a.png 현인-업무 "이미지"'
 check "-f 반복으로 더 밀림 → 차단"                2 'discord-send -f /tmp/a.png -f /tmp/b.png 현인-다용도 "둘"'
