@@ -9,6 +9,7 @@
 # 규약: 확인된 빈 상태(할 일 0건) → 섹션을 뺀다 / 소스 실패 → 반드시 줄을 낸다.
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/lib/timeshift.sh"   # 시각 조작은 정본 하나를 지난다(GNU/BSD 공용)
 BOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 SCRIPT="$BOT_DIR/scripts/morning-briefing.sh"
 
@@ -81,10 +82,10 @@ if [[ "$empty" != "$broken" ]] && ! grep -q '못 읽음' <<<"$empty"; then
 broken:$broken"; fi
 
 echo "⑤ 오래된 목록 — 며칠째 안 바뀌었는지 덧붙인다"
-touch -d '10 days ago' "$ROOT/todo.md"
+touch_ago $(( 10 * DAY )) "$ROOT/todo.md"
 out="$(run "$ROOT/todo.md" "$ROOT/weather.json")"
 if grep -q '10일째 안 바뀜' <<<"$out"; then ok "정지 기간 표시"; else bad "정지 표시 없음" "$out"; fi
-touch -d 'now' "$ROOT/todo.md"
+touch "$ROOT/todo.md"   # 인자 없는 touch = 지금 (POSIX)
 out="$(run "$ROOT/todo.md" "$ROOT/weather.json")"
 if ! grep -q '안 바뀜' <<<"$out"; then ok "최신이면 안 붙는다(수렴)"; else bad "최신인데 붙었다" "$out"; fi
 
@@ -162,11 +163,58 @@ echo "⑩ 코어 드리프트 하트비트 — cron 이 죽은 상태가 무음�
 out="$(run "$ROOT/todo.md" "$ROOT/weather.json" "$ROOT/hb-fresh")"
 if ! grep -q '드리프트 감시' <<<"$out"; then ok "신선하면 조용하다"; else bad "정상인데 떠들었다" "$out"; fi
 
+# ⑤-3 mtime 을 **못 읽으면 그렇게 말한다** — 조용하면 "최신이라 안 붙었다" 와 구별이 안 된다
+#   왜: 이 자리는 `date -r FILE` 을 직접 써서 macOS 에서 산술 에러로 안내가 통째로 사라졌다.
+#   폴백을 태운 뒤에도 **읽는 경로가 둘 다 실패**할 수 있으니(권한·이상한 FS) 그 갈래를 잠근다.
+mkdir -p "$ROOT/nomtime"
+cat > "$ROOT/nomtime/date" <<'NOMT'
+#!/bin/bash
+[ "$1" = "-r" ] && exit 1     # 파일 mtime 읽기만 막는다
+exec /bin/date "$@"
+NOMT
+cat > "$ROOT/nomtime/stat" <<'NOMT'
+#!/bin/bash
+[ "$1" = "-f" ] && exit 1     # BSD 폴백도 막는다
+exec /usr/bin/stat "$@"
+NOMT
+chmod +x "$ROOT/nomtime/date" "$ROOT/nomtime/stat"
+out="$(PATH="$ROOT/nomtime:$PATH" run "$ROOT/todo.md" "$ROOT/weather.json")"
+if grep -q '못 읽음' <<<"$out"; then ok "갱신일을 못 읽으면 못 읽었다고 말한다"; else bad "못 읽었는데 조용하다(최신과 구별 불가)" "$out"; fi
+if ! grep -qE '일째 안 바뀜' <<<"$out"; then ok "못 잰 것을 일수로 단정하지 않는다"; else bad "못 쟀는데 일수를 말했다" "$out"; fi
+
+# ⑤-4 **BSD 갈래를 가른다** — `date -r FILE` 이 안 되는 기계에서도 mtime 을 읽어야 한다
+#   ⚠️ ⑤-3 은 두 경로를 **동시에** 막아서, 폴백이 있는 코드와 없는 코드가 같은 답을 낸다
+#      (실측: 폴백을 떼는 변이가 ⑤-3 만으로는 살아남았다). 존재 검사는 등가변이에 먹힌다 —
+#      **한쪽만 막고 다른 쪽이 살아 있는** 상태라야 갈래가 갈린다.
+#   macOS: `date -r` 은 인자 의미가 달라 파일에 못 쓰고, `stat -f %m` 이 동작하는 기계다.
+mkdir -p "$ROOT/bsdlike"
+cat > "$ROOT/bsdlike/date" <<'BSDD'
+#!/bin/bash
+[ "$1" = "-r" ] && { echo "date: illegal time format" >&2; exit 1; }   # BSD 는 파일을 못 받는다
+exec /bin/date "$@"
+BSDD
+cat > "$ROOT/bsdlike/stat" <<'BSDS'
+#!/bin/bash
+# BSD `stat -f %m` = mtime epoch. GNU 기계에서는 -c %Y 로 같은 값을 낸다(폴백이 사는 조건).
+# ⚠️ GNU 를 **먼저** 시도한다 — GNU 의 `-f` 는 --file-system 이라 실패하지 않고 마운트포인트를
+#    조용히 찍는다(`||` 가 안 걸린다). 실제로 이 스텁을 그 순서로 썼다가 한 번 밟았다.
+if [ "$1" = "-f" ] && [ "$2" = "%m" ]; then
+  /usr/bin/stat -c %Y "$3" 2>/dev/null || /usr/bin/stat -f %m "$3"
+  exit $?
+fi
+exec /usr/bin/stat "$@"
+BSDS
+chmod +x "$ROOT/bsdlike/date" "$ROOT/bsdlike/stat"
+touch_ago $(( 10 * DAY )) "$ROOT/todo.md"
+out="$(PATH="$ROOT/bsdlike:$PATH" run "$ROOT/todo.md" "$ROOT/weather.json")"
+if grep -q '10일째 안 바뀜' <<<"$out"; then ok "date -r 이 막혀도 폴백으로 mtime 을 읽는다(BSD 갈래)"; else bad "BSD 갈래에서 정지 기간을 잃었다" "$out"; fi
+touch "$ROOT/todo.md"
+
 # ⑩-2 낡으면 반드시 줄을 낸다 + 얼마나 낡았는지
-touch -d '5 hours ago' "$ROOT/hb-fresh.stale" 2>/dev/null || touch -t "$(date -d '5 hours ago' +%Y%m%d%H%M)" "$ROOT/hb-fresh.stale"
+touch_ago $(( 5 * HOUR )) "$ROOT/hb-fresh.stale"
 printf 'old rc=0\n' >> /dev/null
-: > "$ROOT/hb-stale"; printf '%s rc=0\n' "$(date -d '5 hours ago' '+%Y-%m-%d %H:%M:%S')" > "$ROOT/hb-stale"
-touch -d '5 hours ago' "$ROOT/hb-stale"
+: > "$ROOT/hb-stale"; printf '%s rc=0\n' "$(fmt_ago $(( 5 * HOUR )) '+%Y-%m-%d %H:%M:%S')" > "$ROOT/hb-stale"
+touch_ago $(( 5 * HOUR )) "$ROOT/hb-stale"
 out="$(run "$ROOT/todo.md" "$ROOT/weather.json" "$ROOT/hb-stale")"
 if grep -q '드리프트 감시' <<<"$out"; then ok "낡으면 줄을 낸다"; else bad "낡았는데 무음" "$out"; fi
 if grep -qE '5시간|[0-9]+시간' <<<"$out"; then ok "얼마나 낡았는지 수치가 나온다"; else bad "수치 없음" "$out"; fi
@@ -186,7 +234,7 @@ stale_out="$(run "$ROOT/todo.md" "$ROOT/weather.json" "$ROOT/hb-stale")"
 if grep -qE '멈췄|시간째' <<<"$(grep '드리프트 감시' <<<"$stale_out")"; then ok "'낡음'은 멈춤으로 말한다"; else bad "낡음 문구 이상" "$stale_out"; fi
 
 # ⑩-4 경계값 — 정확히 임계면 아직 신선(초과만 낡음)
-: > "$ROOT/hb-edge"; touch -d '2 hours ago' "$ROOT/hb-edge"
+: > "$ROOT/hb-edge"; touch_ago $(( 2 * HOUR )) "$ROOT/hb-edge"
 out="$(HEARTBEAT_STALE_HOURS=2 run "$ROOT/todo.md" "$ROOT/weather.json" "$ROOT/hb-edge")"
 if ! grep -q '드리프트 감시' <<<"$out"; then ok "경계값은 아직 신선(초과만 낡음)"; else bad "경계에서 오탐" "$out"; fi
 

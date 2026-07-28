@@ -10,6 +10,7 @@
 # 설계: 스크립트가 경로·시각을 env로 받는다(기본값은 프로덕션). 그래야 부작용 없이 검증 가능.
 #   [[feedback_vault_script_test_isolation]] — 실제 봇 트리·NAS를 건드리면 격리가 깨진다.
 set -uo pipefail
+source "$(cd "$(dirname "$0")" && pwd)/lib/timeshift.sh"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 SCRIPT="$BOT_DIR/scripts/backup-to-nas.sh"
@@ -382,9 +383,10 @@ teardown
 setup
 make_db "$ROOT/msgs.db"
 mkdir -p "$ROOT/nas/yaksu-history"
-# ⚠️ `touch -d` 는 GNU 전용 — 코어(macOS)로 옮기면 `touch -t` 로 바꿔야 한다(룬드 지적)
-touch -d '30 days ago' "$ROOT/nas/yaksu-history/messages-20260101.db"
-touch -d '3 days ago'  "$ROOT/nas/yaksu-history/messages-20260724.db"
+# 시각 조작은 tests/lib/timeshift.sh 를 지난다(GNU/BSD 공용) — 여기 있던 `touch -d` 가
+# 룬드 맥에서 죽어서 이 단언이 빨개졌다. 상대 시각을 초로 계산해 POSIX `touch -t` 로 찍는다.
+touch_ago $(( 30 * DAY )) "$ROOT/nas/yaksu-history/messages-20260101.db"
+touch_ago $((  3 * DAY )) "$ROOT/nas/yaksu-history/messages-20260724.db"
 run_backup BACKUP_FORCE_HOUR=03 BACKUP_HISTORY_DB="$ROOT/msgs.db" >/dev/null
 OLD_GONE=$([[ -f "$ROOT/nas/yaksu-history/messages-20260101.db" ]] && echo NO || echo YES)
 NEW_KEPT=$([[ -f "$ROOT/nas/yaksu-history/messages-20260724.db" ]] && echo YES || echo NO)
