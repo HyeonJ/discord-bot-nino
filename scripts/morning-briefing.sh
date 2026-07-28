@@ -112,10 +112,19 @@ todo_section() {
   (( rest > 0 )) && tail="외 ${rest}건"
 
   # 오래 안 바뀐 목록을 매일 그대로 읽어주면 낡은 것만 반복하게 된다 → 그 사실을 덧붙인다
-  local age
-  age=$(( ( $(date +%s) - $(date -r "$TODO_FILE" +%s) ) / 86400 ))
-  if (( age >= STALE_DAYS )); then
-    tail="${tail:+$tail · }목록 ${age}일째 안 바뀜"
+  # ⚠️ 여기도 `date -r FILE` 을 직접 쓰고 있었다 — 아래 file_mtime 의 폴백이 **한 자리에만**
+  #    들어가서, macOS 에선 이 줄이 빈 값으로 산술 에러를 내고 안내가 통째로 사라졌다.
+  #    (2026-07-28 BSD 흉내 실측: `( 1785233421 -  ) / 86400 : syntax error`)
+  #    🔑 폴백을 자리마다 넣지 말고 **읽는 경로를 하나로** 모은다 — 개별로 고치면 다음 자리가 남는다.
+  local age mt
+  if mt="$(file_mtime "$TODO_FILE")"; then
+    age=$(( ( $(date +%s) - mt ) / 86400 ))
+    if (( age >= STALE_DAYS )); then
+      tail="${tail:+$tail · }목록 ${age}일째 안 바뀜"
+    fi
+  else
+    # 못 쟀는데 조용하면 "최신이라 안 붙었다" 와 구별이 안 된다 — 확인된 정상만 조용하다.
+    tail="${tail:+$tail · }목록 갱신일 못 읽음"
   fi
   [[ -n "$tail" ]] && printf '       (%s)\n' "$tail"
 }
