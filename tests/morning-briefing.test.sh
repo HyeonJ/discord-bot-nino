@@ -140,10 +140,15 @@ if grep -qE '5시간|[0-9]+시간' <<<"$out"; then ok "얼마나 낡았는지 �
 out="$(run "$ROOT/todo.md" "$ROOT/weather.json" "$ROOT/hb-none")"
 if grep -q '드리프트 감시' <<<"$out"; then ok "파일 없음도 알린다(한 번도 안 돎)"; else bad "무음" "$out"; fi
 # 🔑 "없음"과 "낡음"은 원인이 다르다(cron 미등록 vs 죽음) → 문구가 갈려야 조치가 갈린다
+# ⚠️ 처음엔 `none_line != stale_line` 으로 썼는데 **숫자만 달라도 통과**했다 —
+#    "N시간째 안 돌았다" 를 없음 쪽에 그대로 붙이는 변이가 살아남았다. 문구가 다른지가
+#    아니라 **원인을 맞게 말하는지**를 봐야 한다: 없음은 "돌다 멈췄다"가 아니다.
 none_line="$(grep '드리프트 감시' <<<"$out")"
+if grep -qE '미등록|한 번도' <<<"$none_line"; then ok "'없음'은 미등록/한 번도 안 돎으로 말한다"; else bad "원인이 안 드러남" "$none_line"; fi
+if grep -q '시간째' <<<"$none_line"; then bag=1; else bag=0; fi
+if [[ "$bag" -eq 0 ]]; then ok "'없음'을 '시간째 안 돌았다'로 말하지 않는다(돌다 멈춘 게 아니다)"; else bad "없음을 낡음처럼 말했다" "$none_line"; fi
 stale_out="$(run "$ROOT/todo.md" "$ROOT/weather.json" "$ROOT/hb-stale")"
-stale_line="$(grep '드리프트 감시' <<<"$stale_out")"
-if [[ "$none_line" != "$stale_line" ]]; then ok "'없음'과 '낡음'이 다른 문구다"; else bad "두 상태가 같은 문구" "$none_line"; fi
+if grep -qE '멈췄|시간째' <<<"$(grep '드리프트 감시' <<<"$stale_out")"; then ok "'낡음'은 멈춤으로 말한다"; else bad "낡음 문구 이상" "$stale_out"; fi
 
 # ⑩-4 경계값 — 정확히 임계면 아직 신선(초과만 낡음)
 : > "$ROOT/hb-edge"; touch -d '2 hours ago' "$ROOT/hb-edge"
