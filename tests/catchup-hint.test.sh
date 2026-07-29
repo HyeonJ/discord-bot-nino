@@ -339,16 +339,26 @@ echo ""
 echo "🟡 배선 — 호출부가 인자를 넘기는지 (테스트가 스크립트만 직접 부르면 배선은 검사 밖):"
 # 오늘 양봇이 대칭으로 밟은 함정이라 **주석을 걷고 호출부 전부**를 센다.
 # (룬드는 산문의 --limit 을, 나는 주석의 파일명을 코드로 셌다 → 검사 대상 범위부터 좁힌다)
-mapfile -t calls < <(grep -vE '^[[:space:]]*#' "$REPO/scripts/start-nino.sh" \
+# 🔴 `mapfile` 은 **bash 4+ 빌트인**이라 룬드 맥(3.2)엔 없다. 있던 자리에서 이 블록이
+#    fail 도 skip 도 아니고 **통째로 안 세어졌다**(룬드 62 vs 니노 64 — 정확히 이 2건).
+#    빈 배열 확장도 3.2 + set -u 에서 죽으므로 **배열 자체를 안 쓴다**(개행 구분 문자열).
+calls=""; n_calls=0; missing=0
+while IFS= read -r c; do
+  [ -n "$c" ] || continue
+  n_calls=$((n_calls + 1))
+  calls="$calls$c
+"
+  case "$c" in *--no-head*) ;; *) missing=$((missing + 1)) ;; esac
+done <<EOF
+$(grep -vE '^[[:space:]]*#' "$REPO/scripts/start-nino.sh" \
   | grep -oE '\$SCRIPT_DIR/catchup-hint\.sh"?( --[a-z-]+)*')
-if [[ ${#calls[@]} -eq 0 ]]; then
+EOF
+if [ "$n_calls" -eq 0 ]; then
   bad "start-nino가 catchup-hint를 부른다" "1건 이상" "0건"
 else
-  ok "start-nino의 catchup-hint 호출부 ${#calls[@]}건 확인"
-  missing=0
-  for c in "${calls[@]}"; do [[ "$c" == *--no-head* ]] || missing=$((missing + 1)); done
-  [[ $missing -eq 0 ]] && ok "호출부 전부가 --no-head를 넘긴다" \
-    || bad "호출부 전부가 --no-head를 넘긴다" "0건 누락" "${missing}건 누락: ${calls[*]}"
+  ok "start-nino의 catchup-hint 호출부 ${n_calls}건 확인"
+  [ "$missing" -eq 0 ] && ok "호출부 전부가 --no-head를 넘긴다" \
+    || bad "호출부 전부가 --no-head를 넘긴다" "0건 누락" "${missing}건 누락: $(printf '%s' "$calls" | tr '\n' ' ')"
 fi
 
 echo ""
@@ -361,6 +371,11 @@ echo "🔴 이식성 가드 — 상대 봇(macOS·bash 3.2·BSD)이 이 시험�
 portab=$(python3 - "$0" "$REPO/scripts/catchup-hint.sh" <<'PYEOF'
 import re, sys
 test_src, script_src = open(sys.argv[1]).read(), open(sys.argv[2]).read()
+# 🔴 **검사기를 검사 대상에서 뺀다.** 이 가드의 패턴 문자열(`mapfile`, `declare -A` …)이
+#    시험 파일 안에 그대로 있어서, 안 빼면 **가드가 자기 자신을 세고 고친 파일도 빨개진다.**
+#    2026-07-29 에 이 형태로 세 번 걸렸다(grep 가드 2회 + 여기 1회) — 검사기가 검사 대상과
+#    같은 파일에 살면 매번 난다. 범위를 먼저 좁히는 게 규칙이다.
+test_src = re.sub(r"<<'PYEOF'.*?^PYEOF", "", test_src, flags=re.S | re.M)
 problems = []
 
 # ① GNU 전용 `date -d` 는 iso_off 함수 안(=BSD 분기가 붙은 자리)에만 허용된다
@@ -380,6 +395,18 @@ safe = re.sub(r'\$\{(\w+)\[@\]\+"\$\{\1\[@\]\}"\}', "", code)
 bare = re.findall(r'\$\{(\w+)\[@\]\}', safe)
 if bare:
     problems.append(f'맨 ${{{bare[0]}[@]}} 확장 {len(bare)}곳 — bash 3.2 + set -u 에서 unbound')
+
+# ③ bash 4+ 전용 빌트인/문법 — 3.2 엔 없다. 🔴 이 축은 2026-07-29 에 **가드가 놓쳤다**:
+#    `mapfile` 이 있는 블록이 룬드 맥에서 fail 도 skip 도 아니고 **통째로 안 세어졌고**,
+#    통과 수만 보면 아무 이상이 없었다(62 vs 64 를 대조해야만 드러났다).
+#    ⇒ 가드는 *내가 아는 함정*만 잡는다. 축을 하나씩 늘려도 상호 실행을 대체하지 못한다.
+for name, pat in (("mapfile/readarray", r'\b(mapfile|readarray)\b'),
+                  ("연관배열 declare -A", r'declare\s+-A\b'),
+                  ("대소문자 확장 ${x^^}/${x,,}", r'\$\{[A-Za-z_][A-Za-z0-9_]*(\^\^|,,)\}')):
+    for src, where in ((test_src, "시험"), (script_src, "스크립트")):
+        body = "\n".join(l for l in src.splitlines() if not l.lstrip().startswith("#"))
+        if re.search(pat, body):
+            problems.append(f"{where}에 bash 4+ 전용 {name}")
 
 print(" | ".join(problems) if problems else "OK")
 PYEOF
