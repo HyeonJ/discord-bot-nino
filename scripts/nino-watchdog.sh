@@ -48,6 +48,93 @@ if [ -n "$CLAUDE_PID" ]; then
     fi
 fi
 
+# ── 🔴 Check 5: 인증 축 — 401 은 침묵으로 **원리적으로** 안 잡힌다 ────────────
+#   (Check 4 보다 **앞**에 둔다. 4 는 조용한 밤·긴 턴에서 exit 0 으로 빠지는데,
+#    401 은 바로 그때 나기 때문이다 — 뒤에 두면 건너뛴다.)
+#
+# 🔴 왜 새 축이 필요한가 (2026-07-29, Tim 질문에서 발견 · Darren 승인 M:wh7t):
+#   401 은 "멈춤"이 아니라 **에러를 뱉고 턴을 끝내는 것**이다.
+#     ⇒ Stop 훅이 계속 돌아 하트비트가 신선하게 유지된다 ⇒ Check 4 에 안 걸린다.
+#     ⇒ 도구 호출도 계속되므로 활동 축(#71)에도 안 걸린다.
+#   내 실측(7/17 에피소드): 44분 35초 · 401 21건 · 간격 중앙 110초 · **60분 초과 간격 0건**
+#     ⇒ 에피소드가 임계(60분)보다 짧아 **침묵 감시로는 못 잡는다.** 임계를 낮추면 오탐이 는다.
+#   ⇒ 자원·산출·활동 어디에도 없는 축이라 새로 만든다.
+#
+# 🔑 조회는 **구조적 플래그**로 한다 — `isApiErrorMessage: true`.
+#   문자열 grep 은 **내가 401 을 주제로 쓴 글까지 센다**(실측: 49건 중 진짜 0건).
+# ⚠️ `API Error: 401` 로 잡으면 소켓 끊김(`401 The socket connection was closed`)까지 걸려 오탐.
+#   세 변종에 공통이면서 안전한 건 `Please run /login`.
+# ⚠️ 529·502 는 **서버측 일시 장애**라 사람이 할 일이 없다 — 안 센다.
+# 🔴 **복구하지 않는다.** 401 에 재시작·`/clear` 를 쏘면 인증은 그대로고 맥락만 날아간다(Tim M:s2um).
+SESSION_LOG_DIR="${NINO_SESSION_LOG_DIR:-$HOME/.claude/projects/-home-bpx27-discord-bot-nino}"
+AUTH_STATE="$BOT_DIR/logs/watchdog-auth-next"      # 침묵 축과 **다른 파일** — 서로 침묵시키지 않게
+AUTH_MIN_COUNT=${NINO_AUTH_MIN_COUNT:-3}           # 1~2건은 재시도로 지나간다
+AUTH_WINDOW=${NINO_AUTH_WINDOW:-3600}              # 이 창 안의 건수만 센다(지난 사고로 영원히 부르지 않게)
+
+# 최근 창 안의 인증 에러 건수. 셀 수 없으면 "unknown".
+auth_errors_recent() {
+    [ -d "$SESSION_LOG_DIR" ] || { printf 'unknown'; return 0; }
+    local n
+    n=$(python3 - "$SESSION_LOG_DIR" "$AUTH_WINDOW" <<'PYEOF' 2>/dev/null || true
+import sys, os, json, glob, datetime
+d, win = sys.argv[1], int(sys.argv[2])
+files = glob.glob(os.path.join(d, "*.jsonl"))
+if not files:
+    raise SystemExit(1)
+# 🔴 현재 세션 = mtime 최신. ⚠️ 재시작하면 증거가 **다른 파일로 옮겨간다** —
+#   "지금 고장인가"를 묻는 거라 최신이 맞지만, 재시작 직후엔 방금 401 을 못 본다.
+newest = max(files, key=os.path.getmtime)
+now = datetime.datetime.now(datetime.timezone.utc)
+n = 0
+with open(newest, errors="replace") as f:
+    for line in f:
+        if "isApiErrorMessage" not in line:      # 선필터 — 70MB 전수도 0.14초
+            continue
+        try:
+            r = json.loads(line)
+        except Exception:
+            continue
+        if not r.get("isApiErrorMessage"):
+            continue
+        c = r.get("message", {}).get("content")
+        t = c if isinstance(c, str) else json.dumps(c, ensure_ascii=False)
+        if "Please run /login" not in t:          # 529·502·소켓끊김은 안 센다
+            continue
+        ts = r.get("timestamp", "")
+        try:
+            when = datetime.datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        except Exception:
+            continue
+        if (now - when).total_seconds() <= win:
+            n += 1
+print(n)
+PYEOF
+)
+    case "${n:-}" in ''|*[!0-9]*) printf 'unknown' ;; *) printf '%s' "$n" ;; esac
+}
+
+AUTH_N=$(auth_errors_recent)
+if [ "$AUTH_N" = "unknown" ]; then
+    log "AUTH-UNKNOWN: 세션 로그($SESSION_LOG_DIR)를 못 읽었다 — 인증 상태를 가릴 수 없다."
+elif [ "$AUTH_N" -ge "$AUTH_MIN_COUNT" ]; then
+    AUTH_NEXT=$(cat "$AUTH_STATE" 2>/dev/null || echo 0)
+    case "$AUTH_NEXT" in ''|*[!0-9]*) AUTH_NEXT=0 ;; esac
+    if [ "$(date +%s)" -ge "$AUTH_NEXT" ]; then
+        log "AUTH: 최근 $((AUTH_WINDOW / 60))분 안에 인증 에러 ${AUTH_N}건. 사람 호출(복구 안 함)."
+        $DISCORD_SEND "$ALERT_CHANNEL" "<@353914579929268226> 🔴 니노 **로그인이 풀린 것 같아.** 최근 $((AUTH_WINDOW / 60))분 동안 인증 에러가 **${AUTH_N}건** 났어.
+
+이건 조용히 죽는 게 아니라 **에러를 뱉으면서 계속 도는 상태**라, 겉보기엔 멀쩡해 보여도 실제로는 아무 일도 못 하고 있어.
+
+확인: WSL에서 \`tmux attach -t nino\` → \`/login\`. 브라우저 인증이라 내가 못 해.
+
+재시작은 안 했어 — 토큰 문제라 재시작해도 그대로고 지금까지 맥락만 날아가거든." 2>/dev/null || true
+        echo "$(( $(date +%s) + 1800 ))" > "$AUTH_STATE"   # 30분 뒤에 다시 부를 수 있다
+    fi
+    exit 0
+else
+    [ -f "$AUTH_STATE" ] && rm -f "$AUTH_STATE"            # 회복 — 다음 사고에 즉시 부른다
+fi
+
 # ── 🔴 Check 4: 산출 축 — "살아 있나"가 아니라 "말을 하고 있나" ────────────
 #   2026-07-29 실사고(룬드): 세션이 **살아 있는 채로** 9시간 50분 침묵했다.
 #     tmux · claude 프로세스 · relay 전부 정상 / 응답만 401 × 21회 / 9시 기상 알람 실패
