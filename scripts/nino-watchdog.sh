@@ -193,30 +193,74 @@ fi
 #     세면 cron 이 앵커를 오염시키던 #63 과 같은 함정이 판정 쪽에서 재현된다.
 SILENCE_LIMIT=${NINO_SILENCE_LIMIT:-3600}          # 기본 60분
 HEARTBEAT_FILE="$BOT_DIR/logs/session-heartbeat-utc"
-# 🔴 활동 축 — 도구 호출마다 갱신(PostToolUse 훅). 하트비트와 **파일이 달라야 한다**:
-#   하트비트는 재시작 따라잡기 앵커라 의미를 바꾸면 catchup 이 깨진다(#63).
-#   자세한 배경·계약은 hooks/session-activity.sh 머리말.
+# 🔴 활동 축 — "살아 있다"는 흔적. 원천이 **둘**이다(activity_age 머리말 참조):
+#   ① 도구 호출마다 갱신되는 파일(PostToolUse 훅)  ② 세션 기록 jsonl 의 마지막 시각(턴 시작 포함)
+#   하트비트와 **파일이 달라야 한다**: 하트비트는 재시작 따라잡기 앵커라
+#   의미를 바꾸면 catchup 이 깨진다(#63). 자세한 배경·계약은 hooks/session-activity.sh 머리말.
 ACTIVITY_FILE="$BOT_DIR/logs/session-activity-utc"
 SILENCE_STATE="$BOT_DIR/logs/watchdog-silence-next"
 # 🔴 절대경로로 박으면 **시험이 실물 DB 를 읽는다.** 주입 seam 을 둔다(기본값은 실물과 동일).
 HISTORY_CLI="${NINO_HISTORY_CLI:-$HOME/.local/bin/yaksu-history}"
 
-# 마지막 도구 호출로부터 몇 초 지났나. 읽을 수 없거나 파싱 불가면 "unknown".
+# 세션이 마지막으로 **살아 있다는 흔적**을 남긴 뒤 몇 초 지났나. 아무 데서도 못 읽으면 "unknown".
 # 🔴 부재·손상은 **정지가 아니라 판정 불가**다. 이 값으로 알림을 *막을 수만* 있고
 #   이 값 때문에 알림이 *나가지는* 않는다(억제기 전용 — 부르는 쪽은 하트비트가 정한다).
+#
+# 🔴 원천이 **둘**인 이유 (2026-07-29 룬드 실오탐 #2):
+#   훅(PostToolUse)은 **도구를 부를 때만** 찍는다. 그래서 *도구를 하나도 안 부르는 긴 턴*은
+#   여전히 죽어 보인다 — 룬드가 21:21 에 61분 턴으로 맞았다(5분 뒤 재개).
+#   턴 *시작* 신호가 필요한데, **세션 기록(jsonl)에 이미 남아 있다**:
+#   턴이 도는 중에 user 레코드가 먼저 flush 된다(2026-07-29 21:53 실측 —
+#   assistant 산출이 아직 없는 시점에 그 턴의 user 레코드가 디스크에 있었다).
+#   ⇒ 훅을 하나 더 달지 않고 덮는다. 덤으로 훅 계약의 약점도 준다:
+#     jsonl 은 내 훅이 아니라 Claude Code 가 쓰므로, **훅이 죽어도 원천 하나가 남는다.**
 activity_age() {
-    [ -r "$ACTIVITY_FILE" ] || { printf 'unknown'; return 0; }
-    local e
-    e=$(python3 -c '
-import sys, datetime
+    local now e
+    now=$(date +%s)
+    e=$(python3 - "$ACTIVITY_FILE" "$SESSION_LOG_DIR" "$now" <<'PYEOF' 2>/dev/null || true
+import sys, os, re, glob, datetime
+
+now = int(sys.argv[3])
+best = None
+
+
+def stamp(s):
+    try:
+        t = int(datetime.datetime.fromisoformat(s.strip().replace("Z", "+00:00")).timestamp())
+    except Exception:
+        return None
+    # 🔴 미래 시각은 버린다. 깨진 값 하나가 억제를 **영구히** 걸어 감시를 조용히 끄는 자리다
+    #   (incoming_since 에서 '조회 실패가 0건이 되어 눈이 머는' 것과 같은 형태).
+    return None if t > now + 300 else t
+
+
+# ① 도구 호출 — 훅이 남긴 시각
 try:
-    s = open(sys.argv[1]).read().strip()
-    print(int(datetime.datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp()))
+    best = stamp(open(sys.argv[1]).read())
 except Exception:
     pass
-' "$ACTIVITY_FILE" 2>/dev/null || true)
+
+# ② 턴 시작 — 세션 기록의 마지막 시각. 꼬리만 읽는다(파일이 수십 MB 이고 2분마다 돈다).
+try:
+    newest = max(glob.glob(os.path.join(sys.argv[2], "*.jsonl")), key=os.path.getmtime)
+    with open(newest, "rb") as f:
+        f.seek(0, 2)
+        f.seek(max(0, f.tell() - 65536))
+        tail = f.read().decode("utf-8", "replace")
+    # 잘린 줄이 섞여도(append 중 꼬리 손상) 성한 줄은 그대로 읽힌다 — 줄 단위 JSON 파싱을 안 한다.
+    for m in re.finditer(r'"timestamp"\s*:\s*"([^"]+)"', tail):
+        t = stamp(m.group(1))
+        if t is not None and (best is None or t > best):
+            best = t
+except Exception:
+    pass
+
+if best is not None:
+    print(best)
+PYEOF
+)
     case "${e:-}" in ''|*[!0-9]*) printf 'unknown'; return 0 ;; esac
-    printf '%s' "$(( $(date +%s) - e ))"
+    printf '%s' "$(( now - e ))"
 }
 
 # 하트비트 이후 **니노 외** 작성자의 메시지 건수. 셀 수 없으면 "unknown".
@@ -289,17 +333,17 @@ except Exception:
                 unknown)
                     # 부재·손상 = 판정 불가. 억제를 **못 할 뿐** 이전 동작으로 돌아간다.
                     # 감시 구멍이 조용히 생기지 않게 로그에 남기고, 본문에도 적는다.
-                    log "ACTIVITY-UNKNOWN: 활동 파일($ACTIVITY_FILE)을 못 읽었다 — 긴 턴인지 가릴 수 없다. 훅(PostToolUse) 설치 확인 필요."
+                    log "ACTIVITY-UNKNOWN: 활동 파일($ACTIVITY_FILE)도 세션 기록($SESSION_LOG_DIR)도 못 읽었다 — 긴 턴인지 가릴 수 없다. 훅(PostToolUse) 설치·세션 로그 경로 확인 필요."
                     ACTIVITY_NOTE="
-⚠️ 활동 축을 확인 못 했어(도구 호출 기록이 없어) — 긴 작업 중인 건지 가릴 수가 없었어."
+⚠️ 활동 축을 확인 못 했어(도구 호출 기록도 세션 기록도 없어) — 긴 작업 중인 건지 가릴 수가 없었어."
                     ;;
                 *)
                     if [ "$ACT_AGE" -lt "$SILENCE_LIMIT" ]; then
-                        log "WORKING: 턴 종료 ${SILENT}초 전이지만 ${ACT_AGE}초 전에 도구를 불렀다 — 긴 턴이지 정지가 아니다."
+                        log "WORKING: 턴 종료 ${SILENT}초 전이지만 ${ACT_AGE}초 전에 활동 흔적이 있다(도구 호출 또는 턴 시작) — 긴 턴이지 정지가 아니다."
                         exit 0
                     fi
                     ACTIVITY_NOTE="
-도구 호출도 $((ACT_AGE / 60))분째 없어 — 긴 작업 중인 것도 아니야."
+도구 호출도 턴 시작도 $((ACT_AGE / 60))분째 없어 — 긴 작업 중인 것도 아니야."
                     ;;
             esac
             if [ "$INCOMING" = "unknown" ]; then
