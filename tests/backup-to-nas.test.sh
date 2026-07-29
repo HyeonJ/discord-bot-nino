@@ -523,7 +523,7 @@ else
     if [[ $RC -eq 0 ]]; then
       bad "age 가 실패했는데 rc=0" "$(logtext)"
     elif [[ "$NOW_CDM" != "$SZ_CDM" || "$NOW_ENV" != "$SZ_ENV" ]]; then
-      bad "age 실패가 기존 사본을 파괴했다 (cdm $SZ_CDM→$NOW_CDM, env $SZ_ENV→$NOW_ENV)" "$(logtext)"
+      bad "age 실패가 기존 사본을 파괴했다 (cdm ${SZ_CDM}→${NOW_CDM}, env ${SZ_ENV}→${NOW_ENV})" "$(logtext)"
     elif [[ "$LEFT" -ne 0 ]]; then
       bad ".partial 잔재 $LEFT 건" "$(ls -la "$ROOT/nas/")"
     else

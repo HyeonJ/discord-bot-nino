@@ -64,5 +64,46 @@ else
 fi
 
 echo
+echo "🔴 변수 뒤 비ASCII — bash 3.2 에서 이름 경계가 안 잡힌다:"
+# 룬드 맥(bash 3.2.57) 실측 2026-07-29: `"$MSG⚠️"` 에서 **`⚠️` 의 선두 바이트(342)까지
+#   변수명에 먹혀** 값이 통째로 사라진다(od -c 로 확정). bash 5.2 는 정상이라
+#   **내 기계에선 영원히 안 보이는 축**이다 — 그런데 tests/ 는 룬드가 상호 검증으로 돌린다.
+#   ⇒ 내 기계에서 안 나는 고장을 내 기계에서 잠근다. `${VAR}` 로 감싸면 사라진다.
+#   ⚠️ 룬드 첫 결론은 "모든 bash"였고 내 반박으로 3.2 한정으로 갈렸다(assistant 9307e96).
+#     내가 안 눌렀으면 과한 규칙이, 룬드가 내 결론을 그대로 받았으면 실재하는 함정이 지워졌다.
+nonascii=$(python3 - "$SCRIPT_DIR/.." <<'PYEOF'
+import os, re, sys
+root = sys.argv[1]
+# 🔴 **검사기를 검사 대상에서 뺀다** — 이 가드가 사는 파일의 heredoc 안에 패턴 문자열이 있다.
+#   오늘 세 번 밟은 형태(grep 가드 자기 줄 · 안전형 안의 부분문자열 · 파이썬 가드의 패턴).
+pat = re.compile(r'\$[A-Za-z_][A-Za-z0-9_]*[^\x00-\x7f]')
+hits = []
+for dirpath, dirnames, filenames in os.walk(root):
+    dirnames[:] = [d for d in dirnames if d not in (".git", "node_modules", "backups")]
+    for fn in filenames:
+        if not fn.endswith(".sh"):
+            continue
+        fp = os.path.join(dirpath, fn)
+        try:
+            src = open(fp, encoding="utf-8", errors="replace").read()
+        except Exception:
+            continue
+        if fn == "repo-hygiene.test.sh":
+            src = re.sub(r"<<'PYEOF'.*?^PYEOF", "", src, flags=re.S | re.M)
+        for i, line in enumerate(src.splitlines(), 1):
+            if line.lstrip().startswith("#"):
+                continue
+            if pat.search(line):
+                hits.append(f"{os.path.relpath(fp, root)}:{i}")
+print(" ".join(hits))
+PYEOF
+)
+if [ -z "$nonascii" ]; then
+  ok "변수 뒤에 비ASCII 가 바로 붙는 자리가 없다(\${VAR} 로 감쌀 것)"
+else
+  bad "변수 뒤 비ASCII 없음" "$nonascii"
+fi
+
+echo
 echo "  통과 $pass · 실패 $fail"
 [[ "$fail" -eq 0 ]]
