@@ -71,6 +71,7 @@ printf '#!/bin/bash\nexit 1\n' > "$WORK/bin/pgrep"   # Claude PID 없음 → Che
 chmod +x "$WORK/bin/pgrep"
 
 HB="$WORK/logs/session-heartbeat-utc"
+ACT="$WORK/logs/session-activity-utc"
 STATE="$WORK/logs/watchdog-silence-next"
 
 # 🔴 yaksu-history 스텁 — **실물 CLI/DB 를 절대 안 태운다.**
@@ -104,7 +105,11 @@ run_wd() {   # 환경 초기화 후 워치독 1회 실행 (cron 한 tick)
   cat "$WORK/sent.txt" 2>/dev/null
 }
 set_hb()  { iso_off "-$1" > "$HB"; }        # $1 = 분 전
-reset()   { rm -f "$STATE" "$WORK/logs/watchdog.log"; }
+# 🔴 활동 축 — 도구 호출마다 갱신되는 파일. 하트비트(턴 종료)와 **의미가 다르다**.
+set_activity() { iso_off "-$1" > "$ACT"; }  # $1 = 분 전
+no_activity()  { rm -f "$ACT"; }            # 훅 미설치·초기 상태
+bad_activity() { printf 'not-a-timestamp\n' > "$ACT"; }
+reset()   { rm -f "$STATE" "$WORK/logs/watchdog.log"; no_activity; }
 
 make_tmux 0
 make_history Tim   # 기본은 "수신이 있었다" — 아래 침묵 케이스들은 전부 *먹통* 상황이다
@@ -194,6 +199,79 @@ reset; set_hb 120; fail_history
 out="$(run_wd)"
 [[ "$out" == *"확인 못 했"* ]] && ok "CLI 실패도 같은 취급" || bad "CLI 실패" "확인 못 했" "${out:-<없음>}"
 make_history Tim   # 기본 복구
+
+echo ""
+echo "🔴 긴 턴 ≠ 먹통 — 활동 축 (2026-07-29 룬드 실오탐 회귀):"
+# 하트비트는 **턴이 끝날 때만** 찍힌다 ⇒ 한 턴이 임계를 넘으면 *가장 활발히 일할 때*가
+# *가장 죽어 보인다*. 룬드 실발동: 63분짜리 턴 도중 "산출 정지 · 수신 38건" 이 Tim 께 나갔다.
+# 🔴 수신 축(#67)은 이걸 **막지 못한다** — GitHub 웹훅 등이 계속 들어와 게이트를 통과하고,
+#   본문에 "38건 들어왔는데 하나도 못 받았어" 라고 **확신까지 실어준다**. 실측: 니노 외 38건/시간.
+reset; set_hb 120; make_history Tim; set_activity 1
+out="$(run_wd)"
+[[ -z "$out" ]] && ok "🔑 긴 턴(하트비트 2시간 전 + 수신 있음 + 활동 1분 전) → 안 부른다" \
+  || bad "긴 턴 오탐 방지" "<없음>" "$out"
+grep -q "WORKING:" "$WORK/logs/watchdog.log" 2>/dev/null \
+  && ok "일하는 중이라 넘어갔다는 사실이 로그에 남는다(조용히 삼키지 않는다)" \
+  || bad "WORKING 로그" "WORKING:" "$(cat "$WORK/logs/watchdog.log" 2>/dev/null)"
+
+reset; set_hb 120; make_history Tim; set_activity 120
+out="$(run_wd)"
+[[ -n "$out" ]] && ok "둘 다 멈췄으면(활동도 2시간 전) 부른다 — 진짜 정지" \
+  || bad "진짜 정지" "알림" "<없음>"
+
+# 🔴 **억제기 전용 계약** — 활동 축은 알림을 *줄이기만* 한다. 혼자서 트리거하면
+#   훅이 죽었을 때 사람을 부르게 되어, 감시를 고치려다 감시가 새 오탐원이 된다.
+reset; set_hb 1; make_history Tim; set_activity 120
+out="$(run_wd)"
+[[ -z "$out" ]] && ok "🔑 하트비트가 신선하면 활동이 멈춰 있어도 안 부른다(억제기 전용)" \
+  || bad "활동 축 단독 트리거 금지" "<없음>" "$out"
+
+# 🟡 부재는 **정지가 아니라 판정 불가**다. 부재를 정지로 읽으면 훅 하나 빠뜨렸을 때
+#   2분마다 사람을 부른다(#64 에서 밟은 자리). 억제만 못 할 뿐 이전 동작으로 되돌아간다.
+reset; set_hb 120; make_history Tim; no_activity
+out="$(run_wd)"
+[[ -n "$out" ]] && ok "활동 파일 부재 → 억제 못 하고 이전 동작(부른다)" || bad "부재 fail-open" "알림" "<없음>"
+[[ "$out" == *"활동 축"* ]] && ok "활동 축을 못 봤다는 걸 본문에 적는다(사람이 판단하게)" \
+  || bad "부재 안내 문구" "활동 축" "$out"
+# 🔴 감시 구멍이 **조용히** 생기지 않게: 부재는 로그에도 남는다.
+grep -q "ACTIVITY-UNKNOWN:" "$WORK/logs/watchdog.log" 2>/dev/null \
+  && ok "부재가 로그에 남는다 — 훅 미설치가 조용한 무감시가 되지 않는다" \
+  || bad "부재 로그" "ACTIVITY-UNKNOWN:" "$(cat "$WORK/logs/watchdog.log" 2>/dev/null)"
+
+reset; set_hb 120; make_history Tim; bad_activity
+out="$(run_wd)"
+[[ -n "$out" ]] && ok "활동 파일이 깨져 있어도 부재와 같은 취급(부른다)" || bad "손상 fail-open" "알림" "<없음>"
+[[ "$out" == *"활동 축"* ]] && ok "손상도 판정 불가로 안내한다" || bad "손상 안내" "활동 축" "$out"
+
+# 🟢 조용한 밤(#67)과 **독립**이다 — 수신 0건이면 활동 여부와 무관하게 안 부른다.
+reset; set_hb 120; make_history; set_activity 120
+out="$(run_wd)"
+[[ -z "$out" ]] && ok "수신 0건이면 활동이 멈춰 있어도 안 부른다(#67 그대로)" \
+  || bad "QUIET 우선" "<없음>" "$out"
+make_history Tim   # 🔴 상태 복구 — 위에서 0건 스텁으로 바꿨다. 안 되돌리면 뒤 시험이 전부 QUIET 로 샌다
+
+echo ""
+echo "🔴 활동 훅 계약 — 이 훅이 죽으면 억제가 통째로 사라진다:"
+HOOK="$REPO/hooks/session-activity.sh"
+HOOKWORK="$WORK/hookhome"; mkdir -p "$HOOKWORK"
+if [[ -f "$HOOK" ]]; then
+  ACTIVITY_BOT_DIR="$HOOKWORK" bash "$HOOK"; rc=$?
+  [[ $rc -eq 0 ]] && ok "훅이 rc=0 으로 끝난다(도구 호출을 방해하지 않는다)" || bad "훅 rc" "0" "$rc"
+  v="$(cat "$HOOKWORK/logs/session-activity-utc" 2>/dev/null)"
+  [[ "$v" == *Z ]] && ok "워치독이 읽는 형식(...Z)으로 쓴다" || bad "형식" "...Z" "${v:-<없음>}"
+  # 🔴 하트비트와 **다른 파일**이어야 한다. 같은 파일이면 재시작 따라잡기 앵커가 오염된다(#63).
+  [[ ! -e "$HOOKWORK/logs/session-heartbeat-utc" ]] \
+    && ok "🔑 하트비트 파일은 건드리지 않는다(앵커 오염 금지)" \
+    || bad "앵커 오염" "하트비트 미생성" "생성됨"
+  # 원자적 교체 — 임시파일을 남기면 워치독이 반쯤 쓰인 값을 읽을 수 있다
+  [[ -z "$(find "$HOOKWORK/logs" -name 'session-activity-utc.*' 2>/dev/null)" ]] \
+    && ok "임시파일을 남기지 않는다(원자적 교체)" || bad "임시파일 잔존" "<없음>" "$(ls "$HOOKWORK/logs")"
+  # 쓸 수 없는 곳이어도 죽지 않는다 — 훅이 죽으면 세션의 도구 호출이 막힌다
+  ACTIVITY_BOT_DIR="/proc/nonexistent-$$" bash "$HOOK" >/dev/null 2>&1; rc=$?
+  [[ $rc -eq 0 ]] && ok "쓸 수 없는 경로에서도 rc=0(세션을 막지 않는다)" || bad "실패 시 rc" "0" "$rc"
+else
+  skipt "활동 훅 계약" "hooks/session-activity.sh 가 없다"
+fi
 
 echo ""
 echo "🔴 cron 주기 실행이라 백오프가 **파일**에 남아야 한다 (룬드와 구조가 다른 지점):"
