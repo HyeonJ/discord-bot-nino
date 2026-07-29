@@ -616,12 +616,43 @@ echo "🔴 로그 표지는 원인마다 고유하다 — 사후 집계가 두 �
 #   *"뭐 때문에 죽었나"* 를 세면 두 원인이 한 칸으로 뭉친다.
 #   ⇒ 룬드 known-issue *"축이 여럿이면 어느 축이 돌았는지도 구분이 안 된다"* 의 내 쪽 사례.
 # 🔑 개별 표지를 하나씩 세지 않고 **겹침 자체를 구조로** 잠근다 — 새 표지를 추가해도 걸린다.
-dup="$(grep -o 'log "[A-Z][A-Z-]*:' "$WD" | sort | uniq -d | sed 's/log "//;s/:$//' | tr '\n' ' ')"
-if [ -z "$dup" ]; then
-  ok "로그 표지 $(grep -o 'log "[A-Z][A-Z-]*:' "$WD" | sort -u | wc -l)종이 전부 고유하다"
+#
+# 🔄 2026-07-29: 손으로 쓴 `uniq -d` 를 **코어 공용 도구**로 교체(Darren 승인 M:oxhg).
+#    양봇이 같은 판정을 두 벌로 들고 있으면 한쪽만 고쳐져 조용히 갈린다 — 오늘 여러 번 본 형태.
+#    코어가 대신 막아주는 것: ⓐ 아무것도 못 셈(--min-labels) ⓑ 내 정규식이 놓침(--candidate-pattern).
+#    ⓒ 과대포착은 rc 로는 못 잡고 **접두사 경고**로 재료만 준다.
+# ⚠️ 코어가 없거나 낡으면 **판정 불가로 남긴다.** 조용히 통과시키면 이 시험이 있으나 마나가 된다.
+LV="${LABEL_VERDICT:-$HOME/yaksu-bot-core/scripts/label-verdict.sh}"   # dev 클론 — 프로덕션(-live) 무관
+# 🔴 **있다 ≠ 그 기능이 있다** — `-x` 는 *없음*만 잡고 *낡음*은 안 잡는다.
+#    구버전이 자리에 있으면 -x 통과·rc 정상인데 ⓒ 경고만 조용히 사라진다.
+#    ⇒ 존재가 아니라 **능력**을 잰다: 접두사 관계가 확실한 픽스처를 태워 경고가 나오는지 본다.
+LV_PROBE="$(mktemp)"
+cat > "$LV_PROBE" <<'PROBEEOF'
+log "DEAD: 본문"
+log "DEAD-PANE: 본문"
+log "WORKING: 본문"
+log "STALE: 본문"
+PROBEEOF
+LV_PAT='log "([A-Z][A-Z-]*):'
+LV_CAND='log "[A-Z]'
+if [ ! -x "$LV" ]; then
+  skipt "로그 표지 겹침 — 판정 불가" "코어 label-verdict.sh 없음($LV). \`git -C ~/yaksu-bot-core pull\` 후 재실행"
+elif ! "$LV" --file "$LV_PROBE" --pattern "$LV_PAT" --candidate-pattern "$LV_CAND" 2>&1 \
+     | grep -q '접두사 관계'; then
+  skipt "로그 표지 겹침 — 판정 불가" "코어에 ⓒ(접두사 경고) 기능이 없다 — 구버전으로 보인다($LV)"
 else
-  bad "같은 표지가 서로 다른 원인에 쓰인다 — 로그로 원인을 못 가른다" "겹치는 표지 없음" "겹침: $dup"
+  LV_OUT="$("$LV" --file "$WD" --pattern "$LV_PAT" --candidate-pattern "$LV_CAND" 2>&1)"; LV_RC=$?
+  case "$LV_RC" in
+    0) ok "로그 표지가 전부 고유하다 (코어 label-verdict 판정)" ;;
+    1) bad "같은 표지가 서로 다른 원인에 쓰인다 — 로그로 원인을 못 가른다" \
+           "겹치는 표지 없음" "$(printf '%s' "$LV_OUT" | tr '\n' ' ')" ;;
+    *) skipt "로그 표지 겹침 — 판정 불가" "코어 rc=$LV_RC: $(printf '%s' "$LV_OUT" | tr '\n' ' ')" ;;
+  esac
+  # ⓒ 과대포착은 rc 를 안 바꾼다 — 사람이 볼 재료로만 띄운다.
+  printf '%s' "$LV_OUT" | grep -q '접두사 관계' && \
+    echo "       ⚠️ $(printf '%s' "$LV_OUT" | grep -A1 '접두사 관계' | tail -1 | sed 's/^ *//')"
 fi
+rm -f "$LV_PROBE"
 
 echo ""
 echo "🔴 실물 계약 — 스텁이 받은 argv 를 **진짜 discord-send** 에 재생한다:"
