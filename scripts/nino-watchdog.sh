@@ -21,7 +21,7 @@ log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG"; }
 
 # Check 1: tmux 세션 살아있는지
 if ! tmux has-session -t "$SESSION" 2>/dev/null; then
-    log "DEAD: tmux session '$SESSION' not found. Restarting..."
+    log "DEAD-SESSION: tmux session '$SESSION' not found. Restarting..."
     "$SCRIPT_DIR/start-nino.sh" >> "$LOG" 2>&1
     $DISCORD_SEND "$ALERT_CHANNEL" "니노가 죽어서 자동 재시작했어! (tmux 세션 없음)" 2>/dev/null || true
     exit 0
@@ -30,7 +30,7 @@ fi
 # Check 2: tmux pane 안에 프로세스가 살아있는지
 PANE_PID=$(tmux list-panes -t "$SESSION" -F '#{pane_pid}' 2>/dev/null | head -1)
 if [ -z "$PANE_PID" ] || ! kill -0 "$PANE_PID" 2>/dev/null; then
-    log "DEAD: pane process gone (PID: $PANE_PID). Respawning..."
+    log "DEAD-PROC: pane process gone (PID: $PANE_PID). Respawning..."
     "$SCRIPT_DIR/restart-nino.sh" >> "$LOG" 2>&1
     $DISCORD_SEND "$ALERT_CHANNEL" "니노 프로세스가 죽어서 자동 재시작했어! (pane 프로세스 없음)" 2>/dev/null || true
     exit 0
@@ -47,6 +47,11 @@ if [ -n "$CLAUDE_PID" ]; then
         exit 0
     fi
 fi
+
+# 🔑 로그 표지는 **원인마다 고유해야 한다** (2026-07-29, Darren 승인 M:wdb9)
+#   `DEAD:` 하나를 tmux 세션 사망과 pane 프로세스 사망에 같이 썼다. Discord 문구는 갈려 있었지만
+#   **로그로 사후 집계**할 때 두 원인이 한 칸으로 뭉쳤다 — *"뭐 때문에 죽었나"* 를 못 센다.
+#   ⇒ DEAD-SESSION / DEAD-PROC 로 분리. 겹침은 시험이 구조로 잠근다(새 표지를 늘려도 걸린다).
 
 # ── 🔴 Check 5: 인증 축 — 401 은 침묵으로 **원리적으로** 안 잡힌다 ────────────
 #   (Check 4 보다 **앞**에 둔다. 4 는 조용한 밤·긴 턴에서 exit 0 으로 빠지는데,
