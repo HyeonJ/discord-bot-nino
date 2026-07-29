@@ -32,4 +32,4 @@ exec bash "$RUNNER" \
     --root "$ROOT" \
     "$@" \
     --shell-glob 'tests/*.test.sh' \
-    --cmd 'npx jest --runInBand'
+    --cmd-allow-stderr 'npx jest --runInBand'
