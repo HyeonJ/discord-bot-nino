@@ -61,9 +61,49 @@ fi
 #
 # 🔑 복구하지 않는다. **사람을 부른다.**
 #   401 은 재시작으로 안 풀리고(새 세션도 같은 토큰으로 401), 살아 있는 맥락만 날린다.
+#
+# 🔴 그런데 하트비트만으로는 **조용한 밤과 먹통을 구별하지 못한다** (2026-07-29 발견)
+#   하트비트는 Stop 훅이라 *턴이 끝날 때* 갱신된다. 아무도 말을 안 걸면 턴 자체가 없다.
+#   ⇒ "건강"이 아니라 **"마지막 대화 종료 시각"** 이다. DB 실측(최근 400발화):
+#       07-27 16:02→17:31 89분 · 17:31→18:38 67분 · 20:04→21:15 71분
+#       07-28 18:15→19:15 · 21:15→22:15 · 22:15→23:15  (정시 간격 = 그 사이 턴 없음)
+#     정상 운영 중에 60분 초과 공백이 7건이다 — 임계값 바로 위라 **매일 밤 걸린다.**
+#   🔑 거짓 호출이 반복되면 사람이 알림을 끈다. 그러면 진짜가 왔을 때 오늘과 같은 결과다 —
+#     이 기능의 존재 이유를 스스로 무너뜨리는 방향이라 그냥 두면 안 된다.
+#
+# 🔑 축을 하나 더 쓴다: **응답할 것이 있었나.**
+#   수신은 relay 가 DB 에 적는다 — **세션과 별개 프로세스라 401 침묵 중에도 계속 쌓였다.**
+#   (yaksu-history 도움말이 앵커의 *함정*으로 적어둔 그 성질이 여기선 **신호**다.)
+#     수신 없음 + 턴 없음 → 조용함  ✅ 안 부른다
+#     수신 있음 + 턴 없음 → 먹통    🔴 부른다   (9시간 50분 사고는 그대로 걸린다)
+#   ⚠️ 니노 **자기 발화는 수신으로 세지 않는다** — cron 발신자 7개가 니노 이름으로 말한다.
+#     세면 cron 이 앵커를 오염시키던 #63 과 같은 함정이 판정 쪽에서 재현된다.
 SILENCE_LIMIT=${NINO_SILENCE_LIMIT:-3600}          # 기본 60분
 HEARTBEAT_FILE="$BOT_DIR/logs/session-heartbeat-utc"
 SILENCE_STATE="$BOT_DIR/logs/watchdog-silence-next"
+# 🔴 절대경로로 박으면 **시험이 실물 DB 를 읽는다.** 주입 seam 을 둔다(기본값은 실물과 동일).
+HISTORY_CLI="${NINO_HISTORY_CLI:-$HOME/.local/bin/yaksu-history}"
+
+# 하트비트 이후 **니노 외** 작성자의 메시지 건수. 셀 수 없으면 "unknown".
+incoming_since() {
+    [ -x "$HISTORY_CLI" ] || { printf 'unknown'; return 0; }
+    local n
+    n=$("$HISTORY_CLI" --after "$1" --limit 200 2>/dev/null | python3 -c '
+import sys, json
+n = 0
+for line in sys.stdin:
+    line = line.strip()
+    if not line.startswith("{"):
+        continue          # 첫 줄은 사람이 읽는 요약이라 JSON 이 아니다
+    try:
+        if json.loads(line).get("author_name") != "니노":
+            n += 1
+    except Exception:
+        pass
+print(n)
+' 2>/dev/null) || n=""
+    case "$n" in ''|*[!0-9]*) printf 'unknown' ;; *) printf '%s' "$n" ;; esac
+}
 
 # 🔴 이 워치독은 **cron 2분 주기**다(룬드는 상주 루프). 재알림 백오프를 셸 변수에 두면
 #   매 tick 초기화돼 2분마다 사람을 부르게 된다 — 그래서 **파일**에 남긴다.
@@ -85,9 +125,28 @@ except Exception:
         if [ "$SILENT" -ge "$SILENCE_LIMIT" ]; then
             NEXT=$(cat "$SILENCE_STATE" 2>/dev/null || echo "$SILENCE_LIMIT")
             case "$NEXT" in ''|*[!0-9]*) NEXT=$SILENCE_LIMIT ;; esac
+            # 🔴 수신 축 — 조용한 밤을 먹통으로 읽지 않는다
+            HB_RAW=$(head -n1 "$HEARTBEAT_FILE" 2>/dev/null || true)
+            INCOMING=$(incoming_since "$HB_RAW")
+            if [ "$INCOMING" = "0" ]; then
+                # 아무도 안 불렀으니 턴이 없는 게 정상이다. 로그만 남기고 사람은 안 부른다.
+                log "QUIET: 턴 종료 ${SILENT}초 전이지만 그 뒤 수신이 0건이다 — 조용한 것이지 먹통이 아니다."
+                exit 0
+            fi
+            # 🟡 셀 수 없으면(CLI 부재·실패) **부르는 쪽으로 넘어간다.**
+            #   못 부른 사고(9시간 50분)가 헛부름보다 비싸고, 조치가 "화면 봐줘"라 무해하다.
+            #   대신 확인 못 했다는 걸 본문에 적어 사람이 판단할 수 있게 한다.
+            if [ "$INCOMING" = "unknown" ]; then
+                INCOMING_NOTE="
+⚠️ 수신 건수를 확인 못 했어(yaksu-history 를 못 돌렸어) — 그냥 조용한 시간대일 수도 있어."
+            else
+                INCOMING_NOTE="
+그 사이 **${INCOMING}건이 들어왔는데 하나도 못 받았어** — 조용한 시간대가 아니야."
+            fi
             if [ "$SILENT" -ge "$NEXT" ]; then
-                log "SILENT: 세션이 살아 있는데 ${SILENT}초($((SILENT / 60))분) 동안 턴을 못 끝냈다. 사람 호출(복구 안 함)."
+                log "SILENT: 세션이 살아 있는데 ${SILENT}초($((SILENT / 60))분) 동안 턴을 못 끝냈다(수신 ${INCOMING}건). 사람 호출(복구 안 함)."
                 $DISCORD_SEND "$ALERT_CHANNEL" "<@353914579929268226> 🔴 니노가 **살아 있는데 $((SILENT / 60))분째 응답을 못 만들고 있어.** tmux랑 프로세스는 멀쩡해서 기존 감시엔 안 걸려 — 인증 만료(401)나 사용량 소진일 수 있어.
+$INCOMING_NOTE
 
 확인: WSL에서 \`tmux attach -t nino\` 로 화면 봐줘. 401이면 로그인이 필요한데 그건 내가 못 해(브라우저 인증이라).
 

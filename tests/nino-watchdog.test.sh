@@ -67,12 +67,33 @@ chmod +x "$WORK/bin/pgrep"
 HB="$WORK/logs/session-heartbeat-utc"
 STATE="$WORK/logs/watchdog-silence-next"
 
+# 🔴 yaksu-history 스텁 — **실물 CLI/DB 를 절대 안 태운다.**
+#   절대경로로 박힌 CLI 를 그대로 두면 시험이 진짜 DB 를 읽어, 결과가 그날 대화량에
+#   따라 갈린다(= 시험이 아니라 관측). 주입 seam(NINO_HISTORY_CLI)을 쓰는 이유다.
+#   make_history <작성자...>  — 인자 하나가 메시지 한 건. 인자 없으면 0건(조용한 밤).
+make_history() {
+  { printf '#!/bin/bash\n'
+    printf 'echo "[yaksu-history] 결과 N건 · 사람이 읽는 요약 줄"\n'   # JSON 아닌 첫 줄
+    for a in "$@"; do
+      printf 'printf %s\\\\n %s\n' "'{\"author_name\": \"$a\", \"content\": \"x\"}'" ""
+    done
+    printf 'exit 0\n'
+  } > "$WORK/bin/yaksu-history"
+  chmod +x "$WORK/bin/yaksu-history"
+}
+no_history() { rm -f "$WORK/bin/yaksu-history"; }
+fail_history() {
+  printf '#!/bin/bash\necho "boom" >&2\nexit 1\n' > "$WORK/bin/yaksu-history"
+  chmod +x "$WORK/bin/yaksu-history"
+}
+
 run_wd() {   # 환경 초기화 후 워치독 1회 실행 (cron 한 tick)
   : > "$WORK/sent.txt"; : > "$WORK/restarted.txt"
   # 🔴 stderr 를 삼키지 않는다. 삼켰더니 2026-07-29 에 룬드가 9건 빨간 이유를
   #    **화면에서 볼 수 없었다** — 스크립트가 13행 `source` 에서 죽고 있었는데
   #    stderr·카운터·로그 셋 다 신호가 없었다. 러너가 stderr 를 봐야 미지가 잡힌다.
   WORK_MARK="$WORK" PATH="$WORK/bin:$PATH" NINO_SILENCE_LIMIT="${LIMIT:-3600}" \
+    NINO_HISTORY_CLI="$WORK/bin/yaksu-history" \
     bash "$WORK/scripts/nino-watchdog.sh" >/dev/null 2>"$WORK/stderr.txt"
   cat "$WORK/sent.txt" 2>/dev/null
 }
@@ -80,6 +101,7 @@ set_hb()  { iso_off "-$1" > "$HB"; }        # $1 = 분 전
 reset()   { rm -f "$STATE" "$WORK/logs/watchdog.log"; }
 
 make_tmux 0
+make_history Tim   # 기본은 "수신이 있었다" — 아래 침묵 케이스들은 전부 *먹통* 상황이다
 
 echo "🔴 산출 축 — '살아 있나'가 아니라 '말을 하고 있나':"
 reset; set_hb 120
@@ -125,6 +147,47 @@ out="$(run_wd)"
 reset; iso_off 60 > "$HB"
 out="$(run_wd)"
 [[ -z "$out" ]] && ok "미래 시각(시계 어긋남)은 침묵으로 읽지 않는다" || bad "미래 하트비트" "<없음>" "$out"
+
+echo ""
+echo "🔴 조용한 밤 ≠ 먹통 — 응답할 것이 있었나로 가른다 (2026-07-29 회귀):"
+# 하트비트는 Stop 훅이라 *턴이 끝날 때만* 갱신된다. 아무도 말을 안 걸면 턴이 없다.
+# ⇒ 조용한 밤이 401 침묵과 파일상 **완전히 같은 모습**이 된다.
+#   실측: 정상 운영 중 60분 초과 공백이 최근 400발화에 7건(임계값 바로 위) — 매일 밤 걸릴 것이었다.
+reset; set_hb 120; make_history        # 수신 0건
+out="$(run_wd)"
+[[ -z "$out" ]] && ok "2시간 침묵 + 수신 0건 → 안 부른다(조용한 밤)" \
+  || bad "조용한 밤엔 안 부른다" "<없음>" "$out"
+grep -q "QUIET:" "$WORK/logs/watchdog.log" 2>/dev/null \
+  && ok "조용해서 넘어갔다는 사실은 로그에 남는다(조용히 삼키지 않는다)" \
+  || bad "QUIET 로그" "QUIET:" "$(cat "$WORK/logs/watchdog.log" 2>/dev/null)"
+
+reset; set_hb 120; make_history Tim Darren
+out="$(run_wd)"
+[[ -n "$out" ]] && ok "2시간 침묵 + 수신 2건 → 부른다(먹통)" || bad "먹통이면 부른다" "알림" "<없음>"
+[[ "$out" == *"2건이 들어왔는데"* ]] && ok "몇 건을 못 받았는지 사람에게 말해준다" \
+  || bad "수신 건수 안내" "2건" "$out"
+
+# 🔴 cron 발신자 7개가 **니노 이름으로** 말한다. 자기 발화를 수신으로 세면
+#   #63 에서 앵커가 오염되던 그 함정이 판정 쪽에서 그대로 재현된다.
+reset; set_hb 120; make_history 니노 니노 니노
+out="$(run_wd)"
+[[ -z "$out" ]] && ok "내 발화(cron)만 있으면 수신으로 안 센다" \
+  || bad "자기 발화는 수신이 아니다" "<없음>" "$out"
+
+reset; set_hb 120; make_history 니노 Tim
+out="$(run_wd)"
+[[ -n "$out" ]] && ok "내 발화에 섞여 있어도 남의 발화 1건은 잡는다" || bad "혼재 시 수신 인식" "알림" "<없음>"
+
+# 🟡 셀 수 없을 때는 **부르는 쪽**으로 넘어간다 — 못 부른 사고가 헛부름보다 비싸다.
+reset; set_hb 120; no_history
+out="$(run_wd)"
+[[ -n "$out" ]] && ok "CLI 부재 → 그래도 부른다(fail-open)" || bad "CLI 부재 fail-open" "알림" "<없음>"
+[[ "$out" == *"확인 못 했"* ]] && ok "확인 못 했다는 걸 본문에 적는다" \
+  || bad "unknown 안내 문구" "확인 못 했" "$out"
+reset; set_hb 120; fail_history
+out="$(run_wd)"
+[[ "$out" == *"확인 못 했"* ]] && ok "CLI 실패도 같은 취급" || bad "CLI 실패" "확인 못 했" "${out:-<없음>}"
+make_history Tim   # 기본 복구
 
 echo ""
 echo "🔴 cron 주기 실행이라 백오프가 **파일**에 남아야 한다 (룬드와 구조가 다른 지점):"
