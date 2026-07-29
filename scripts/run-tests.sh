@@ -14,6 +14,16 @@
 #   1  하나 이상 실패
 #   2  판정 불가 — 돌린 것이 0개이거나 도구가 없어 **못 쟀다**. 통과로도 실패로도 접지 않는다
 #
+# 🔴 **셸이 자기 몫으로 쓰는 코드는 판정 불가로 접는다** (2026-07-28, 니노 발견):
+#      126  permission denied      127  command not found      128+ 시그널(130=INT · 143=TERM)
+#    세 슬롯(0/1/2)만 적어두면 이것들이 **어느 칸에도 안 들어가** `else` 로 새고, 실측에서
+#    전부 *실패* 로 접혔다 — **못 쟀는데 "코드가 깨졌다"** 가 된다. 오탐이 쌓이면 무시된다.
+#    ⚠️ 127 은 앞의 `command -v` 검사를 **통과한 뒤** 스크립트 *안에서* 없는 도구를 부를 때 난다.
+#
+# ⚠️ **`3~125` 는 접지 않는다** — 그건 프로그램이 정의한 코드다. 실측: 코어 `mutate.sh` 가
+#    `3`(판정 불가) · `4`(복구 실패 — *레포에 변이가 남았다*)를 쓴다. "그 외 전부" 로 접으면
+#    그 둘이 **판정 불가로 뭉개져** 레포에 변이가 남은 걸 못 본다. 접는 범위는 **셸의 몫**뿐이다.
+#
 # ⚠️ **초록불의 개수**를 찍는다. "빨간불이 없다" 는 건강 신호가 아니다 — 아무것도 안 돌아도
 #    빨간불은 없다. 그래서 개수를 못 읽으면 그 사실(`건수 미상`)도 찍는다.
 #
@@ -21,6 +31,9 @@
 #   scripts/run-tests.sh [--shell-glob <glob>]... [--cmd <명령>]... [--root <경로>]
 #     --shell-glob   bash 로 돌릴 시험 파일 glob (반복 가능). 예: 'tests/*.test.sh'
 #     --cmd          그대로 실행할 명령 (반복 가능). 예: 'bun test' · 'npx jest --runInBand'
+#     --cmd-allow-stderr
+#                    같은 명령인데 **stderr 를 정상 출력으로 쓰는 도구**용. 선언한 항목만 면제되고,
+#                    면제 사실이 화면에 찍힌다(조용한 면제 금지). 실측: bun·jest 는 요약까지 stderr 로 쓴다.
 #     --root         기준 디렉터리 (기본: 이 스크립트의 상위)
 #     --unmeasured-state <파일>
 #                    판정 불가 **이름 집합**을 남겨 직전과 비교한다(env `UNMEASURED_STATE` 도 됨).
@@ -38,6 +51,8 @@ ROOT=""
 UNMEASURED_STATE="${UNMEASURED_STATE:-}"
 GLOBS=""     # 개행 구분 문자열 — bash 3.2 에서 빈 배열 확장이 set -u 와 부딪히므로 배열을 안 쓴다
 CMDS=""
+# stderr 를 정상 출력으로 쓰는 항목(개행 구분). --cmd-allow-stderr 로만 채워진다.
+ALLOW_STDERR=""
 # 실패 시 보여줄 표식 줄 수. 넘치면 **몇 줄 잘랐는지 반드시 찍는다**(조용한 절단 금지).
 # ⚠️ env 로 여는 건 설정 기능이 아니라 **검증 가능성** 때문이다 — 값이 6 으로 고정이면
 #    안내의 `%s` 를 6 으로 하드코딩하는 변이가 **등가라서 안 잡힌다**(실측: 변이 H 살아남음).
@@ -53,6 +68,16 @@ while [ $# -gt 0 ]; do
 "; shift 2 ;;
         --cmd)        [ $# -ge 2 ] || die_usage "--cmd 뒤에 명령이 없다"
                       CMDS="$CMDS$2
+"; shift 2 ;;
+        # 🔴 stderr 를 정상적으로 쓰는 도구를 **항목 단위로** 선언한다 (니노 #95 리뷰)
+        #   패턴 화이트리스트가 아니다 — 패턴으로 열면 다 들어오고, 그게 "일단 넣고 보자" 로 샌다.
+        #   실측(2026-07-29): `bun test` 는 **요약(`577 pass`)까지 stderr 로** 쓰고,
+        #   `npx jest` 도 같다(니노 실측 11줄). 이건 고장이 아니라 그 도구의 설계다.
+        #   ⚠️ 선언은 **출력에 찍힌다** — 조용한 면제가 아니라 리뷰에서 보이는 면제다.
+        --cmd-allow-stderr)
+                      [ $# -ge 2 ] || die_usage "--cmd-allow-stderr 뒤에 명령이 없다"
+                      CMDS="$CMDS$2
+"; ALLOW_STDERR="$ALLOW_STDERR$2
 "; shift 2 ;;
         --root)       [ $# -ge 2 ] || die_usage "--root 뒤에 경로가 없다"
                       ROOT="$2"; shift 2 ;;
@@ -106,18 +131,77 @@ extract_count() {
 
 run_one() {  # $1=표시이름 $2...=명령
     local name="$1"; shift
-    local out rc n marks
-    out="$("$@" 2>&1)"; rc=$?
-    if [ "$rc" -eq 0 ]; then
+    local out err rc n marks errf
+    # 🔴 stdout 과 stderr 를 **나눠서** 받는다 (2026-07-29 신설)
+    #   왜: 섞으면 ① 통과 수 파싱이 stderr 한 줄에 흔들리고 ② **에러가 화면에 보이는데
+    #   카운터에도 rc 에도 안 남는다.**
+    #   실사고 — 룬드 맥(bash 3.2)에서:
+    #     tests/…: line 342: mapfile: command not found
+    #     결과: 62 pass, 0 fail, 0 skip        rc=0 · CI 초록불
+    #   `mapfile` 이 없어 **블록 2개가 통째로 안 돌았는데** 통과 수만 보면 이상이 없었다.
+    #   니노 기계(bash 5.x)의 64 와 **숫자를 대조해야만** 드러났다.
+    #   ⇒ 러너가 stderr 를 보면 *아직 모르는 이식성 축* 까지 잡힌다(항목 가드는 아는 것만 잡는다).
+    errf="$(mktemp 2>/dev/null)" || errf=""
+    if [ -n "$errf" ]; then
+        out="$("$@" 2>"$errf")"; rc=$?
+        err="$(cat "$errf" 2>/dev/null)"; rm -f "$errf"
+    else
+        # 🔴 mktemp 를 못 쓰면 stderr 계약을 **못 잰다**. 옛 동작으로 조용히 물러나면
+        #    `err=""` 이라 아래 조건이 절대 참이 안 되고 **계약이 꺼진 채 전부 초록불**이 된다 —
+        #    오늘 우리가 고친 것들과 정확히 같은 형태다(니노 #95 리뷰 ②).
+        #    ⇒ 세 상태를 이미 쓰고 있으니 **판정 불가**로 올린다.
+        add_unmeasured "$name"
+        printf '  ⛔ %-38s 판정 불가 — mktemp 를 못 써서 stderr 계약을 못 쟀다\n' "$name"
+        return
+    fi
+    # 선언된 항목인가 (이름 = 명령 전체와 같다)
+    local allowed=no
+    case "
+$ALLOW_STDERR" in *"
+$name
+"*) allowed=yes ;; esac
+    if [ "$rc" -eq 0 ] && [ -n "$err" ] && [ "$allowed" = "yes" ]; then
+        # 🔸 선언된 항목 — 통과로 세되 **선언 사실을 화면에 남긴다**(조용한 면제 금지)
+        pass=$((pass + 1))
+        n="$(extract_count "$out")"
+        [ -z "$n" ] && n="$(extract_count "$err")"   # bun·jest 는 요약도 stderr 로 쓴다
+        printf '  ✅ %-38s %s  (stderr %s줄 — 선언됨)\n' "$name" "${n:-⚠️건수 미상}" "$(printf '%s\n' "$err" | grep -c .)"
+    elif [ "$rc" -eq 0 ] && [ -n "$err" ]; then
+        # 🔴 rc 는 0 인데 stderr 가 있다 = **조용한 고장**. rc 축과 직교인 새 축이다.
+        #   ⚠️ 삼키지 않는다 — 내용을 그대로 보여준다(안 그러면 이 계약이 만들어진 이유가 재현된다).
+        #   🔸 화이트리스트는 **일부러 안 만들었다**: 2026-07-29 실측으로 양봇 시험 20+개가
+        #      stderr 0줄이었다(진행 로그는 다들 stdout 을 쓴다). 근거 0건에 예외 창구부터 만들면
+        #      "일단 넣고 보자" 로 샌다 — 필요해지면 그 케이스를 보고 만든다.
+        fail=$((fail + 1)); failed="$failed $name"
+        n="$(extract_count "$out")"
+        printf '  🔴 %-38s rc=0 인데 **stderr 가 있다** (%s)\n' "$name" "${n:-건수 미상}"
+        printf '%s\n' "$err" | head -"$MARK_LINES" | sed 's/^/       ⚠ /'
+        n_err="$(printf '%s\n' "$err" | grep -c .)"
+        if [ "$n_err" -gt "$MARK_LINES" ]; then
+            printf '       ⚠️ stderr %s줄 중 %s줄만 보인다 — **%s줄 잘랐다**\n' \
+                "$n_err" "$MARK_LINES" "$((n_err - MARK_LINES))"
+        fi
+    elif [ "$rc" -eq 0 ]; then
         pass=$((pass + 1))
         n="$(extract_count "$out")"
         printf '  ✅ %-38s %s\n' "$name" "${n:-⚠️건수 미상}"
-    elif [ "$rc" -eq 2 ]; then
+    elif [ "$rc" -eq 2 ] || [ "$rc" -eq 126 ] || [ "$rc" -eq 127 ] || [ "$rc" -ge 128 ]; then
         # 하위 시험도 세 상태 계약을 쓴다(양봇 규칙) — 그 2를 실패로 접으면 헛빨간불이 되고,
         # 통과로 접으면 못 쟀다가 초록이 된다. 그대로 올린다.
+        # 🔴 126·127·128+ 도 여기다 — **셸이 낸 코드는 "못 쟀다"** 이지 "코드가 깨졌다" 가 아니다.
+        #    ⚠️ 이유를 같이 적는다. `rc=127 판정 불가` 만 찍으면 *도구 부재* 인지 *중간에 죽었다* 인지
+        #       안 보인다 — 오늘 `head -1` 이 근거를 버린 것과 같은 자리다.
+        case "$rc" in
+            2)   why="하위 계약" ;;
+            126) why="셸: 실행 권한 없음" ;;
+            127) why="셸: 명령을 못 찾음" ;;
+            *)   why="셸: 시그널로 종료(128+$((rc - 128)))" ;;
+        esac
         add_unmeasured "$name"
-        printf '  ⛔ %-38s rc=2 판정 불가\n' "$name"
+        printf '  ⛔ %-38s rc=%s 판정 불가 — %s\n' "$name" "$rc" "$why"
+        # stdout·stderr 를 나눠 받으므로 **둘 다** 보여준다 — 판정 불가의 이유는 보통 stderr 에 있다
         printf '%s\n' "$out" | tail -3 | sed 's/^/       /'
+        [ -n "$err" ] && printf '%s\n' "$err" | tail -3 | sed 's/^/       ⚠ /'
     else
         fail=$((fail + 1)); failed="$failed $name"
         printf '  🔴 %-38s rc=%s\n' "$name" "$rc"
@@ -135,7 +219,11 @@ run_one() {  # $1=표시이름 $2...=명령
         #       **셋째 실패를 통째로 지운다.** 위에서 막으려던 *"빨간불은 보이는데 왜인지는
         #       안 보인다"* 가 **한 겹 위에서 그대로 재발**한다 — 게다가 이번엔 6줄이 보이니까
         #       **다 보여준 것처럼 읽힌다**(잘림은 흔적을 안 남긴다). 개수를 세서 알린다.
-        marks_all="$(printf '%s\n' "$out" | grep -nE '❌|✗|FAIL|want:|got:|[Ee]rror|assert')"
+        # ⚠️ 표식 검색은 **stdout+stderr 합본**으로 한다 — 예전엔 2>&1 이라 stderr 도 포함됐고,
+        #    나눠 받으면서 stderr 를 빼면 *실패 이유가 조용히 줄어든다*(이 PR 이 없애려는 것과 같은 형태).
+        both="$out"; [ -n "$err" ] && both="$out
+$err"
+        marks_all="$(printf '%s\n' "$both" | grep -nE '❌|✗|FAIL|want:|got:|[Ee]rror|assert')"
         n_marks="$(printf '%s\n' "$marks_all" | grep -c .)"
         if [ "$n_marks" -gt 0 ]; then
             printf '%s\n' "$marks_all" | head -"$MARK_LINES" | sed 's/^/       /'
@@ -143,10 +231,10 @@ run_one() {  # $1=표시이름 $2...=명령
                 printf '       ⚠️ 표식 줄 %s개 중 %s개만 보인다 — **%s줄 잘랐다**(전부 보려면 이 시험을 로컬에서 직접 돌린다)\n' \
                     "$n_marks" "$MARK_LINES" "$((n_marks - MARK_LINES))"
             fi
-            printf '%s\n' "$out" | tail -3 | sed 's/^/       … /'
+            printf '%s\n' "$both" | tail -3 | sed 's/^/       … /'
         else
             printf '       (실패 표식 줄을 못 찾았다 — 꼬리 12줄)\n'
-            printf '%s\n' "$out" | tail -12 | sed 's/^/       /'
+            printf '%s\n' "$both" | tail -12 | sed 's/^/       /'
         fi
     fi
 }
