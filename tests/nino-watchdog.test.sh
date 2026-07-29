@@ -300,6 +300,21 @@ make_sessions() {
   } > "$SESSLOG/session-a.jsonl"
 }
 no_sessions() { rm -rf "$SESSLOG"; }
+# 🔴 파일 단위로 만든다 — **재시작하면 새 파일이 생기고 직전 증거는 옛 파일에 남는다.**
+#   $1=파일명 · $2=인증에러 건수 · $3=레코드/mtime 을 몇 분 전으로 둘지
+make_session_file() {
+  mkdir -p "$SESSLOG"
+  local f="$SESSLOG/$1" ago="${3:-5}" ts; ts="$(iso_off "-$ago")"
+  {
+    printf '{"type":"user","timestamp":"%s","message":{"content":"평범한 대화"}}\n' "$ts"
+    for _ in $(seq 1 "${2:-0}"); do
+      printf '{"type":"user","isApiErrorMessage":true,"timestamp":"%s","message":{"content":"Please run /login · API Error: 401 OAuth access token has expired"}}\n' "$ts"
+    done
+  } > "$f"
+  # mtime 을 레코드 시각에 맞춘다 — 실제로도 마지막 append 시각이 mtime 이다.
+  # ⚠️ `touch -d` 는 GNU 전용이라 룬드 맥(BSD)에서 깨진다 → python os.utime 으로(이식성 가드가 잡아줬다).
+  python3 -c 'import os,sys,time; t=time.time()-int(sys.argv[2])*60; os.utime(sys.argv[1],(t,t))' "$f" "$ago"
+}
 
 # 🔴 **핵심 회귀** — 하트비트가 신선해도 인증 축은 돌아야 한다. 401 의 정의가 그거니까.
 reset; set_hb 1; set_activity 1; make_history Tim; make_sessions 5 0
@@ -345,6 +360,36 @@ first="$(run_wd)"; second="$(run_wd)"
   || bad "인증 백오프" "1회차만" "1=${first:0:20} 2=${second:0:20}"
 [[ -f "$WORK/logs/watchdog-auth-next" ]] && ok "백오프가 침묵 축과 분리된 파일에 남는다" \
   || bad "백오프 파일 분리" "watchdog-auth-next" "$(ls "$WORK/logs")"
+# 🔴 **재시작 시나리오** — 사고 중 재시작되면 **새 파일이 생기고 직전 증거는 옛 파일에 남는다.**
+#   최신 파일 하나만 보면 새 파일엔 0건이라 **방금 난 401 을 못 본다.**
+#   ⇒ 파일 선택은 개수(`ls -t | head -N`)가 아니라 **mtime 이 창 안인가**로 한다:
+#     파일이 창 안에 안 쓰였다면 창 안의 레코드를 **가질 수 없다**(append-only 라 mtime = 최신 레코드 시각).
+#     N 을 고를 근거를 안 만들어도 되고, 재시작이 몇 번 연달아 나도 자동으로 맞는다.
+reset; set_hb 1; set_activity 1; make_history Tim
+rm -rf "$SESSLOG"
+make_session_file "new.jsonl" 0 1      # 재시작 직후 새 파일 — 깨끗하다
+make_session_file "prev.jsonl" 5 8     # 직전 파일 — 여기에 증거가 있다(창 안)
+out="$(run_wd)"
+[[ "$out" == *"로그인"* ]] && ok "🔑 재시작으로 증거가 옛 파일에 남아도 잡는다(최신 하나만 보면 놓친다)" \
+  || bad "재시작 시나리오" "로그인 알림" "${out:-<없음>}"
+
+# 🟡 창 **밖** 파일의 에러는 안 센다 — 지난 사고가 되살아나면 안 된다.
+reset; set_hb 1; set_activity 1
+rm -rf "$SESSLOG"
+make_session_file "new.jsonl" 0 1
+make_session_file "old.jsonl" 9 600    # 10시간 전 사고
+out="$(run_wd)"
+[[ -z "$out" ]] && ok "창 밖 파일(10시간 전)의 에러는 안 센다" || bad "창 밖 파일 제외" "<없음>" "$out"
+
+# 🟡 파일은 있는데 **전부 창 밖** = 최근 에러 0건이지 판정 불가가 아니다.
+reset; set_hb 1; set_activity 1
+rm -rf "$SESSLOG"; make_session_file "old.jsonl" 9 600
+out="$(run_wd)"
+[[ -z "$out" ]] && ok "전부 창 밖이면 안 부른다" || bad "전부 창 밖" "<없음>" "$out"
+grep -q "AUTH-UNKNOWN:" "$WORK/logs/watchdog.log" 2>/dev/null \
+  && bad "🔑 창 밖은 '0건'이지 '판정 불가'가 아니다" "AUTH-UNKNOWN 없음" "$(cat "$WORK/logs/watchdog.log")" \
+  || ok "🔑 창 밖은 '0건'으로 읽는다 — 판정 불가와 구분한다"
+
 # 🔴 **배치 계약** — Check 4 는 조용한 밤(QUIET)·긴 턴(WORKING)에서 `exit 0` 으로 빠진다.
 #   401 은 바로 그때 나므로 인증 축이 **Check 4 뒤에 있으면 통째로 건너뛴다.**
 #   이 두 케이스가 배치를 잠그는 유일한 판별점이다(하트비트가 신선하면 4 가 어차피 exit 하지 않아 구분이 안 된다).

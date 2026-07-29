@@ -76,17 +76,28 @@ auth_errors_recent() {
     [ -d "$SESSION_LOG_DIR" ] || { printf 'unknown'; return 0; }
     local n
     n=$(python3 - "$SESSION_LOG_DIR" "$AUTH_WINDOW" <<'PYEOF' 2>/dev/null || true
-import sys, os, json, glob, datetime
+import sys, os, json, glob, datetime, time
 d, win = sys.argv[1], int(sys.argv[2])
 files = glob.glob(os.path.join(d, "*.jsonl"))
 if not files:
     raise SystemExit(1)
-# 🔴 현재 세션 = mtime 최신. ⚠️ 재시작하면 증거가 **다른 파일로 옮겨간다** —
-#   "지금 고장인가"를 묻는 거라 최신이 맞지만, 재시작 직후엔 방금 401 을 못 본다.
-newest = max(files, key=os.path.getmtime)
+# 🔴 파일 선택은 **개수가 아니라 mtime 창**으로 (2026-07-29, Darren 승인 M:48kb)
+#   사고 중 재시작되면 새 파일이 생기고 **직전 증거는 옛 파일에 남는다** — 최신 하나만 보면 못 본다.
+#   그렇다고 `ls -t | head -N` 로 N 을 고르면 그 N 의 근거가 *관측*이지 계약이 아니게 된다
+#   (룬드는 "재시작해도 파일이 안 바뀌더라"로 2개를 골랐는데, 그건 `--continue` 가 성공한 관측이다.
+#    나는 모델 교체 때 fresh 세션이 필요해 **파일이 바뀌는 경로가 정상 운영 안에 있다**).
+#
+# 🔑 원리: **창 안에 안 쓰인 파일은 창 안의 레코드를 가질 수 없다.**
+#   append-only 라 mtime 이 곧 그 파일의 최신 레코드 시각이기 때문. ⇒ N 이 필요 없고
+#   재시작이 몇 번 연달아 나도 자동으로 맞는다. 시간 창이 타임스탬프로 또 거르므로 오탐도 안 는다.
+# ⚠️ 여유 5분 — mtime 과 레코드 시각 사이의 오차·시계 흔들림을 흡수한다.
+cutoff = time.time() - (win + 300)
+sel = [p for p in files if os.path.getmtime(p) >= cutoff]
+# 🟡 하나도 없으면 **최근 에러 0건**이지 판정 불가가 아니다(파일 자체는 있으니 조회는 성공했다).
 now = datetime.datetime.now(datetime.timezone.utc)
 n = 0
-with open(newest, errors="replace") as f:
+for path in sel:
+  with open(path, errors="replace") as f:
     for line in f:
         if "isApiErrorMessage" not in line:      # 선필터 — 70MB 전수도 0.14초
             continue
