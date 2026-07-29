@@ -88,6 +88,14 @@ HISTORY_CLI="${NINO_HISTORY_CLI:-$HOME/.local/bin/yaksu-history}"
 incoming_since() {
     [ -x "$HISTORY_CLI" ] || { printf 'unknown'; return 0; }
     local n
+    # 🔴 **이 함수의 정확성은 3행의 `pipefail` 한 단어에 걸려 있다.**
+    #   파이프라인 rc 는 마지막 명령(python) 것이라, pipefail 이 없으면 CLI 가 rc=1 이어도
+    #   python 은 0줄을 읽고 `0` 을 찍는다 ⇒ **조회 실패가 "0건"이 되고, 0건은 조용함이라
+    #   워치독이 영영 안 부른다**(조용히 눈이 먼다). 실측:
+    #       set -euo pipefail → FAILED(=unknown, 부르는 쪽)   set -eu → 0  🔴
+    #   시험이 잡긴 하지만(제거 시 30 pass·1 fail) **보이지 않는 결합**이라 여기 적어둔다.
+    #   🔸 룬드는 같은 판정을 `if OUT="$(cli)"; then` 으로 rc 를 명시해서 갈랐다(assistant#28).
+    #     그쪽이 결합이 드러나서 낫다 — 코어로 옮길 때 그 형태로 통일할 것.
     n=$("$HISTORY_CLI" --after "$1" --limit 200 2>/dev/null | python3 -c '
 import sys, json
 n = 0
