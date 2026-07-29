@@ -32,7 +32,8 @@
 #     --shell-glob   bash 로 돌릴 시험 파일 glob (반복 가능). 예: 'tests/*.test.sh'
 #     --cmd          그대로 실행할 명령 (반복 가능). 예: 'bun test' · 'npx jest --runInBand'
 #     --cmd-allow-stderr
-#                    같은 명령인데 **stderr 를 정상 출력으로 쓰는 도구**용. 선언한 항목만 면제되고,
+#                    같은 명령인데 **stderr 를 정상 출력으로 쓰는 도구**용. `--cmd` 를 **대체한다**
+#                    (둘 다 주면 경고하고 한 번만 돈다). 선언한 항목만 면제되고,
 #                    면제 사실이 화면에 찍힌다(조용한 면제 금지). 실측: bun·jest 는 요약까지 stderr 로 쓴다.
 #     --root         기준 디렉터리 (기본: 이 스크립트의 상위)
 #     --unmeasured-state <파일>
@@ -53,6 +54,8 @@ GLOBS=""     # 개행 구분 문자열 — bash 3.2 에서 빈 배열 확장이 
 CMDS=""
 # stderr 를 정상 출력으로 쓰는 항목(개행 구분). --cmd-allow-stderr 로만 채워진다.
 ALLOW_STDERR=""
+# 같은 명령을 --cmd 와 --cmd-allow-stderr 로 **둘 다** 주면 두 번 돈다. 경고를 모아 실행 전에 찍는다.
+DUP_WARN=""
 # 실패 시 보여줄 표식 줄 수. 넘치면 **몇 줄 잘랐는지 반드시 찍는다**(조용한 절단 금지).
 # ⚠️ env 로 여는 건 설정 기능이 아니라 **검증 가능성** 때문이다 — 값이 6 으로 고정이면
 #    안내의 `%s` 를 6 으로 하드코딩하는 변이가 **등가라서 안 잡힌다**(실측: 변이 H 살아남음).
@@ -61,14 +64,25 @@ MARK_LINES="${MARK_LINES:-6}"
 
 die_usage() { echo "⛔ 판정 불가 — $1"; echo "   사용법은 --help"; exit 2; }
 
+# 🔴 같은 명령이 이미 CMDS 에 있나 (개행 구분 문자열에서 정확 일치)
+already_cmd() { case "
+$CMDS" in *"
+$1
+"*) return 0 ;; esac; return 1; }
+
 while [ $# -gt 0 ]; do
     case "$1" in
         --shell-glob) [ $# -ge 2 ] || die_usage "--shell-glob 뒤에 glob 이 없다"
                       GLOBS="$GLOBS$2
 "; shift 2 ;;
         --cmd)        [ $# -ge 2 ] || die_usage "--cmd 뒤에 명령이 없다"
-                      CMDS="$CMDS$2
-"; shift 2 ;;
+                      if already_cmd "$2"; then
+                          DUP_WARN="${DUP_WARN}⚠️ 같은 명령이 두 번 등록됐다(그대로 두면 **두 번 돈다**): $2
+"
+                      else
+                          CMDS="$CMDS$2
+"
+                      fi; shift 2 ;;
         # 🔴 stderr 를 정상적으로 쓰는 도구를 **항목 단위로** 선언한다 (니노 #95 리뷰)
         #   패턴 화이트리스트가 아니다 — 패턴으로 열면 다 들어오고, 그게 "일단 넣고 보자" 로 샌다.
         #   실측(2026-07-29): `bun test` 는 **요약(`577 pass`)까지 stderr 로** 쓰고,
@@ -76,8 +90,17 @@ while [ $# -gt 0 ]; do
         #   ⚠️ 선언은 **출력에 찍힌다** — 조용한 면제가 아니라 리뷰에서 보이는 면제다.
         --cmd-allow-stderr)
                       [ $# -ge 2 ] || die_usage "--cmd-allow-stderr 뒤에 명령이 없다"
-                      CMDS="$CMDS$2
-"; ALLOW_STDERR="$ALLOW_STDERR$2
+                      # ⚠️ 이 플래그는 --cmd 를 **대체**한다(추가가 아니다).
+                      #    둘 다 주면 같은 suite 가 두 번 돌아 시간도 통과 수도 두 배가 된다 —
+                      #    조용히 두 배 도는 건 오늘 우리가 계속 잡은 형태라 **경고하고 한 번만** 넣는다.
+                      if already_cmd "$2"; then
+                          DUP_WARN="${DUP_WARN}⚠️ --cmd 와 --cmd-allow-stderr 에 같은 명령이 있다 — **--cmd-allow-stderr 가 --cmd 를 대체한다**(한 번만 돈다): $2
+"
+                      else
+                          CMDS="$CMDS$2
+"
+                      fi
+                      ALLOW_STDERR="$ALLOW_STDERR$2
 "; shift 2 ;;
         --root)       [ $# -ge 2 ] || die_usage "--root 뒤에 경로가 없다"
                       ROOT="$2"; shift 2 ;;
@@ -97,6 +120,9 @@ cd "$ROOT" || { echo "⛔ 판정 불가 — 루트로 못 갔다: $ROOT"; exit 2
 if [ -z "$GLOBS" ] && [ -z "$CMDS" ]; then
     die_usage "돌릴 것을 하나도 안 줬다(--shell-glob / --cmd). 목록은 레포가 준다"
 fi
+
+# 중복 경고를 **실행 전에** 찍는다 — 조용한 dedup 은 "왜 한 번만 돌지" 를 못 보게 만든다
+[ -n "$DUP_WARN" ] && printf '%s' "$DUP_WARN"
 
 pass=0; fail=0; unk=0
 failed=""
