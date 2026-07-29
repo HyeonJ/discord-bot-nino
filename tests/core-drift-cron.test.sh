@@ -21,6 +21,17 @@ bad() { echo "  ❌ $1"; fail=$((fail + 1)); [ -n "${2:-}" ] && printf '%s\n' "$
 [ -f "$SCRIPT" ] || { echo "❌ 없음: $SCRIPT"; exit 1; }
 ROOT="$(mktemp -d)"; trap 'rm -rf "$ROOT"' EXIT
 
+# 🔴 **시험이 실물 상태를 건드리면 안 된다** (2026-07-29 실사고)
+#   `#75` 에서 상태 seam(NOTIFY_STATE)을 run() 에만 넣어, 나머지 호출부 3곳이
+#   **진짜 `logs/core-drift-notify-state` 에 썼다.** 시험이 그걸 읽기도 하므로
+#   ① 결과가 실물 상태에 따라 흔들리고 ② 최악엔 **진짜 알림을 억제**한다.
+#   ⇒ 아래에서 실행 전후를 대조한다. 새 호출부가 seam 을 빠뜨리면 여기서 걸린다.
+REAL_STATE="$BOT/logs/core-drift-notify-state"
+real_sig() { if [ -e "$REAL_STATE" ]; then printf 'exists:%s' \
+        "$(stat -c %Y "$REAL_STATE" 2>/dev/null || stat -f %m "$REAL_STATE" 2>/dev/null)"
+    else printf 'absent'; fi; }
+REAL_BEFORE="$(real_sig)"
+
 # 가짜 검사기 — 종료코드를 주입한다
 mkfake() { printf '#!/usr/bin/env bash\necho "%s"\nexit %s\n' "$2" "$1" > "$ROOT/check.sh"; chmod +x "$ROOT/check.sh"; }
 
@@ -76,12 +87,12 @@ echo "⑧ 🔴 **셸이 내는 코드(127·126)도 판정 불가로 접는다** 
 mkfake 2 "WARN: fetch 실패"; run; plain2="$out"
 for code in 127 126; do
     if [ "$code" -eq 127 ]; then
-        out="$(BOT_DIR="$BOT" CHECK="$ROOT/nonexistent-check.sh" DRY_RUN=1             HEARTBEAT="$ROOT/hb" LOG="$ROOT/log"             DISCORD_SEND="$ROOT/should-not-exist" bash "$SCRIPT" 2>&1)"; rc=$?
+        out="$(BOT_DIR="$BOT" CHECK="$ROOT/nonexistent-check.sh" DRY_RUN=1             HEARTBEAT="$ROOT/hb" LOG="$ROOT/log" NOTIFY_STATE="$ROOT/notify-state"             DISCORD_SEND="$ROOT/should-not-exist" bash "$SCRIPT" 2>&1)"; rc=$?
     else
         printf '#!/usr/bin/env bash
 exit 0
 ' > "$ROOT/noexec.sh"; chmod -x "$ROOT/noexec.sh"
-        out="$(BOT_DIR="$BOT" CHECK="$ROOT/noexec.sh" DRY_RUN=1             HEARTBEAT="$ROOT/hb" LOG="$ROOT/log"             DISCORD_SEND="$ROOT/should-not-exist" bash "$SCRIPT" 2>&1)"; rc=$?
+        out="$(BOT_DIR="$BOT" CHECK="$ROOT/noexec.sh" DRY_RUN=1             HEARTBEAT="$ROOT/hb" LOG="$ROOT/log" NOTIFY_STATE="$ROOT/notify-state"             DISCORD_SEND="$ROOT/should-not-exist" bash "$SCRIPT" 2>&1)"; rc=$?
     fi
     [ "$rc" -eq 2 ] && ok "rc=$code → 판정 불가(2)로 접힌다"         || bad "rc=$code 가 $rc 로 나갔다 — 정상·위반 어느 쪽으로도 접지 않는다" "$out"
     grep -q "판정 불가" <<<"$out" && ok "  → '판정 불가' 라고 말한다"         || bad "  rc=$code 인데 판정 불가라고 안 한다" "$out"
@@ -99,7 +110,7 @@ echo "⑨ 시그널로 죽은 것도 **시그널이라고** 말한다 (128+N)"
 # 🔴 128+N 은 *도구가 판정을 낸 것*이 아니라 **중간에 끊긴 것**이다. 127(도구 부재)과 조치가
 #    다르다 — 전자는 설치·PATH, 후자는 왜 죽었는지. 한 문장으로 뭉치면 매번 다시 조사한다.
 printf '#!/usr/bin/env bash\nkill -TERM $$\n' > "$ROOT/sig.sh"; chmod +x "$ROOT/sig.sh"
-out="$(BOT_DIR="$BOT" CHECK="$ROOT/sig.sh" DRY_RUN=1 HEARTBEAT="$ROOT/hb" LOG="$ROOT/log" DISCORD_SEND="$ROOT/should-not-exist" bash "$SCRIPT" 2>&1)"; rc=$?
+out="$(BOT_DIR="$BOT" CHECK="$ROOT/sig.sh" DRY_RUN=1 HEARTBEAT="$ROOT/hb" LOG="$ROOT/log" NOTIFY_STATE="$ROOT/notify-state" DISCORD_SEND="$ROOT/should-not-exist" bash "$SCRIPT" 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] && ok "rc=143 → 판정 불가(2)" || bad "rc=$rc 로 나갔다" "$out"
 grep -q "시그널 15" <<<"$out" && ok "  → 시그널 번호를 계산해서 준다(143-128)" || bad "  시그널 번호가 없다" "$out"
 
@@ -161,10 +172,6 @@ echo "⑦ DRY_RUN 은 전송하지 않는다"
 [ ! -e "$ROOT/should-not-exist" ] && ok "discord-send 미호출" || bad "전송이 일어났다"
 
 echo
-echo "  통과 $pass · 실패 $fail"
-[ "$fail" -eq 0 ]
-
-echo
 echo "🔴 같은 말을 매시간 반복하지 않는다 — 알림은 **사실이 아니라 변화**로 (2026-07-29, 룬드 지적)"
 # 🔑 실사고: 이 래퍼가 **하루 30건**을 보냈다(매시 :15, 전부 동일).
 #   내용은 *"코어가 2커밋 뒤처졌다"* 인데 그건 **승인 대기로 일부러 안 당기는 상태**였다.
@@ -219,6 +226,29 @@ no_state
 mkfake 1 "DRIFT: repo_behind=2커밋 · process_behind=0파일 (aaa → bbb)"; run
 printf 'garbage\n' > "$ROOT/notify-state"; run
 grep -q "코어 드리프트" <<<"$out" && ok "손상된 상태 파일 → 알린다(fail-open)" || bad "손상 시 침묵" "${out:-<조용>}"
+
+echo
+echo "🔴 격리 — 모든 호출부가 상태 seam 을 넘긴다 (구조 검사):"
+# 🔑 아래 실물 대조는 **구멍이 있다**: 실물 파일이 원래 없으면 *지워도* 안 걸린다.
+#   (실측 2026-07-29: seam 을 뺀 변이가 rc=0 경로로 `rm -f` 만 하고 지나가 초록이었다)
+#   ⇒ 성질을 **구조로** 잠근다 — 호출부마다 seam 이 붙어 있는지 직접 센다.
+leak="$(grep -n 'bash "\$SCRIPT"' "$0" | while IFS=: read -r ln _; do
+    start=$(( ln - 4 )); [ "$start" -lt 1 ] && start=1
+    sed -n "${start},${ln}p" "$0" | grep -q 'NOTIFY_STATE=' || printf '%s ' "$ln"
+done)"
+if [ -z "$leak" ]; then
+  ok "$(grep -c 'bash "\$SCRIPT"' "$0")개 호출부 전부 NOTIFY_STATE 를 넘긴다"
+else
+  bad "상태 seam 이 빠진 호출부가 있다 — 실물 logs/ 를 건드린다" "줄: $leak"
+fi
+
+echo "🔴 시험이 실물 상태 파일을 건드리지 않았다 (실물 대조):"
+if [ "$(real_sig)" = "$REAL_BEFORE" ]; then
+  ok "실물 상태($REAL_STATE)가 그대로다"
+else
+  bad "시험이 실물 상태를 바꿨다 — 호출부에 NOTIFY_STATE seam 이 빠졌다" \
+      "전: $REAL_BEFORE / 후: $(real_sig)"
+fi
 
 echo
 echo "  통과 $pass · 실패 $fail"
