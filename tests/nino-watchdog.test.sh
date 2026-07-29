@@ -237,9 +237,27 @@ make_tmux 0
 
 echo ""
 echo "🔴 이식성 — 상대 봇(macOS·bash 3.2·BSD)이 이 시험을 셀 수 있어야 한다:"
-gnu=$(grep -c 'date -u -d' "$0")
-[[ "$gnu" -le 3 ]] && ok "GNU 전용 date -d 는 iso_off 안에만 있다" \
-  || bad "GNU date -d" "iso_off 안에만" "${gnu}줄"
+# 🔴 상수로 세지 않는다 (룬드 #68 리뷰).
+#   원래 `grep -c 'date -u -d' "$0"` 로 세고 `-le 3` 으로 판정했는데, 그 3 중 하나가
+#   **검사 코드 자신**이었다(패턴 문자열이 파일 안에 있다). 검사 코드를 리팩터하면
+#   실사용이 그대로여도 카운트가 흔들린다 — 오늘 코어에서 잡은 *계측 상수* 형태이자,
+#   *검사기가 자기를 센다* 의 네 번째 사례다.
+#   ⇒ 개수가 아니라 **구조**를 본다: iso_off 밖에 있으면 몇 개든 빨간불.
+gnu=$(python3 - "$0" <<'PYEOF'
+import re, sys
+src = open(sys.argv[1]).read()
+src = re.sub(r"<<'PYEOF'.*?^PYEOF", "", src, flags=re.S | re.M)   # 검사기를 대상에서 뺀다
+m = re.search(r'^iso_off\(\)\s*\{.*?^\}', src, re.S | re.M)
+if not m:
+    print("iso_off 헬퍼가 없다"); raise SystemExit
+outside = src.replace(m.group(0), "")
+outside = "\n".join(l for l in outside.splitlines() if not l.lstrip().startswith("#"))
+n = len(re.findall(r'date\s+-u\s+-d', outside))
+print(f"iso_off 밖에서 {n}곳" if n else "")
+PYEOF
+)
+[[ -z "$gnu" ]] && ok "GNU 전용 date -d 는 iso_off 안에만 있다" \
+  || bad "GNU date -d" "iso_off 안에만" "$gnu"
 
 echo ""
 echo "🔴 러너 계약 — 예상 못 한 stderr 는 실패다 (룬드 제안 2026-07-29):"
