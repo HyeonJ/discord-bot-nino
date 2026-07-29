@@ -28,15 +28,34 @@ WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK/logs" "$WORK/scripts" "$WORK/src" "$WORK/bin"
 
 # 🔴 GNU/BSD 양쪽 — 상대 봇(macOS)이 이 시험을 셀 수 있어야 한다. ref_bash_portability_32
+# 🔴 `+` 도 벗겨야 한다 (2026-07-29, 룬드가 `#78` 리뷰에서 발견):
+#   `-` 만 벗기면 `iso_off "+600"` → `date -v"++600"M` → **BSD 에서 빈 문자열**.
+#   그러면 픽스처의 타임스탬프가 빈 값이 되고, 파싱 불가 = 판정 불가로 접혀
+#   **미래 시각 시험이 가드가 있든 없든 초록**이 된다(룬드 실측: ② 변이 0실패).
+#   ⇒ 헬퍼가 조용히 비면 그 위의 시험이 통째로 죽는다. 아래 자체 검사가 그걸 시끄럽게 만든다.
 iso_off() {   # $1 = 분(음수=과거, 양수=미래)
   if date -u -d "1 minute ago" +%Y >/dev/null 2>&1; then
     date -u -d "$1 minutes" +%Y-%m-%dT%H:%M:%S.000Z
   else
     sign=+; n=$1
-    case "$n" in -*) sign=-; n=${n#-} ;; esac
+    case "$n" in -*) sign=-; n=${n#-} ;; +*) n=${n#+} ;; esac
     date -u -v"${sign}${n}"M +%Y-%m-%dT%H:%M:%S.000Z
   fi
 }
+
+# 🔴 픽스처 헬퍼 자체 검사 — **이게 조용히 비면 아래 시험이 전부 죽는다.**
+#   룬드 기계에서 미래 시각 변이가 0실패로 나온 게 이 자리였다(구현이 아니라 헬퍼가 원인).
+#   빈 값은 "시각이 아님"으로 접혀 **판정 불가 = 알림 발송**이 되고, 그 알림이 시험을 초록으로 만든다.
+#   ⇒ 무음이 "없음"을 뜻하려면 실패가 시끄러워야 한다. 여기서 시끄럽게 만든다.
+echo "🔴 픽스처 헬퍼 — 시각을 못 만들면 그 위 시험은 아무것도 안 잰다:"
+for _a in -600 -1 60 "+600"; do
+  _v="$(iso_off "$_a" 2>/dev/null)"
+  case "$_v" in
+    ????-??-??T??:??:??.000Z) ok "iso_off $_a → $_v" ;;
+    *) bad "iso_off $_a" "ISO 시각(...Z)" "${_v:-<빈 문자열>}" ;;
+  esac
+done
+echo ""
 
 cp "$WD" "$WORK/scripts/"
 # 재시작 스크립트는 **불려선 안 되는** 것들이다. 불리면 흔적이 남게 한다.
@@ -279,6 +298,77 @@ out="$(run_wd)"
 make_history Tim   # 🔴 상태 복구 — 위에서 0건 스텁으로 바꿨다. 안 되돌리면 뒤 시험이 전부 QUIET 로 샌다
 
 echo ""
+echo "🔴 활동 축 두 번째 원천 — 세션 기록(jsonl) (2026-07-29 룬드 실오탐 #2 회귀):"
+# 🔴 왜 원천이 둘인가:
+#   훅은 **도구를 부를 때만** 찍는다. 그래서 *도구를 하나도 안 부르는 긴 턴*(순수 생성)은
+#   활동 파일이 안 갱신되어 여전히 죽어 보인다 — 룬드가 오늘 21:21 에 이걸로 두 번째 오탐을 맞았다
+#   (61분 턴 → "산출 정지" 발송 → 5분 뒤 재개). 훅을 하나 더 다는 길도 있었지만
+#   **세션 기록(jsonl)에 턴 시작이 이미 남는다**(실측 21:53: 턴이 도는 중에 user 레코드가 먼저 flush).
+#   ⇒ 새 훅 없이 덮는다. 덤으로 위 계약("훅이 죽으면 억제가 통째로 사라진다")의 약점도 준다 —
+#     jsonl 은 내 훅이 아니라 Claude Code 가 쓰므로 훅이 죽어도 한 원천이 남는다.
+SESSD="$WORK/sessions"
+set_session() {   # $1 = 분 전
+  rm -rf "$SESSD"; mkdir -p "$SESSD"
+  printf '{"type":"user","timestamp":"%s","message":{"content":"안녕"}}\n' "$(iso_off "-$1")" > "$SESSD/s.jsonl"
+}
+no_session() { rm -rf "$SESSD"; }
+
+# 🔑 이 시험이 이 PR 의 이유다 — 도구를 **하나도 안 부른** 긴 턴.
+reset; set_hb 120; make_history Tim; no_activity; set_session 1
+out="$(run_wd)"
+[[ -z "$out" ]] && ok "🔑 도구를 안 불러도 세션 기록이 신선하면 안 부른다(룬드 21:21 오탐)" \
+  || bad "도구 없는 긴 턴" "<없음>" "$out"
+
+# 활동 파일이 **낡았어도** 세션 기록이 신선하면 억제된다 — 둘 중 최신을 쓴다.
+reset; set_hb 120; make_history Tim; set_activity 120; set_session 1
+out="$(run_wd)"
+[[ -z "$out" ]] && ok "둘 중 더 최근 것을 쓴다(활동 2시간 전 · 기록 1분 전 → 억제)" \
+  || bad "최신 우선" "<없음>" "$out"
+
+# 반대 방향도 성립해야 한다 — 훅만 살아 있고 기록이 낡은 경우.
+reset; set_hb 120; make_history Tim; set_activity 1; set_session 120
+out="$(run_wd)"
+[[ -z "$out" ]] && ok "반대도 성립한다(활동 1분 전 · 기록 2시간 전 → 억제)" \
+  || bad "최신 우선(역방향)" "<없음>" "$out"
+
+# 🔴 **진짜 정지**는 여전히 부른다 — 원천을 늘렸다고 감시가 꺼지면 안 된다.
+reset; set_hb 120; make_history Tim; set_activity 120; set_session 120
+out="$(run_wd)"
+[[ -n "$out" ]] && ok "세 신호가 모두 멈췄으면 부른다(진짜 정지)" || bad "진짜 정지" "알림" "<없음>"
+
+# 🟡 둘 다 없어야 비로소 판정 불가다. 하나만 없는 건 판정 불가가 아니다.
+reset; set_hb 120; make_history Tim; no_activity; no_session
+out="$(run_wd)"
+[[ -n "$out" ]] && ok "두 원천이 다 없으면 판정 불가 → 이전 동작(부른다)" || bad "둘 다 부재" "알림" "<없음>"
+grep -q "ACTIVITY-UNKNOWN:" "$WORK/logs/watchdog.log" 2>/dev/null \
+  && ok "둘 다 부재가 로그에 남는다" || bad "부재 로그" "ACTIVITY-UNKNOWN:" "$(cat "$WORK/logs/watchdog.log" 2>/dev/null)"
+
+# 🔴 억제기 전용 계약은 원천이 늘어도 그대로다 — 기록이 멈췄다는 사실만으로 부르지 않는다.
+reset; set_hb 1; make_history Tim; no_activity; set_session 120
+out="$(run_wd)"
+[[ -z "$out" ]] && ok "🔑 하트비트가 신선하면 기록이 멈춰 있어도 안 부른다(억제기 전용 유지)" \
+  || bad "기록 단독 트리거 금지" "<없음>" "$out"
+
+# 🔴 미래 시각은 억제에 못 쓴다 — 깨진 값 하나가 감시를 **영구히** 꺼버리는 자리다.
+#   (incoming_since 에서 '조회 실패가 0건이 되어 조용히 눈이 먼' 것과 같은 형태)
+reset; set_hb 120; make_history Tim; no_activity
+rm -rf "$SESSD"; mkdir -p "$SESSD"
+printf '{"type":"user","timestamp":"%s","message":{"content":"미래"}}\n' "$(iso_off "+600")" > "$SESSD/s.jsonl"
+out="$(run_wd)"
+[[ -n "$out" ]] && ok "미래 타임스탬프는 무시한다(깨진 값이 감시를 끄지 못한다)" \
+  || bad "미래 시각 무시" "알림" "<없음>"
+
+# 깨진 줄이 섞여 있어도 성한 줄은 읽는다 — 기록은 append 중에 잘린 줄이 남을 수 있다.
+reset; set_hb 120; make_history Tim; no_activity
+rm -rf "$SESSD"; mkdir -p "$SESSD"
+{ printf '{"type":"user","timestamp":"%s"}\n' "$(iso_off "-1")"; printf '{"type":"assist'; } > "$SESSD/s.jsonl"
+out="$(run_wd)"
+[[ -z "$out" ]] && ok "잘린 줄이 섞여도 성한 줄로 판정한다(append 중 꼬리 손상)" \
+  || bad "손상 줄 내성" "<없음>" "$out"
+
+no_session   # 🔴 상태 복구 — 안 지우면 뒤 인증 시험이 이 픽스처를 읽는다
+
+echo ""
 echo "🔴 활동 훅 계약 — 이 훅이 죽으면 억제가 통째로 사라진다:"
 HOOK="$REPO/hooks/session-activity.sh"
 HOOKWORK="$WORK/hookhome"; mkdir -p "$HOOKWORK"
@@ -424,7 +514,10 @@ reset; set_hb 120; set_activity 1; make_history Tim; make_sessions 5 0  # 긴 �
 out="$(run_wd)"
 [[ "$out" == *"로그인"* ]] && ok "🔑 긴 턴(WORKING)에도 인증 축은 돈다" \
   || bad "WORKING 경로 배치" "로그인 알림" "${out:-<없음>}"
-make_history Tim; make_sessions 0 0   # 상태 복구 — 뒤 시험이 인증 알림에 오염되지 않게
+# 🔴 상태 복구 — 뒤 시험이 인증 알림에 오염되지 않게. **시각(3번째 인자)까지 챙겨야 한다:**
+#   세션 기록은 이제 활동 축의 원천이라, 에러 0건이어도 레코드가 *신선하면* 침묵 알림이 억제된다.
+#   `make_sessions 0 0`(기본 5분 전)으로 두면 아래 백오프 시험 3개가 조용히 억제된다(실제로 밟았다).
+make_history Tim; make_sessions 0 0 600
 
 echo ""
 echo "🔴 cron 주기 실행이라 백오프가 **파일**에 남아야 한다 (룬드와 구조가 다른 지점):"
