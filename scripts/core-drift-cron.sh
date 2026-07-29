@@ -51,7 +51,23 @@ printf '%s' "$OUT" | tail -n +2 | sed 's/^ *//; s/^/    · /' >> "$LOG"
 printf '%s rc=%s\n' "$STAMP" "$RC" > "$HEARTBEAT"
 
 # 충족이면 여기서 끝 — 조용한 게 정상이고, 살아 있다는 증거는 하트비트가 댄다
-[ "$RC" -eq 0 ] && exit 0
+# 🔴 알림은 **사실이 아니라 변화**로 보낸다 (2026-07-29, 룬드 지적 · Darren 승인 M:x9mo)
+#   실사고: 이 래퍼가 **하루 30건**을 보냈다(매시 :15, 전부 동일 문구).
+#   내용은 *"2커밋 뒤처졌다"* 인데 그건 **승인 대기로 일부러 안 당기는 상태**였다.
+#   ⇒ 조치가 불가능한 구간에서 같은 말을 반복한 것이고, 그건 순수 소음이다.
+# 🔑 거짓/무의미 호출이 반복되면 사람이 알림을 끈다 — 그러면 진짜가 왔을 때 묻힌다.
+#   워치독 Check 4 에 이미 적어둔 논리인데 **이 파일에 옮겨 적용하지 않았다**(교훈은 파일 단위로 갇힌다).
+# 🔴 그리고 **급한 것과 안 급한 것이 안 갈렸다** — 30건 전부 `process_behind=0`(재시작 불필요)인데
+#   실행 파일이 바뀐 날에도 문구가 같았을 것이다. ⇒ 아래 FORCE 가 그 자리를 가른다.
+NOTIFY_STATE="${NOTIFY_STATE:-$BOT_DIR/logs/core-drift-notify-state}"
+RENOTIFY_AFTER="${RENOTIFY_AFTER:-43200}"   # 12시간 — 같은 상태여도 이만큼 지나면 한 번 더 부른다
+                                            # 🔑 **영영 잊지는 않는다.** 순수 침묵은 조치를 영원히 미룬다.
+
+# 해소되면 상태를 지운다 — 재발했을 때 **즉시** 부를 수 있어야 한다
+if [ "$RC" -eq 0 ]; then
+    rm -f "$NOTIFY_STATE"
+    exit 0
+fi
 
 if [ "$RC" -eq 1 ]; then
     HEAD="🔴 코어 드리프트 — 조치 필요"
@@ -87,6 +103,39 @@ MSG="$HEAD
 \`\`\`
 $OUT
 \`\`\`"
+
+# ── 억제 판단 ─────────────────────────────────────────────────────────────
+# 🔑 **억제하는 것은 알림뿐이다.** 종료코드(OUT_RC)는 그대로 나간다 —
+#   조용해졌다고 판정이 바뀐 게 아니다. cron 이 rc 로 상태를 읽는 걸 망가뜨리면 안 된다.
+NOW="$(date +%s)"
+SIG="$RC|$(printf '%s' "$OUT" | md5sum 2>/dev/null | cut -c1-12)"
+
+# 🔴 **실행 파일이 바뀌었으면 억제하지 않는다** — 그건 재시작이 필요한 상태다.
+#   억제를 넣을 때 제일 위험한 실패 모드가 **급한 것까지 같이 잠기는 것**이다(룬드 리뷰 요청).
+PROC_BEHIND="$(printf '%s' "$OUT" | sed -n 's/.*process_behind=\([0-9]\{1,\}\).*/\1/p' | head -1)"
+FORCE=0
+case "${PROC_BEHIND:-}" in
+    ''|0) ;;                 # 0 이거나 못 읽었으면 평소 규칙
+    *)    FORCE=1 ;;         # 1 이상 = 런타임이 어긋났다 = 매번 부른다
+esac
+# 🔑 판정 불가(rc≠1)도 억제하지 않는다 — 그건 **검사기가 못 돈 것**이라
+#   "같은 상태가 이어진다" 로 접으면 죽은 검사가 조용해진다.
+[ "$RC" -eq 1 ] || FORCE=1
+
+if [ "$FORCE" -eq 0 ]; then
+    PREV_SIG=""; PREV_AT=0
+    # 🟡 못 읽거나 깨졌으면 **부르는 쪽**으로 간다 — 못 부른 사고가 헛부름보다 비싸다.
+    if [ -r "$NOTIFY_STATE" ]; then
+        read -r PREV_SIG PREV_AT < "$NOTIFY_STATE" 2>/dev/null || { PREV_SIG=""; PREV_AT=0; }
+        case "${PREV_AT:-}" in ''|*[!0-9]*) PREV_SIG=""; PREV_AT=0 ;; esac
+    fi
+    if [ -n "$PREV_SIG" ] && [ "$PREV_SIG" = "$SIG" ] \
+       && [ "$(( NOW - PREV_AT ))" -lt "$RENOTIFY_AFTER" ]; then
+        # 같은 상태가 이어지는 중 — 로그엔 이미 남았다(위). 알림만 접는다.
+        exit "$OUT_RC"
+    fi
+fi
+printf '%s %s\n' "$SIG" "$NOW" > "$NOTIFY_STATE"
 
 if [ "$DRY_RUN" = "1" ]; then
     printf '%s\n' "$MSG"

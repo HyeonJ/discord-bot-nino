@@ -26,10 +26,12 @@ mkfake() { printf '#!/usr/bin/env bash\necho "%s"\nexit %s\n' "$2" "$1" > "$ROOT
 
 run() {  # run  → stdout(DRY_RUN 이라 전송 대신 출력), 종료코드는 $rc 로
     out="$(BOT_DIR="$BOT" CHECK="$ROOT/check.sh" DRY_RUN=1 \
-        HEARTBEAT="$ROOT/hb" LOG="$ROOT/log" \
+        HEARTBEAT="$ROOT/hb" LOG="$ROOT/log" NOTIFY_STATE="$ROOT/notify-state" \
+        RENOTIFY_AFTER="${RENOTIFY_AFTER:-43200}" \
         DISCORD_SEND="$ROOT/should-not-exist" bash "$SCRIPT" 2>&1)"
     rc=$?
 }
+no_state() { rm -f "$ROOT/notify-state"; }
 
 echo "① 충족(rc=0) — 조용하다"
 mkfake 0 "OK: repo_behind=0 · process_behind=0"; run
@@ -161,3 +163,63 @@ echo "⑦ DRY_RUN 은 전송하지 않는다"
 echo
 echo "  통과 $pass · 실패 $fail"
 [ "$fail" -eq 0 ]
+
+echo
+echo "🔴 같은 말을 매시간 반복하지 않는다 — 알림은 **사실이 아니라 변화**로 (2026-07-29, 룬드 지적)"
+# 🔑 실사고: 이 래퍼가 **하루 30건**을 보냈다(매시 :15, 전부 동일).
+#   내용은 *"코어가 2커밋 뒤처졌다"* 인데 그건 **승인 대기로 일부러 안 당기는 상태**였다.
+#   거짓 호출이 반복되면 사람이 알림을 끈다 ⇒ 진짜가 왔을 때 묻힌다(워치독 #64 와 같은 논리).
+# 🔴 그리고 **급한 것과 안 급한 것이 안 갈렸다** — 30건 전부 process_behind=0(재시작 불필요)인데
+#   실행 파일이 바뀐 날에도 문구가 같았다. "이 값이 두 상태를 갈라주나" 에 걸린 자리.
+no_state
+mkfake 1 "DRIFT: repo_behind=2커밋 · process_behind=0파일 (aaa → bbb)"; run
+grep -q "코어 드리프트" <<<"$out" && ok "처음 본 드리프트는 알린다" || bad "첫 알림 없음" "$out"
+run
+[ -z "$out" ] && ok "같은 상태가 이어지면 **조용하다**" || bad "같은 상태 반복 알림" "$out"
+[ "$rc" -eq 1 ] && ok "조용해도 종료코드는 그대로 1 (억제는 알림만, 판정이 아니다)" || bad "종료코드 $rc"
+
+mkfake 1 "DRIFT: repo_behind=3커밋 · process_behind=0파일 (aaa → ccc)"; run
+grep -q "repo_behind=3커밋" <<<"$out" && ok "상태가 바뀌면 다시 알린다(2→3커밋)" || bad "변화를 못 알렸다" "$out"
+
+echo "  🔑 실행 파일이 바뀌면 = 재시작이 필요하다 = **매번 알린다**"
+no_state
+mkfake 1 "DRIFT: repo_behind=3커밋 · process_behind=2파일 (aaa → ccc)"; run
+grep -q "코어 드리프트" <<<"$out" && ok "process_behind>0 첫 알림" || bad "첫 알림 없음" "$out"
+run
+grep -q "코어 드리프트" <<<"$out" && ok "process_behind>0 는 같은 상태여도 **억제하지 않는다**" \
+  || bad "행동이 필요한 알림을 억제했다" "${out:-<조용>}"
+
+echo "  🔑 판정 불가(rc≠1)도 억제하지 않는다 — 검사기가 **못 돈 것**이라 접으면 죽은 검사가 조용해진다"
+# 변이 ②(`[ "$RC" -eq 1 ] || FORCE=1` 제거)가 안 물어서 추가했다.
+# 기존 rc=2 시험은 매번 **다른 서명**이라 억제 경로를 아예 안 지나갔다 — 같은 것을 두 번 돌려야 잡힌다.
+no_state
+mkfake 2 "UNKNOWN: 검사기가 못 돌았다"; run
+grep -q "판정 불가" <<<"$out" && ok "판정 불가 첫 알림" || bad "첫 알림 없음" "${out:-<조용>}"
+run
+grep -q "판정 불가" <<<"$out" && ok "판정 불가는 **반복돼도 억제하지 않는다**" \
+  || bad "죽은 검사가 조용해졌다" "${out:-<조용>}"
+
+echo "  🟡 해소되면 상태를 지운다 — 재발 시 즉시 부를 수 있게"
+no_state
+mkfake 1 "DRIFT: repo_behind=2커밋 · process_behind=0파일 (aaa → bbb)"; run
+mkfake 0 "OK: repo_behind=0 · process_behind=0"; run
+[ -z "$out" ] && ok "해소는 조용하다(rc=0)" || bad "해소인데 떠들었다" "$out"
+mkfake 1 "DRIFT: repo_behind=2커밋 · process_behind=0파일 (aaa → bbb)"; run
+grep -q "코어 드리프트" <<<"$out" && ok "해소 뒤 재발하면 **즉시** 알린다" || bad "재발을 놓쳤다" "${out:-<조용>}"
+
+echo "  🟡 오래 이어지면 다시 한 번 부른다 — 영영 잊지는 않는다"
+no_state
+mkfake 1 "DRIFT: repo_behind=2커밋 · process_behind=0파일 (aaa → bbb)"; run
+RENOTIFY_AFTER=0 run
+grep -q "코어 드리프트" <<<"$out" && ok "재알림 간격이 지나면 같은 상태여도 부른다" \
+  || bad "영영 조용해졌다" "${out:-<조용>}"
+
+echo "  🟡 상태 파일이 깨졌으면 **부르는 쪽**으로 — 못 부른 사고가 헛부름보다 비싸다"
+no_state
+mkfake 1 "DRIFT: repo_behind=2커밋 · process_behind=0파일 (aaa → bbb)"; run
+printf 'garbage\n' > "$ROOT/notify-state"; run
+grep -q "코어 드리프트" <<<"$out" && ok "손상된 상태 파일 → 알린다(fail-open)" || bad "손상 시 침묵" "${out:-<조용>}"
+
+echo
+echo "  통과 $pass · 실패 $fail"
+[[ "$fail" -eq 0 ]]
