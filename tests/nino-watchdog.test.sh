@@ -69,8 +69,11 @@ STATE="$WORK/logs/watchdog-silence-next"
 
 run_wd() {   # 환경 초기화 후 워치독 1회 실행 (cron 한 tick)
   : > "$WORK/sent.txt"; : > "$WORK/restarted.txt"
+  # 🔴 stderr 를 삼키지 않는다. 삼켰더니 2026-07-29 에 룬드가 9건 빨간 이유를
+  #    **화면에서 볼 수 없었다** — 스크립트가 13행 `source` 에서 죽고 있었는데
+  #    stderr·카운터·로그 셋 다 신호가 없었다. 러너가 stderr 를 봐야 미지가 잡힌다.
   WORK_MARK="$WORK" PATH="$WORK/bin:$PATH" NINO_SILENCE_LIMIT="${LIMIT:-3600}" \
-    bash "$WORK/scripts/nino-watchdog.sh" >/dev/null 2>&1
+    bash "$WORK/scripts/nino-watchdog.sh" >/dev/null 2>"$WORK/stderr.txt"
   cat "$WORK/sent.txt" 2>/dev/null
 }
 set_hb()  { iso_off "-$1" > "$HB"; }        # $1 = 분 전
@@ -168,6 +171,32 @@ echo "🔴 이식성 — 상대 봇(macOS·bash 3.2·BSD)이 이 시험을 셀 �
 gnu=$(grep -c 'date -u -d' "$0")
 [[ "$gnu" -le 3 ]] && ok "GNU 전용 date -d 는 iso_off 안에만 있다" \
   || bad "GNU date -d" "iso_off 안에만" "${gnu}줄"
+
+echo ""
+echo "🔴 러너 계약 — 예상 못 한 stderr 는 실패다 (룬드 제안 2026-07-29):"
+# 가드(항목 목록)는 **내가 아는 함정**만 잡는다. stderr 감시는 아직 모르는 축까지 잡는다.
+# 실제로 이 사고(source + || true)는 가드로 못 잡혔다 — `source`·`|| true` 는 정상 문법이라서.
+reset; set_hb 120; run_wd >/dev/null
+if [ -s "$WORK/stderr.txt" ]; then
+  bad "워치독이 stderr 를 내지 않는다" "빈 stderr" "$(head -c 200 "$WORK/stderr.txt")"
+else
+  ok "워치독이 stderr 를 내지 않는다(command not found·unbound 를 조용히 지나치지 않는다)"
+fi
+
+echo ""
+echo "🔴 회귀 잠금 — set -e 아래 \`source … || true\` 는 bash 3.2 에서 죽는다:"
+# 🔴 이 고침은 **내 기계에서 검증이 안 된다.** 버그가 3.2 에서만 나타나서
+#    고치기 전후가 5.x 에선 똑같이 통과한다(실측: 5.2 는 after 가 나오고 rc=0).
+#    ⇒ 동작 시험으로는 못 잠그니 **패턴을 정적으로** 잠근다. 실증은 룬드 재측정에 의존한다.
+# 🔸 룬드는 "가드로 못 잡는다"고 했는데(source·|| true 가 정상 문법이라) 맞다 —
+#    다만 **set -e + source + || true 라는 조합**은 잡힌다. 넓은 그물은 위 stderr 감시가 맡고,
+#    이건 *이미 두 번 사고 난 이 줄*만 좁게 잠그는 용도다.
+if grep -qE '^[[:space:]]*set -[a-z]*e' "$REPO/scripts/nino-watchdog.sh" \
+   && grep -qE '^[[:space:]]*(source|\.)[[:space:]].*\|\|[[:space:]]*true' "$REPO/scripts/nino-watchdog.sh"; then
+  bad "set -e + source … || true 조합이 없다" "없음" "있음 — bash 3.2 에서 || true 가 source 실패를 못 잡는다"
+else
+  ok "set -e + source … || true 조합이 없다([ -f x ] && source x 로 쓸 것)"
+fi
 
 echo ""
 echo "결과: $pass pass, $fail fail"

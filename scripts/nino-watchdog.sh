@@ -10,7 +10,12 @@ DISCORD_SEND="$BOT_DIR/src/discord-send"
 # jq 미설치 + set -e 조합으로 워치독이 여기서 죽어 자동 재시작이 동작하지 않았다(2026-07-25 발견).
 ALERT_CHANNEL="현인-업무"
 
-source "$BOT_DIR/.env" 2>/dev/null || true
+# 🔴 `source … || true` 로 쓰면 **bash 3.2 에서 `|| true` 가 source 실패를 못 잡고 죽는다.**
+#    (룬드 맥 실측 2026-07-29 · 니노 bash 5.2 대조 확인 — 5.x 는 안 죽는다 = 버전 차이)
+#    죽으면 **실패 신호가 셋 다 없다**: stderr 없음 · 종료코드만 1 · log() 정의 전이라 로그도 없음.
+#    ⚠️ 같은 줄에서 **같은 클래스가 두 번째다** — 위 10행 주석의 `jq` 건도 여기였다.
+#    조건문은 `set -e` 면제라 이 형태가 정본. (이 줄이 파일 마지막이면 rc 가 1이 되니 주의)
+[ -f "$BOT_DIR/.env" ] && source "$BOT_DIR/.env"
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG"; }
 
