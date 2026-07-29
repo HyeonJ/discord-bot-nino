@@ -80,9 +80,31 @@ fi
 #     세면 cron 이 앵커를 오염시키던 #63 과 같은 함정이 판정 쪽에서 재현된다.
 SILENCE_LIMIT=${NINO_SILENCE_LIMIT:-3600}          # 기본 60분
 HEARTBEAT_FILE="$BOT_DIR/logs/session-heartbeat-utc"
+# 🔴 활동 축 — 도구 호출마다 갱신(PostToolUse 훅). 하트비트와 **파일이 달라야 한다**:
+#   하트비트는 재시작 따라잡기 앵커라 의미를 바꾸면 catchup 이 깨진다(#63).
+#   자세한 배경·계약은 hooks/session-activity.sh 머리말.
+ACTIVITY_FILE="$BOT_DIR/logs/session-activity-utc"
 SILENCE_STATE="$BOT_DIR/logs/watchdog-silence-next"
 # 🔴 절대경로로 박으면 **시험이 실물 DB 를 읽는다.** 주입 seam 을 둔다(기본값은 실물과 동일).
 HISTORY_CLI="${NINO_HISTORY_CLI:-$HOME/.local/bin/yaksu-history}"
+
+# 마지막 도구 호출로부터 몇 초 지났나. 읽을 수 없거나 파싱 불가면 "unknown".
+# 🔴 부재·손상은 **정지가 아니라 판정 불가**다. 이 값으로 알림을 *막을 수만* 있고
+#   이 값 때문에 알림이 *나가지는* 않는다(억제기 전용 — 부르는 쪽은 하트비트가 정한다).
+activity_age() {
+    [ -r "$ACTIVITY_FILE" ] || { printf 'unknown'; return 0; }
+    local e
+    e=$(python3 -c '
+import sys, datetime
+try:
+    s = open(sys.argv[1]).read().strip()
+    print(int(datetime.datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp()))
+except Exception:
+    pass
+' "$ACTIVITY_FILE" 2>/dev/null || true)
+    case "${e:-}" in ''|*[!0-9]*) printf 'unknown'; return 0 ;; esac
+    printf '%s' "$(( $(date +%s) - e ))"
+}
 
 # 하트비트 이후 **니노 외** 작성자의 메시지 건수. 셀 수 없으면 "unknown".
 incoming_since() {
@@ -144,6 +166,29 @@ except Exception:
             # 🟡 셀 수 없으면(CLI 부재·실패) **부르는 쪽으로 넘어간다.**
             #   못 부른 사고(9시간 50분)가 헛부름보다 비싸고, 조치가 "화면 봐줘"라 무해하다.
             #   대신 확인 못 했다는 걸 본문에 적어 사람이 판단할 수 있게 한다.
+            # 🔴 활동 축 — **긴 턴을 먹통으로 읽지 않는다** (2026-07-29 룬드 실오탐 회귀)
+            #   하트비트는 턴이 *끝날 때만* 찍히므로, 한 턴이 임계를 넘으면
+            #   **가장 활발히 일할 때가 가장 죽어 보인다.** 도구 호출이 최근에 있었다면
+            #   세션은 응답을 만들고 있는 중이다 — 사람을 부를 일이 아니다.
+            #   ⚠️ 억제 전용: 활동이 멈췄다는 사실만으로는 여기서 아무것도 안 한다.
+            ACT_AGE=$(activity_age)
+            case "$ACT_AGE" in
+                unknown)
+                    # 부재·손상 = 판정 불가. 억제를 **못 할 뿐** 이전 동작으로 돌아간다.
+                    # 감시 구멍이 조용히 생기지 않게 로그에 남기고, 본문에도 적는다.
+                    log "ACTIVITY-UNKNOWN: 활동 파일($ACTIVITY_FILE)을 못 읽었다 — 긴 턴인지 가릴 수 없다. 훅(PostToolUse) 설치 확인 필요."
+                    ACTIVITY_NOTE="
+⚠️ 활동 축을 확인 못 했어(도구 호출 기록이 없어) — 긴 작업 중인 건지 가릴 수가 없었어."
+                    ;;
+                *)
+                    if [ "$ACT_AGE" -lt "$SILENCE_LIMIT" ]; then
+                        log "WORKING: 턴 종료 ${SILENT}초 전이지만 ${ACT_AGE}초 전에 도구를 불렀다 — 긴 턴이지 정지가 아니다."
+                        exit 0
+                    fi
+                    ACTIVITY_NOTE="
+도구 호출도 $((ACT_AGE / 60))분째 없어 — 긴 작업 중인 것도 아니야."
+                    ;;
+            esac
             if [ "$INCOMING" = "unknown" ]; then
                 INCOMING_NOTE="
 ⚠️ 수신 건수를 확인 못 했어(yaksu-history 를 못 돌렸어) — 그냥 조용한 시간대일 수도 있어."
@@ -152,9 +197,10 @@ except Exception:
 그 사이 **${INCOMING}건이 들어왔는데 하나도 못 받았어** — 조용한 시간대가 아니야."
             fi
             if [ "$SILENT" -ge "$NEXT" ]; then
-                log "SILENT: 세션이 살아 있는데 ${SILENT}초($((SILENT / 60))분) 동안 턴을 못 끝냈다(수신 ${INCOMING}건). 사람 호출(복구 안 함)."
+                log "SILENT: 세션이 살아 있는데 ${SILENT}초($((SILENT / 60))분) 동안 턴을 못 끝냈다(수신 ${INCOMING}건 · 활동 ${ACT_AGE}). 사람 호출(복구 안 함)."
                 $DISCORD_SEND "$ALERT_CHANNEL" "<@353914579929268226> 🔴 니노가 **살아 있는데 $((SILENT / 60))분째 응답을 못 만들고 있어.** tmux랑 프로세스는 멀쩡해서 기존 감시엔 안 걸려 — 인증 만료(401)나 사용량 소진일 수 있어.
 $INCOMING_NOTE
+$ACTIVITY_NOTE
 
 확인: WSL에서 \`tmux attach -t nino\` 로 화면 봐줘. 401이면 로그인이 필요한데 그건 내가 못 해(브라우저 인증이라).
 

@@ -38,6 +38,17 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /home/bpx27/discord-bot-nino/hooks/session-activity.sh"
+          }
+        ]
+      }
     ]
   },
   "enabledPlugins": {
