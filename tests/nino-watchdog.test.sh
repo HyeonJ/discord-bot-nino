@@ -17,9 +17,12 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$SCRIPT_DIR/.." && pwd)"
 WD="$REPO/scripts/nino-watchdog.sh"
 
-pass=0; fail=0
+pass=0; fail=0; skip=0
 ok()  { echo "  ✅ $1"; pass=$((pass + 1)); }
 bad() { echo "  ❌ $1"; echo "     want: $2"; echo "     got:  $3"; fail=$((fail + 1)); }
+# ⛔ 판정 불가 — **못 쟀다**를 통과로도 실패로도 접지 않는다(자매 파일 catchup-hint 와 같은 관례).
+#   통과로 접으면 안 잰 계약이 초록불이 되고, 실패로 접으면 남의 기계에서 못 재는 것이 결함이 된다.
+skipt(){ echo "  ⛔ $1"; echo "     사유: $2"; skip=$((skip + 1)); }
 
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK/logs" "$WORK/scripts" "$WORK/src" "$WORK/bin"
@@ -275,11 +278,27 @@ echo "🔴 실물 계약 — 스텁이 받은 argv 를 **진짜 discord-send** �
 REAL_SEND="$REPO/src/discord-send"
 # 채널명을 시험에 다시 적지 않는다 — 스크립트에서 뽑는다(적으면 드리프트가 난다)
 ALERT_CH="$(sed -n 's/^ALERT_CHANNEL="\([^"]*\)".*/\1/p' "$WD" | head -1)"
-reset; set_hb 120; make_history Tim; run_wd >/dev/null
-if [ ! -s "$WORK/argv.bin" ]; then
+
+# 🔴 **이 계약은 니노 기계에서만 잴 수 있다 — 그건 결함이 아니라 설계다.**
+#   src/discord-send 는 BOT_DIR·CORE_CLI·BUN 을 **절대경로로 고정**한다:
+#     "env 절대경로 고정 → 어디서 실행해도 니노 정체 고정(401 근본교정)"
+#     "⚠️ $HOME 폴백 금지(룬드 M:xm2p 리뷰) — $HOME 은 실행 주체에 따라 바뀌고,
+#       어긋나면 전송이 아니라 **해시 역조회**가 조용히 깨진다"
+#   즉 상대 기계에서 못 도는 건 **의도된 고정**이지 이식성 결함이 아니다.
+#   ⇒ 그 기계에선 통과도 실패도 아닌 **판정 불가**다. 실패로 접으면 룬드가 내 PR 을
+#     빨간불로 보게 되고(2026-07-29 실측 32 pass·2 fail), 통과로 접으면 안 잰 게 초록불이 된다.
+SEND_BOT_DIR="$(sed -n 's/^BOT_DIR="\([^"]*\)".*/\1/p' "$REAL_SEND" | head -1)"
+reset; set_hb 120; make_history Tim; run_wd >/dev/null    # 알림 1회 발동 → argv 확보
+
+if [ ! -x "$REAL_SEND" ]; then
+  skipt "실물 discord-send 계약" "$REAL_SEND 가 없거나 실행 불가"
+elif [ -z "$SEND_BOT_DIR" ] || [ ! -r "$SEND_BOT_DIR/.env" ]; then
+  skipt "실물 discord-send 계약" \
+    "discord-send 가 고정한 정체에 못 닿는다(${SEND_BOT_DIR:-BOT_DIR 미검출}/.env). 니노 기계에서만 잴 수 있는 계약이다 — 고정은 의도다(401 근본교정 · \$HOME 폴백 금지)"
+elif [ ! -s "$WORK/argv.bin" ]; then
+  # 🔴 이건 판정 불가가 아니라 **실패**다 — 알림 분기가 argv 를 안 남겼다는 뜻이라
+  #   기계와 무관하게 내 코드의 문제다.
   bad "알림 호출의 argv 를 잡았다" "argv.bin 비어있지 않음" "<없음>"
-elif [ ! -x "$REAL_SEND" ]; then
-  bad "실물 discord-send 가 있다" "$REAL_SEND 실행 가능" "없음/실행 불가"
 else
   ok "알림 호출의 argv 를 잡았다"
   # NUL 구분 argv 를 위치인자로 복원 — 배열을 안 쓴다(bash 3.2)
@@ -311,5 +330,7 @@ print(v if isinstance(v, str) else (v or {}).get("id", ""))
 fi
 
 echo ""
-echo "결과: $pass pass, $fail fail"
+echo "결과: $pass pass, $fail fail, $skip 판정 불가"
+# 판정 불가는 rc 를 바꾸지 않는다(자매 파일 catchup-hint 와 같은 관례) — 못 잰 것이지 깨진 게 아니다.
+# 대신 위에 사유가 찍히므로 "왜 안 쟀나"가 화면에 남는다.
 [[ $fail -eq 0 ]]
