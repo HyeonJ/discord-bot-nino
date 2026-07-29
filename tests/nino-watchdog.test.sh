@@ -17,9 +17,12 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$SCRIPT_DIR/.." && pwd)"
 WD="$REPO/scripts/nino-watchdog.sh"
 
-pass=0; fail=0
+pass=0; fail=0; skip=0
 ok()  { echo "  ✅ $1"; pass=$((pass + 1)); }
 bad() { echo "  ❌ $1"; echo "     want: $2"; echo "     got:  $3"; fail=$((fail + 1)); }
+# ⛔ 판정 불가 — **못 쟀다**를 통과로도 실패로도 접지 않는다(자매 파일 catchup-hint 와 같은 관례).
+#   통과로 접으면 안 잰 계약이 초록불이 되고, 실패로 접으면 남의 기계에서 못 재는 것이 결함이 된다.
+skipt(){ echo "  ⛔ $1"; echo "     사유: $2"; skip=$((skip + 1)); }
 
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK/logs" "$WORK/scripts" "$WORK/src" "$WORK/bin"
@@ -45,6 +48,9 @@ done
 cat > "$WORK/src/discord-send" <<'EOF'
 #!/bin/bash
 printf '%s\n' "$1|$2" >> "$WORK_MARK/sent.txt"
+# 🔴 **전체 argv 를 그대로 남긴다** — 아래 "실물 계약" 시험이 이걸 진짜 discord-send 에 재생한다.
+#   본문에 개행이 있어서 줄 단위로는 못 담는다 → NUL 구분.
+printf '%s\0' "$@" > "$WORK_MARK/argv.bin"
 exit 0
 EOF
 chmod +x "$WORK/src/discord-send"
@@ -231,9 +237,27 @@ make_tmux 0
 
 echo ""
 echo "🔴 이식성 — 상대 봇(macOS·bash 3.2·BSD)이 이 시험을 셀 수 있어야 한다:"
-gnu=$(grep -c 'date -u -d' "$0")
-[[ "$gnu" -le 3 ]] && ok "GNU 전용 date -d 는 iso_off 안에만 있다" \
-  || bad "GNU date -d" "iso_off 안에만" "${gnu}줄"
+# 🔴 상수로 세지 않는다 (룬드 #68 리뷰).
+#   원래 `grep -c 'date -u -d' "$0"` 로 세고 `-le 3` 으로 판정했는데, 그 3 중 하나가
+#   **검사 코드 자신**이었다(패턴 문자열이 파일 안에 있다). 검사 코드를 리팩터하면
+#   실사용이 그대로여도 카운트가 흔들린다 — 오늘 코어에서 잡은 *계측 상수* 형태이자,
+#   *검사기가 자기를 센다* 의 네 번째 사례다.
+#   ⇒ 개수가 아니라 **구조**를 본다: iso_off 밖에 있으면 몇 개든 빨간불.
+gnu=$(python3 - "$0" <<'PYEOF'
+import re, sys
+src = open(sys.argv[1]).read()
+src = re.sub(r"<<'PYEOF'.*?^PYEOF", "", src, flags=re.S | re.M)   # 검사기를 대상에서 뺀다
+m = re.search(r'^iso_off\(\)\s*\{.*?^\}', src, re.S | re.M)
+if not m:
+    print("iso_off 헬퍼가 없다"); raise SystemExit
+outside = src.replace(m.group(0), "")
+outside = "\n".join(l for l in outside.splitlines() if not l.lstrip().startswith("#"))
+n = len(re.findall(r'date\s+-u\s+-d', outside))
+print(f"iso_off 밖에서 {n}곳" if n else "")
+PYEOF
+)
+[[ -z "$gnu" ]] && ok "GNU 전용 date -d 는 iso_off 안에만 있다" \
+  || bad "GNU date -d" "iso_off 안에만" "$gnu"
 
 echo ""
 echo "🔴 러너 계약 — 예상 못 한 stderr 는 실패다 (룬드 제안 2026-07-29):"
@@ -262,5 +286,69 @@ else
 fi
 
 echo ""
-echo "결과: $pass pass, $fail fail"
+echo "🔴 실물 계약 — 스텁이 받은 argv 를 **진짜 discord-send** 에 재생한다:"
+# 🔑 위 시험들은 전부 **페이크**가 받았다. 페이크는 무슨 인자를 줘도 exit 0 이라
+#   "인자 순서가 맞나 · 채널이 해석되나"를 **하나도 못 잰다.**
+#   2026-07-29 실발동(Darren 승인 M:7jj6)으로 실물 도달은 확인했지만, 그건 손으로 만든
+#   일회성 셋업이라 **회귀가 안 된다** — 다음에 인자 계약이 바뀌면 아무도 모른다.
+#   ⇒ 스텁이 받은 **진짜 argv 를 그대로** 실물에 넘기고, `DISCORD_SEND_DRY_RUN=1` 로
+#     네트워크 없이 해석까지만 태운다. 인자를 시험이 다시 적지 않으므로 드리프트가 없다.
+REAL_SEND="$REPO/src/discord-send"
+# 채널명을 시험에 다시 적지 않는다 — 스크립트에서 뽑는다(적으면 드리프트가 난다)
+ALERT_CH="$(sed -n 's/^ALERT_CHANNEL="\([^"]*\)".*/\1/p' "$WD" | head -1)"
+
+# 🔴 **이 계약은 니노 기계에서만 잴 수 있다 — 그건 결함이 아니라 설계다.**
+#   src/discord-send 는 BOT_DIR·CORE_CLI·BUN 을 **절대경로로 고정**한다:
+#     "env 절대경로 고정 → 어디서 실행해도 니노 정체 고정(401 근본교정)"
+#     "⚠️ $HOME 폴백 금지(룬드 M:xm2p 리뷰) — $HOME 은 실행 주체에 따라 바뀌고,
+#       어긋나면 전송이 아니라 **해시 역조회**가 조용히 깨진다"
+#   즉 상대 기계에서 못 도는 건 **의도된 고정**이지 이식성 결함이 아니다.
+#   ⇒ 그 기계에선 통과도 실패도 아닌 **판정 불가**다. 실패로 접으면 룬드가 내 PR 을
+#     빨간불로 보게 되고(2026-07-29 실측 32 pass·2 fail), 통과로 접으면 안 잰 게 초록불이 된다.
+SEND_BOT_DIR="$(sed -n 's/^BOT_DIR="\([^"]*\)".*/\1/p' "$REAL_SEND" | head -1)"
+reset; set_hb 120; make_history Tim; run_wd >/dev/null    # 알림 1회 발동 → argv 확보
+
+if [ ! -x "$REAL_SEND" ]; then
+  skipt "실물 discord-send 계약" "$REAL_SEND 가 없거나 실행 불가"
+elif [ -z "$SEND_BOT_DIR" ] || [ ! -r "$SEND_BOT_DIR/.env" ]; then
+  skipt "실물 discord-send 계약" \
+    "discord-send 가 고정한 정체에 못 닿는다(${SEND_BOT_DIR:-BOT_DIR 미검출}/.env). 니노 기계에서만 잴 수 있는 계약이다 — 고정은 의도다(401 근본교정 · \$HOME 폴백 금지)"
+elif [ ! -s "$WORK/argv.bin" ]; then
+  # 🔴 이건 판정 불가가 아니라 **실패**다 — 알림 분기가 argv 를 안 남겼다는 뜻이라
+  #   기계와 무관하게 내 코드의 문제다.
+  bad "알림 호출의 argv 를 잡았다" "argv.bin 비어있지 않음" "<없음>"
+else
+  ok "알림 호출의 argv 를 잡았다"
+  # NUL 구분 argv 를 위치인자로 복원 — 배열을 안 쓴다(bash 3.2)
+  replay() {
+    set --
+    while IFS= read -r -d '' a; do set -- "$@" "$a"; done < "$WORK/argv.bin"
+    DISCORD_SEND_DRY_RUN=1 "$REAL_SEND" "$@" 2>&1
+  }
+  rp="$(replay)"; rp_rc=$?
+  [ "$rp_rc" -eq 0 ] && ok "실물 discord-send 가 이 argv 를 받아들인다(rc=0)" \
+    || bad "실물이 argv 를 받아들인다" "rc=0" "rc=$rp_rc · $rp"
+  # 🔴 "받아들였다"로 끝내지 않는다 — **의도한 채널로 갔나**까지 본다.
+  #   dry-run 은 해석된 채널 ID 를 찍는다: DRY_RUN POST /channels/<id>/messages
+  want_id="$(python3 -c '
+import json, sys
+m = json.load(open(sys.argv[1]))
+key = sys.argv[2]
+v = m.get(key)
+print(v if isinstance(v, str) else (v or {}).get("id", ""))
+' "$REPO/config/channel-map.json" "$ALERT_CH" 2>/dev/null || true)"
+  if [ -n "$want_id" ]; then
+    case "$rp" in
+      *"/channels/$want_id/"*) ok "의도한 채널($ALERT_CH=$want_id)로 해석된다" ;;
+      *) bad "의도한 채널로 해석된다" "/channels/$want_id/" "$rp" ;;
+    esac
+  else
+    bad "channel-map 에서 $ALERT_CH 를 찾았다" "채널 ID" "<없음>"
+  fi
+fi
+
+echo ""
+echo "결과: $pass pass, $fail fail, $skip 판정 불가"
+# 판정 불가는 rc 를 바꾸지 않는다(자매 파일 catchup-hint 와 같은 관례) — 못 잰 것이지 깨진 게 아니다.
+# 대신 위에 사유가 찍히므로 "왜 안 쟀나"가 화면에 남는다.
 [[ $fail -eq 0 ]]
