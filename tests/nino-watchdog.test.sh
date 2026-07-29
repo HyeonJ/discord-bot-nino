@@ -99,8 +99,11 @@ run_wd() {   # 환경 초기화 후 워치독 1회 실행 (cron 한 tick)
   # 🔴 stderr 를 삼키지 않는다. 삼켰더니 2026-07-29 에 룬드가 9건 빨간 이유를
   #    **화면에서 볼 수 없었다** — 스크립트가 13행 `source` 에서 죽고 있었는데
   #    stderr·카운터·로그 셋 다 신호가 없었다. 러너가 stderr 를 봐야 미지가 잡힌다.
+  # 🔴 세션 로그도 주입 seam 으로 — 안 그러면 시험이 **내 실제 대화 기록**을 읽어
+  #   그날 401 이 났는지에 따라 결과가 갈린다(= 시험이 아니라 관측).
   WORK_MARK="$WORK" PATH="$WORK/bin:$PATH" NINO_SILENCE_LIMIT="${LIMIT:-3600}" \
     NINO_HISTORY_CLI="$WORK/bin/yaksu-history" \
+    NINO_SESSION_LOG_DIR="$WORK/sessions" \
     bash "$WORK/scripts/nino-watchdog.sh" >/dev/null 2>"$WORK/stderr.txt"
   cat "$WORK/sent.txt" 2>/dev/null
 }
@@ -109,7 +112,9 @@ set_hb()  { iso_off "-$1" > "$HB"; }        # $1 = 분 전
 set_activity() { iso_off "-$1" > "$ACT"; }  # $1 = 분 전
 no_activity()  { rm -f "$ACT"; }            # 훅 미설치·초기 상태
 bad_activity() { printf 'not-a-timestamp\n' > "$ACT"; }
-reset()   { rm -f "$STATE" "$WORK/logs/watchdog.log"; no_activity; }
+# 🔴 인증 백오프도 지운다 — 안 지우면 백오프 시험이 건 30분 잠금이 **뒤 시험을 통째로 침묵시킨다**
+#   (실제로 밟았다: 배치 시험 2개가 구현이 아니라 이 상태 누수로 빨갰다)
+reset()   { rm -f "$STATE" "$WORK/logs/watchdog-auth-next" "$WORK/logs/watchdog.log"; no_activity; }
 
 make_tmux 0
 make_history Tim   # 기본은 "수신이 있었다" — 아래 침묵 케이스들은 전부 *먹통* 상황이다
@@ -272,6 +277,86 @@ if [[ -f "$HOOK" ]]; then
 else
   skipt "활동 훅 계약" "hooks/session-activity.sh 가 없다"
 fi
+
+echo ""
+echo "🔴 인증 축 — 401 은 침묵으로 안 잡힌다 (2026-07-29 실측, Darren 승인 M:wh7t):"
+# 🔑 401 은 "멈춤"이 아니라 **에러를 뱉고 턴을 끝내는 것**이다.
+#   ⇒ Stop 훅이 계속 돌아 하트비트가 **신선하게 유지**되므로 산출 축(Check 4)에 안 걸린다.
+#   내 실측(7/17): 44분 35초 · 401 21건 · 간격 중앙 110초 · **60분 초과 간격 0건**
+#   ⇒ 에피소드가 임계보다 짧아 침묵 감시로는 **원리적으로** 못 잡는다. 임계를 낮추면 오탐이 는다.
+SESSLOG="$WORK/sessions"
+# $1 = 인증 에러 건수, $2 = 서버측(529/502) 건수, $3 = 분 전(기본 5)
+make_sessions() {
+  rm -rf "$SESSLOG"; mkdir -p "$SESSLOG"
+  local ts; ts="$(iso_off "-${3:-5}")"
+  {
+    printf '{"type":"user","timestamp":"%s","message":{"content":"평범한 대화"}}\n' "$ts"
+    for _ in $(seq 1 "${1:-0}"); do
+      printf '{"type":"user","isApiErrorMessage":true,"timestamp":"%s","message":{"content":"Please run /login · API Error: 401 OAuth access token has expired"}}\n' "$ts"
+    done
+    for _ in $(seq 1 "${2:-0}"); do
+      printf '{"type":"user","isApiErrorMessage":true,"timestamp":"%s","message":{"content":"API Error: 529 Authentication service is temporarily unavailable"}}\n' "$ts"
+    done
+  } > "$SESSLOG/session-a.jsonl"
+}
+no_sessions() { rm -rf "$SESSLOG"; }
+
+# 🔴 **핵심 회귀** — 하트비트가 신선해도 인증 축은 돌아야 한다. 401 의 정의가 그거니까.
+reset; set_hb 1; set_activity 1; make_history Tim; make_sessions 5 0
+out="$(run_wd)"
+[[ -n "$out" ]] && ok "🔑 하트비트·활동 모두 신선해도 인증 에러 5건이면 부른다" \
+  || bad "인증 축이 산출 축과 독립" "알림" "<없음>"
+[[ "$out" == *"로그인"* || "$out" == *"인증"* ]] && ok "무슨 문제인지 말해준다(로그인/인증)" \
+  || bad "원인 안내" "로그인|인증" "$out"
+# 🔴 401 에 재시작·/clear 를 쏘면 **인증은 그대로고 맥락만 날아간다**(Tim M:s2um).
+[[ ! -s "$WORK/restarted.txt" ]] && ok "🔑 인증 에러에는 재시작하지 않는다(토큰은 그대로고 맥락만 잃는다)" \
+  || bad "재시작 금지" "<없음>" "$(cat "$WORK/restarted.txt")"
+
+# 🟡 1~2건은 **재시도로 지나간다** — 산발을 사고로 읽지 않는다.
+#   실측 근거: 내 현재 세션의 진짜 API 에러 전수 7건이 전부 산발(세션한도 3·Unable to 2·529 1·500 1)인데
+#   진짜 401 에피소드는 44분에 21건이었다. 개수로 깨끗하게 갈린다.
+reset; set_hb 1; set_activity 1; make_sessions 2 0
+out="$(run_wd)"
+[[ -z "$out" ]] && ok "인증 에러 2건은 안 부른다(재시도 산발)" || bad "min-count 미만" "<없음>" "$out"
+
+# 🔴 서버측 일시 장애(529·502)는 **사람이 할 일이 없다** — 부르지 않는다.
+reset; set_hb 1; set_activity 1; make_sessions 0 9
+out="$(run_wd)"
+[[ -z "$out" ]] && ok "529/502 서버측 장애는 안 부른다(사람이 할 게 없다)" || bad "서버측 제외" "<없음>" "$out"
+
+# 🟡 오래된 에러는 **지난 사고**다. 창 밖이면 안 부른다(안 그러면 한 번 난 401이 영원히 부른다).
+reset; set_hb 1; set_activity 1; make_sessions 9 0 600
+out="$(run_wd)"
+[[ -z "$out" ]] && ok "창 밖(10시간 전) 에러는 안 부른다 — 지난 사고로 영원히 부르지 않는다" \
+  || bad "창 필터" "<없음>" "$out"
+
+# 🟡 부재 = **판정 불가**지 정상이 아니다. 조용히 넘어가되 로그에 남긴다.
+reset; set_hb 1; set_activity 1; no_sessions
+out="$(run_wd)"
+[[ -z "$out" ]] && ok "세션 로그 부재 → 안 부른다(부재는 고장이 아니다)" || bad "부재 처리" "<없음>" "$out"
+grep -q "AUTH-UNKNOWN:" "$WORK/logs/watchdog.log" 2>/dev/null \
+  && ok "부재가 로그에 남는다 — 조용한 무감시가 되지 않는다" \
+  || bad "부재 로그" "AUTH-UNKNOWN:" "$(cat "$WORK/logs/watchdog.log" 2>/dev/null)"
+
+# 🔴 백오프는 침묵 축과 **다른 파일**이어야 한다. 같이 쓰면 한쪽이 다른 쪽을 침묵시킨다.
+reset; set_hb 1; set_activity 1; make_sessions 5 0
+first="$(run_wd)"; second="$(run_wd)"
+[[ -n "$first" && -z "$second" ]] && ok "같은 상태로 2분마다 부르지 않는다(백오프)" \
+  || bad "인증 백오프" "1회차만" "1=${first:0:20} 2=${second:0:20}"
+[[ -f "$WORK/logs/watchdog-auth-next" ]] && ok "백오프가 침묵 축과 분리된 파일에 남는다" \
+  || bad "백오프 파일 분리" "watchdog-auth-next" "$(ls "$WORK/logs")"
+# 🔴 **배치 계약** — Check 4 는 조용한 밤(QUIET)·긴 턴(WORKING)에서 `exit 0` 으로 빠진다.
+#   401 은 바로 그때 나므로 인증 축이 **Check 4 뒤에 있으면 통째로 건너뛴다.**
+#   이 두 케이스가 배치를 잠그는 유일한 판별점이다(하트비트가 신선하면 4 가 어차피 exit 하지 않아 구분이 안 된다).
+reset; set_hb 120; set_activity 120; make_history; make_sessions 5 0   # 수신 0건 = QUIET 경로
+out="$(run_wd)"
+[[ "$out" == *"로그인"* ]] && ok "🔑 조용한 밤(QUIET)에도 인증 축은 돈다 — Check 4 앞에 있어야 한다" \
+  || bad "QUIET 경로 배치" "로그인 알림" "${out:-<없음>}"
+reset; set_hb 120; set_activity 1; make_history Tim; make_sessions 5 0  # 긴 턴 = WORKING 경로
+out="$(run_wd)"
+[[ "$out" == *"로그인"* ]] && ok "🔑 긴 턴(WORKING)에도 인증 축은 돈다" \
+  || bad "WORKING 경로 배치" "로그인 알림" "${out:-<없음>}"
+make_history Tim; make_sessions 0 0   # 상태 복구 — 뒤 시험이 인증 알림에 오염되지 않게
 
 echo ""
 echo "🔴 cron 주기 실행이라 백오프가 **파일**에 남아야 한다 (룬드와 구조가 다른 지점):"
