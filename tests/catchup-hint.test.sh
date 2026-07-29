@@ -18,6 +18,32 @@
 #     · 스텁 케이스   — 실패 층 분리(실물로는 재현이 어렵다)
 #     · 실물 케이스   — **설치된 진짜 CLI + fixture DB**로 앵커→창 계약을 끝까지 태운다
 set -uo pipefail
+
+# ── 🔴 러너 계약 ①: **이 시험 자신의 stderr 도 실패로 센다** ──────────────────
+#   2026-07-29 룬드 맥 실측: `mapfile` 이 없어서 한 블록이 통째로 안 돌았는데
+#     tests/…: line 342: mapfile: command not found      ← 화면엔 보였다
+#     결과: 62 pass, 0 fail, 0 skip                      ← 카운터·rc 엔 흔적 없음
+#   fail 도 skip 도 아니라 **2건이 사라진 사실 자체가 지워졌다**. 상대 기계 숫자와
+#   대조해야만 드러났다(62 vs 64).
+#   ⇒ 항목별 가드(아래 이식성 가드)는 *내가 아는 축*만 잡는다. 넷째 축에서 또 뚫린다.
+#     러너가 stderr 를 보는 건 **아직 모르는 축까지** 덮는 유일한 형태다.
+#   ⚠️ 감싸는 쪽에서 stderr 를 삼키면 안 된다 — 실패시 내용을 그대로 다시 뱉는다.
+#     (같은 날 nino-watchdog.test.sh 는 반대로 `2>&1 /dev/null` 로 버려서
+#      룬드가 원인 줄을 못 봤다. 시험이 자기가 찾을 증거를 지운 형태.)
+if [[ -z "${CATCHUP_TEST_INNER:-}" ]]; then
+  _errf="$(mktemp)"
+  CATCHUP_TEST_INNER=1 bash "$0" "$@" 2>"$_errf"
+  _rc=$?
+  if [[ -s "$_errf" ]]; then
+    echo ""
+    echo "  ❌ 러너 계약: 시험이 예상 못 한 stderr 를 냈다 (통과 수와 무관하게 실패)"
+    sed 's/^/     /' "$_errf"
+    _rc=1
+  fi
+  rm -f "$_errf"
+  exit $_rc
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$SCRIPT_DIR/.." && pwd)"
 HINT="$REPO/scripts/catchup-hint.sh"
@@ -87,17 +113,33 @@ c.commit()
 PY
 }
 
+# ── 🔴 러너 계약 ②: **스트림을 합치지 않는다** ────────────────────────────────
+#   원래 `2>&1` 이었다. 합치면 두 방향으로 틀린다:
+#     · stderr 한 줄이 판정에 섞인다 — 경고문에 '재부팅'이 있으면 run_not 이 헛빨강
+#       (같은 클래스로 이미 밟았다: 산문의 `--limit` 을 명령부로 읽은 건 → cmd_run_not)
+#     · 대상이 낸 **에러가 정상 출력처럼 세어진다** — 판정이 통과하면 영영 안 보인다
+#   ⇒ 판정은 stdout 만 본다. stderr 는 케이스 라벨과 함께 모아 **끝에서 한 번에 실패**시킨다.
+STDERR_LOG="$WORK/unexpected-stderr.txt"; : > "$STDERR_LOG"
+CURRENT_CASE="(라벨 없음)"
 env_run() {
+  local err="$WORK/err.one"
   CATCHUP_BOT_DIR="$WORK" CATCHUP_CLI="${CLI_OVERRIDE:-$WORK/bin/yaksu-history}" \
-  YAKSU_HISTORY_DB="${DB_OVERRIDE-}" bash "$HINT" "$@" 2>&1
+  YAKSU_HISTORY_DB="${DB_OVERRIDE-}" bash "$HINT" "$@" 2>"$err"
+  local rc=$?
+  if [ -s "$err" ]; then
+    { printf -- '── [%s] 인자: %s\n' "$CURRENT_CASE" "$*"; sed 's/^/   /' "$err"; } >> "$STDERR_LOG"
+  fi
+  return $rc
 }
 run() {
   local desc="$1" want="$2"; shift 2
+  CURRENT_CASE="$desc"
   local got; got=$(env_run "$@")
   if printf '%s' "$got" | grep -qE "$want"; then ok "$desc"; else bad "$desc" "$want" "$got"; fi
 }
 run_not() {
   local desc="$1" unwanted="$2"; shift 2
+  CURRENT_CASE="$desc"
   local got; got=$(env_run "$@")
   if printf '%s' "$got" | grep -qE "$unwanted"; then bad "$desc" "NOT $unwanted" "$got"; else ok "$desc"; fi
 }
@@ -108,6 +150,7 @@ run_not() {
 #    명령은 "돌려서" 앞까지다. 가드는 무엇을 보는가의 범위부터 좁힌다.
 cmd_run_not() {
   local desc="$1" unwanted="$2"; shift 2
+  CURRENT_CASE="$desc"
   local cmd; cmd=$(env_run "$@" | sed 's/ 돌려서.*//')
   if printf '%s' "$cmd" | grep -qE "$unwanted"; then bad "$desc" "명령부에 NOT $unwanted" "$cmd"; else ok "$desc"; fi
 }
@@ -408,11 +451,29 @@ for name, pat in (("mapfile/readarray", r'\b(mapfile|readarray)\b'),
         if re.search(pat, body):
             problems.append(f"{where}에 bash 4+ 전용 {name}")
 
+# ④ 러너가 대상의 stderr 를 **합치거나 버리지** 않는다 (2026-07-29, 양봇이 대칭으로 밟음)
+#    합치면: 에러가 정상 출력처럼 세어져 판정이 통과하면 영영 안 보인다  ← 이 파일이 그랬다
+#    버리면: 원인 줄이 화면에서 사라진다                              ← nino-watchdog.test.sh 가 그랬다
+#    ⚠️ 이 가드의 패턴 문자열은 heredoc 안이라 위에서 이미 지워졌다(자기를 안 센다).
+m = re.search(r'^env_run\(\)\s*\{.*?^\}', test_src, re.S | re.M)
+if not m:
+    problems.append("env_run 헬퍼가 없다")
+elif re.search(r'2>&1', m.group(0)) or re.search(r'2>\s*/dev/null', m.group(0)):
+    problems.append("env_run 이 대상 stderr 를 합치거나 버린다 — 파일로 모아 끝에서 실패시킬 것")
+
 print(" | ".join(problems) if problems else "OK")
 PYEOF
 )
 [[ "$portab" == "OK" ]] && ok "GNU date -d · 빈 배열 확장 둘 다 없다(bash 3.2 · BSD 안전)" \
   || bad "GNU date -d · 빈 배열 확장 둘 다 없다" "OK" "$portab"
+
+echo ""
+echo "🔴 러너 계약 — 시험이 증거를 버리지도, 섞지도 않는다:"
+if [ -s "$STDERR_LOG" ]; then
+  bad "catchup-hint가 예상 못 한 stderr를 내지 않는다" "빈 stderr" "$(cat "$STDERR_LOG")"
+else
+  ok "catchup-hint가 예상 못 한 stderr를 내지 않는다"
+fi
 
 echo ""
 echo "결과: $pass pass, $fail fail, $skip skip"
