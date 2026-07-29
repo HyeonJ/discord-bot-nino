@@ -41,8 +41,22 @@ exit 0
 STUB
   chmod +x "$WORK/bin/yaksu-history"
 }
+# 🔴 `date -u -d "N minutes ago"` 는 **GNU 전용**이다. BSD(macOS)는 `-v-NM` 을 쓴다.
+#    그냥 쓰면 룬드 맥에서 픽스처가 통째로 빈 시각을 만들어 **28건이 무더기로 빨개진다**
+#    (2026-07-29 룬드 실측 33 pass · 28 fail). 시험이 한쪽 기계 전용이면 **상호 검증이 끊긴다** —
+#    직접 피해가 없어 보여도 상대 봇이 내 PR 을 못 세는 것 자체가 결함이다.
+#    ⚠️ 이 축은 ref_bash_portability_32 에 이미 적혀 있었는데 안 보고 또 밟았다.
+iso_off() {   # $1 = 분(음수=과거, 양수=미래) → ...Z
+  if date -u -d "1 minute ago" +%Y >/dev/null 2>&1; then    # GNU 판별(유일한 -d 사용처)
+    date -u -d "$1 minutes" +%Y-%m-%dT%H:%M:%S.000Z
+  else
+    sign=+; n=$1
+    case "$n" in -*) sign=-; n=${n#-} ;; esac
+    date -u -v"${sign}${n}"M +%Y-%m-%dT%H:%M:%S.000Z
+  fi
+}
 make_cli_at() {   # $1 = 분 전 → 그 시각을 last_seen으로 돌려주는 스텁
-  make_cli "{\"last_seen\": \"$(date -u -d "$1 minutes ago" +%Y-%m-%dT%H:%M:%S.000Z)\", \"count\": 3, \"author\": \"니노\"}"
+  make_cli "{\"last_seen\": \"$(iso_off "-$1")\", \"count\": 3, \"author\": \"니노\"}"
 }
 make_cli_fail() { # 구버전: last-seen 자체가 없다 → argparse 에러로 종료코드 2
   printf '#!/bin/bash\necho "usage: yaksu-history ..." >&2\nexit 2\n' > "$WORK/bin/yaksu-history"
@@ -229,7 +243,7 @@ echo "🔴 앵커 오염 — cron이 니노 이름으로 말해도 창이 좁아
 # 9시간 50분이 창 밖으로 밀렸다. 니노는 cron 7개가 같은 짓을 하므로 더 자주 난다.
 HB="$WORK/logs/session-heartbeat-utc"
 HOOK="$REPO/hooks/session-heartbeat.sh"
-set_hb()  { date -u -d "$1 minutes ago" +%Y-%m-%dT%H:%M:%S.000Z > "$HB"; }
+set_hb()  { iso_off "-$1" > "$HB"; }
 drop_hb() { rm -f "$HB"; }
 
 # ① 쓰는 쪽을 실제로 태운다 — 픽스처만 심으면 "파일을 채우는 주체가 시험 밖"이 된다(위 1차 실패 그대로)
@@ -266,12 +280,12 @@ run "깨진 하트비트는 무시하고 발화 앵커를 쓴다" 'after 9[0-9]m
 run "빈 하트비트도 무시한다"                    'after 9[0-9]m'
 
 # ⑥ 🔴 미래 시각(시계 어긋남) — 창이 좁아지는 유일한 경로라 통째로 버린다
-date -u -d "60 minutes" +%Y-%m-%dT%H:%M:%S.000Z > "$HB"; make_cli_at 90
+iso_off 60 > "$HB"; make_cli_at 90
 run     "미래 하트비트를 버리고 발화 앵커를 쓴다" 'after 9[0-9]m'
 run_not "미래 하트비트가 창을 좁히지 못한다"      'after 5m'
 # 🔴 변이시험이 찾아낸 구멍: CLI까지 죽으면 hb_rescue가 clamp(음수)=5분으로 창을 접는다.
 #    위 케이스는 CLI가 살아 있어서 max() 선택이 음수를 걸러줬고, 그래서 가드가 죽어도 안 빨개졌다.
-date -u -d "60 minutes" +%Y-%m-%dT%H:%M:%S.000Z > "$HB"; make_cli_fail
+iso_off 60 > "$HB"; make_cli_fail
 run_not "미래 하트비트 + CLI실패 → 5분으로 접히지 않는다" 'after 5m'
 run     "그 경우 기본창으로 안전하게 떨어진다"            'after 120m'
 
@@ -336,6 +350,42 @@ else
   [[ $missing -eq 0 ]] && ok "호출부 전부가 --no-head를 넘긴다" \
     || bad "호출부 전부가 --no-head를 넘긴다" "0건 누락" "${missing}건 누락: ${calls[*]}"
 fi
+
+echo ""
+echo "🔴 이식성 가드 — 상대 봇(macOS·bash 3.2·BSD)이 이 시험을 셀 수 있어야 한다:"
+# 룬드 실측 2026-07-29: 이 파일이 저쪽에서 33 pass · 28 fail 이었다. 둘 다 "내 기계에선 안 보이는" 종류다.
+# 직접 피해는 없지만 **상대가 내 PR 을 셀 수 없다는 것 자체가 결함**이라 회귀로 잠근다.
+# ⚠️ 1차 가드는 grep 이라 **자기 자신을 셌다**(가드 줄에 그 문자열이 있고, 안전형
+#    ${a[@]+"${a[@]}"} 안에 옛 형태가 부분문자열로 들어 있다). 검사기가 검사 대상에 섞이는 형태 —
+#    그래서 파싱을 파이썬으로 옮기고 **범위를 명시**한다.
+portab=$(python3 - "$0" "$REPO/scripts/catchup-hint.sh" <<'PYEOF'
+import re, sys
+test_src, script_src = open(sys.argv[1]).read(), open(sys.argv[2]).read()
+problems = []
+
+# ① GNU 전용 `date -d` 는 iso_off 함수 안(=BSD 분기가 붙은 자리)에만 허용된다
+m = re.search(r'^iso_off\(\)\s*\{.*?^\}', test_src, re.S | re.M)
+if not m:
+    problems.append("iso_off 헬퍼가 없다")
+else:
+    outside = test_src.replace(m.group(0), "")
+    outside = "\n".join(l for l in outside.splitlines() if not l.lstrip().startswith("#"))
+    n = len(re.findall(r'date\s+-u\s+-d', outside))
+    if n:
+        problems.append(f"iso_off 밖에서 GNU date -d {n}곳 (BSD 에선 빈 시각이 된다)")
+
+# ② 빈 배열 확장: 안전형 ${a[@]+"${a[@]}"} 를 먼저 지우고 남은 맨 확장을 센다
+code = "\n".join(l for l in script_src.splitlines() if not l.lstrip().startswith("#"))
+safe = re.sub(r'\$\{(\w+)\[@\]\+"\$\{\1\[@\]\}"\}', "", code)
+bare = re.findall(r'\$\{(\w+)\[@\]\}', safe)
+if bare:
+    problems.append(f'맨 ${{{bare[0]}[@]}} 확장 {len(bare)}곳 — bash 3.2 + set -u 에서 unbound')
+
+print(" | ".join(problems) if problems else "OK")
+PYEOF
+)
+[[ "$portab" == "OK" ]] && ok "GNU date -d · 빈 배열 확장 둘 다 없다(bash 3.2 · BSD 안전)" \
+  || bad "GNU date -d · 빈 배열 확장 둘 다 없다" "OK" "$portab"
 
 echo ""
 echo "결과: $pass pass, $fail fail, $skip skip"
