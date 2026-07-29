@@ -637,7 +637,14 @@ LV_PAT='log "([A-Z][A-Z-]*):'
 LV_CAND='log "[A-Z]'
 if [ ! -x "$LV" ]; then
   skipt "로그 표지 겹침 — 판정 불가" "코어 label-verdict.sh 없음($LV). \`git -C ~/yaksu-bot-core pull\` 후 재실행"
-elif ! "$LV" --file "$LV_PROBE" --pattern "$LV_PAT" --candidate-pattern "$LV_CAND" 2>&1 \
+# 🔴 `--min-labels 1` 을 **명시한다** (2026-07-30, 룬드 `e29ace9` 지적 — 내 쪽에서도 재현).
+#    안 주면 코어 기본값(현재 3)에 묶인다. 프로브가 4종이라 지금은 통과하지만
+#    **코어가 기본값을 4 이상으로 올리는 순간** 프로브가 rc=2 로 떨어지고
+#    이 시험은 *"구버전"* 이라고 오판한다 — 기능은 멀쩡한데 거짓 경보가 난다.
+#    실측(기본값 5로 바꾼 사본): `판정 불가: 표지 4종 … (최소 5종)` → ⛔ "구버전으로 보인다".
+#    🔑 **능력을 재는 프로브는 재는 대상의 기본값에 의존하면 안 된다** — 그 기본값도 움직인다.
+elif ! "$LV" --file "$LV_PROBE" --min-labels 1 \
+       --pattern "$LV_PAT" --candidate-pattern "$LV_CAND" 2>&1 \
      | grep -q '접두사 관계'; then
   skipt "로그 표지 겹침 — 판정 불가" "코어에 ⓒ(접두사 경고) 기능이 없다 — 구버전으로 보인다($LV)"
 else
