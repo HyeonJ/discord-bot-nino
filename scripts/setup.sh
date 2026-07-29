@@ -272,7 +272,7 @@ done
 
 if [[ $ADDED -gt 0 ]]; then
     echo "$CURRENT_CRON" | crontab -
-    ok "cron $ADDED개 추가"
+    ok "cron ${ADDED}개 추가"
 else
     ok "cron 이미 등록됨"
 fi
