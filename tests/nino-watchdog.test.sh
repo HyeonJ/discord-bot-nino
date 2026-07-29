@@ -45,6 +45,9 @@ done
 cat > "$WORK/src/discord-send" <<'EOF'
 #!/bin/bash
 printf '%s\n' "$1|$2" >> "$WORK_MARK/sent.txt"
+# 🔴 **전체 argv 를 그대로 남긴다** — 아래 "실물 계약" 시험이 이걸 진짜 discord-send 에 재생한다.
+#   본문에 개행이 있어서 줄 단위로는 못 담는다 → NUL 구분.
+printf '%s\0' "$@" > "$WORK_MARK/argv.bin"
 exit 0
 EOF
 chmod +x "$WORK/src/discord-send"
@@ -259,6 +262,52 @@ if grep -qE '^[[:space:]]*set -[a-z]*e' "$REPO/scripts/nino-watchdog.sh" \
   bad "set -e + source … || true 조합이 없다" "없음" "있음 — bash 3.2 에서 || true 가 source 실패를 못 잡는다"
 else
   ok "set -e + source … || true 조합이 없다([ -f x ] && source x 로 쓸 것)"
+fi
+
+echo ""
+echo "🔴 실물 계약 — 스텁이 받은 argv 를 **진짜 discord-send** 에 재생한다:"
+# 🔑 위 시험들은 전부 **페이크**가 받았다. 페이크는 무슨 인자를 줘도 exit 0 이라
+#   "인자 순서가 맞나 · 채널이 해석되나"를 **하나도 못 잰다.**
+#   2026-07-29 실발동(Darren 승인 M:7jj6)으로 실물 도달은 확인했지만, 그건 손으로 만든
+#   일회성 셋업이라 **회귀가 안 된다** — 다음에 인자 계약이 바뀌면 아무도 모른다.
+#   ⇒ 스텁이 받은 **진짜 argv 를 그대로** 실물에 넘기고, `DISCORD_SEND_DRY_RUN=1` 로
+#     네트워크 없이 해석까지만 태운다. 인자를 시험이 다시 적지 않으므로 드리프트가 없다.
+REAL_SEND="$REPO/src/discord-send"
+# 채널명을 시험에 다시 적지 않는다 — 스크립트에서 뽑는다(적으면 드리프트가 난다)
+ALERT_CH="$(sed -n 's/^ALERT_CHANNEL="\([^"]*\)".*/\1/p' "$WD" | head -1)"
+reset; set_hb 120; make_history Tim; run_wd >/dev/null
+if [ ! -s "$WORK/argv.bin" ]; then
+  bad "알림 호출의 argv 를 잡았다" "argv.bin 비어있지 않음" "<없음>"
+elif [ ! -x "$REAL_SEND" ]; then
+  bad "실물 discord-send 가 있다" "$REAL_SEND 실행 가능" "없음/실행 불가"
+else
+  ok "알림 호출의 argv 를 잡았다"
+  # NUL 구분 argv 를 위치인자로 복원 — 배열을 안 쓴다(bash 3.2)
+  replay() {
+    set --
+    while IFS= read -r -d '' a; do set -- "$@" "$a"; done < "$WORK/argv.bin"
+    DISCORD_SEND_DRY_RUN=1 "$REAL_SEND" "$@" 2>&1
+  }
+  rp="$(replay)"; rp_rc=$?
+  [ "$rp_rc" -eq 0 ] && ok "실물 discord-send 가 이 argv 를 받아들인다(rc=0)" \
+    || bad "실물이 argv 를 받아들인다" "rc=0" "rc=$rp_rc · $rp"
+  # 🔴 "받아들였다"로 끝내지 않는다 — **의도한 채널로 갔나**까지 본다.
+  #   dry-run 은 해석된 채널 ID 를 찍는다: DRY_RUN POST /channels/<id>/messages
+  want_id="$(python3 -c '
+import json, sys
+m = json.load(open(sys.argv[1]))
+key = sys.argv[2]
+v = m.get(key)
+print(v if isinstance(v, str) else (v or {}).get("id", ""))
+' "$REPO/config/channel-map.json" "$ALERT_CH" 2>/dev/null || true)"
+  if [ -n "$want_id" ]; then
+    case "$rp" in
+      *"/channels/$want_id/"*) ok "의도한 채널($ALERT_CH=$want_id)로 해석된다" ;;
+      *) bad "의도한 채널로 해석된다" "/channels/$want_id/" "$rp" ;;
+    esac
+  else
+    bad "channel-map 에서 $ALERT_CH 를 찾았다" "채널 ID" "<없음>"
+  fi
 fi
 
 echo ""
