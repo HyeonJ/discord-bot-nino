@@ -55,7 +55,7 @@ emit_log() {
     # 🔑 임시파일 뒤처리도 여기에 둔다 — **조기 종료가 뒤처리를 건너뛰는** 자리를 없앤다.
     #    ⚠️ `trap 'rm …' EXIT` 를 따로 걸면 안 된다: bash 는 EXIT trap 을 **덮어쓴다**(실측).
     #    위의 emit_log 가 조용히 사라진다. 뒤처리가 여럿이면 **한 trap 안에** 모은다.
-    [ -n "${PARSE_ERR:-}" ] && rm -f "$PARSE_ERR"
+    rm -f ${HDR:+"$HDR"} ${PARSE_ERR:+"$PARSE_ERR"}
     return 0
 }
 trap emit_log EXIT
@@ -101,12 +101,13 @@ CURL_RC=$?
 CODE="$(printf '%s' "$RAW" | tail -c 3)"
 RESPONSE="${RAW%???}"
 
+# 🔸 HDR·PARSE_ERR 뒤처리는 emit_log(EXIT trap) 안에 있다 — 여기서 손으로 지우면
+#    "지금은 exit 이 아래에 없다" 에 기대게 되고, 그건 **안 새는 게 아니라 아직 안 닿은 것**이다.
 # retry-after 는 429 조율의 유일한 **서버측** 근거다. 없으면 na 로 둔다(추측하지 않는다).
 if [ -f "$HDR" ]; then
     RA="$(tr -d '\r' < "$HDR" | awk 'tolower($1) == "retry-after:" { print $2; exit }')"
     [ -n "$RA" ] && RETRY_AFTER="$RA"
 fi
-rm -f "$HDR"
 
 # 🔑 **네트워크 실패와 HTTP 오류를 같은 칸에 넣지 않는다** — 조치가 다르다.
 #    못 쟀다(network) vs 서버가 거절했다(http_error). 뭉치면 429 가 "가끔 실패한다"로 묻힌다.

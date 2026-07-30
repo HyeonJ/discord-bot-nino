@@ -226,6 +226,25 @@ grep -q 'verdict=ok' "$LOGF" && ok "  → verdict=ok" || bad "대조군 verdict"
 echo "── ⑨ 🔑 **어떤 경로로 끝나도 로그 1줄** — 갈래마다 시험을 붙일 수 없으니 성질로 잠근다 ──"
 # 🔴 이 스크립트엔 조기 종료가 여럿이다. 갈래마다 케이스를 만드는 대신 **exit 앞에 로그가 보장되는 구조**
 #    (trap …EXIT)인지를 정적으로 본다. check-auth.sh 가 같은 방식으로 산 사고를 막았다.
+# 🔴 **`mktemp` 변수가 전부 trap 문자열에 있나** — 정적으로 잠근다.
+#    "cp 와 mv 사이에 죽으면 남는다" 같은 축은 픽스처로 재현이 안 되지만(룬드 #104),
+#    *변수가 trap 에 있나* 는 파일만 보면 안다. 재현 불가를 미검증으로 두지 않는 값싼 수.
+#    🔑 규칙 문면이 바뀐 자리다 — "trap 을 쓰자"(판단)가 아니라
+#      **"mktemp 를 쓸 때마다 그 변수가 trap 에 있나"**(확인). 앞엣것은 이미 trap 이 있으면 안 걸린다.
+#    ⚠️ 이 검사가 **변수를 하나도 못 찾으면 공허하게 통과**한다 — 그래서 개수부터 단언한다.
+#      (실제로 처음 판이 `VAR="$(mktemp)"` 를 못 잡아 0개로 ✅ 였다)
+_mkvars="$(grep -oE '[A-Za-z_][A-Za-z0-9_]*="?\$\(mktemp' "$CHECK" | grep -oE '^[A-Za-z_][A-Za-z0-9_]*' | sort -u)"
+_n_mk="$(printf '%s\n' "$_mkvars" | grep -c .)"
+[ "$_n_mk" -ge 2 ] && ok "mktemp 변수를 $_n_mk 개 찾았다(검사가 공허하지 않다)" \
+  || bad "mktemp 변수 탐지" "2개 이상" "$_n_mk 개 — 정규식이 못 잡는다"
+_traps="$(grep '^trap \|rm -f' "$CHECK")"
+_miss=""
+for _v in $_mkvars; do
+  case "$_traps" in *"$_v"*) ;; *) _miss="$_miss $_v" ;; esac
+done
+[ -z "$_miss" ] && ok "  → mktemp 변수가 전부 뒤처리에 걸려 있다" \
+  || bad "뒤처리 누락" "전부 trap/rm 에 있음" "빠짐:$_miss"
+
 grep -q 'trap .*EXIT' "$CHECK" && ok "trap …EXIT 로 로그를 보장한다" \
   || bad "로그 보장 구조" "trap …EXIT" "없음 — 조기 종료 갈래가 조용해진다"
 
