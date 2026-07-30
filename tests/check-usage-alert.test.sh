@@ -152,6 +152,29 @@ grep -q 'verdict=unparseable' "$LOGF" && ok "verdict=unparseable" \
   || bad "verdict=unparseable" "있음" "$(cat "$LOGF")"
 [ "$RC" -eq 2 ] && ok "파싱 실패는 rc=2 (판정 불가)" || bad "unparseable 종료코드" "2" "rc=$RC"
 
+# 🔴 **JSON 은 맞는데 재지 못한 경우**가 통째로 `ok` 로 접혀 있었다 (2026-07-31 04:2x, 룬드 지적)
+#    실측: {"unexpected":1} · null · [] 셋 다 **rc=0 verdict=ok**.
+#    루프가 아는 칸을 하나도 못 찾으면 alerts 가 비고, 빈 alerts 는 *임계 미달* 과 구별되지 않는다.
+#    ⇒ **스키마가 바뀌면 "못 쟀다" 가 "재보니 낮다" 로 접힌다** — #35 이전 403 과 같은 문장이다.
+#    🔑 갈래 이름은 룬드 쪽과 **같은 문면**으로 맞춘다(계약은 링크가 아니라 사본).
+echo "── ⑧-2 🔴 JSON 이어도 **아는 칸이 없으면 못 잰 것** — ok 로 접지 않는다 ──"
+run FAKE_CODE=200 FAKE_BODY='{"unexpected":1}'
+grep -q 'verdict=no_known_buckets' "$LOGF" && ok "아는 버킷 0개 → verdict=no_known_buckets" \
+  || bad "verdict=no_known_buckets" "있음" "$(cat "$LOGF")"
+[ "$RC" -eq 2 ] && ok "  → rc=2 (판정 불가)" || bad "no_known_buckets 종료코드" "2" "rc=$RC"
+
+for _b in 'null' '[]'; do
+  run FAKE_CODE=200 FAKE_BODY="$_b"
+  grep -q 'verdict=not_object' "$LOGF" && ok "본문이 객체가 아니면 not_object ($_b)" \
+    || bad "verdict=not_object ($_b)" "있음" "$(cat "$LOGF")"
+  [ "$RC" -eq 2 ] && ok "  → rc=2 ($_b)" || bad "not_object 종료코드 ($_b)" "2" "rc=$RC"
+done
+
+# 🔑 대조군 — 아는 칸이 **있고** 임계 미달이면 조용히 rc=0. 위 단언들이 항진명제가 아님을 보인다.
+run FAKE_CODE=200 FAKE_BODY='{"five_hour":{"utilization":1,"resets_at":"2099-01-01T00:00:00Z"}}'
+[ "$RC" -eq 0 ] && ok "대조군: 아는 칸이 있고 임계 미달이면 rc=0" || bad "대조군" "0" "rc=$RC"
+grep -q 'verdict=ok' "$LOGF" && ok "  → verdict=ok" || bad "대조군 verdict" "ok" "$(cat "$LOGF")"
+
 echo "── ⑨ 🔑 **어떤 경로로 끝나도 로그 1줄** — 갈래마다 시험을 붙일 수 없으니 성질로 잠근다 ──"
 # 🔴 이 스크립트엔 조기 종료가 여럿이다. 갈래마다 케이스를 만드는 대신 **exit 앞에 로그가 보장되는 구조**
 #    (trap …EXIT)인지를 정적으로 본다. check-auth.sh 가 같은 방식으로 산 사고를 막았다.

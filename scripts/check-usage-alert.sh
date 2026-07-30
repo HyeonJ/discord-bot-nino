@@ -130,6 +130,13 @@ try:
 except json.JSONDecodeError:
     sys.exit(3)
 
+# 🔴 **JSON 이 맞다고 잰 게 아니다** (2026-07-31, 룬드 지적으로 내 쪽 실측)
+#    옛 코드는 `null`·`[]`·`{"unexpected":1}` 을 전부 통과시켜 rc=0 verdict=ok 로 접었다.
+#    아는 칸을 하나도 못 찾으면 alerts 가 비는데, **빈 alerts 는 "임계 미달" 과 구별되지 않는다.**
+#    ⇒ 스키마가 바뀌면 *못 쟀다* 가 *재보니 낮다* 로 접힌다. #35 이전의 403 과 같은 문장이다.
+if not isinstance(data, dict):
+    sys.exit(4)
+
 now = datetime.now(timezone.utc)
 alerts = []
 
@@ -138,6 +145,11 @@ windows = {
     "five_hour": ("5시간 롤링", 5),
     "seven_day": ("7일 전체", 7 * 24),
 }
+
+# 아는 칸이 하나라도 응답에 있었는지 — 없으면 이 응답으로는 **아무것도 못 쟀다**.
+# ⚠️ 경계: *키는 있는데 값이 전부 못 쓰는* 경우는 여기서 안 가른다(#91 이 소유한 칸이다).
+#    그 칸도 사실상 못 잰 것이라 별건으로 남긴다 — 안 잰 것을 여기서 몰래 바꾸지 않는다.
+known_seen = any(k in data for k in windows)
 
 for key, (label, window_hours) in windows.items():
     bucket = data.get(key)
@@ -175,6 +187,9 @@ for key, (label, window_hours) in windows.items():
             f"이 속도면 **{projected:.0f}%** 도달 예상"
         )
 
+if not known_seen:
+    sys.exit(5)
+
 if alerts:
     print("⚠️ **니노 사용량 경고**\n" + "\n".join(alerts))
 PYEOF
@@ -184,6 +199,16 @@ PARSE_RC=$?
 # 🔴 파싱 실패를 정상으로 접지 않는다 — 옛 코드는 `sys.exit(0)` 이라 200 인데 조용히 끝났다.
 if [ "$PARSE_RC" -eq 3 ]; then
     VERDICT=unparseable
+    exit 2
+fi
+
+# 🔑 갈래 이름은 룬드 check-usage-alert.sh 와 **같은 문면**으로 맞춘다(계약은 링크가 아니라 사본).
+if [ "$PARSE_RC" -eq 4 ]; then
+    VERDICT=not_object
+    exit 2
+fi
+if [ "$PARSE_RC" -eq 5 ]; then
+    VERDICT=no_known_buckets
     exit 2
 fi
 
