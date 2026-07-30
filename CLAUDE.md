@@ -128,6 +128,9 @@ discord-bot-nino/
   - prompt: `morning-briefing.sh 실행해줘: \`bash /home/bpx27/discord-bot-nino/scripts/morning-briefing.sh\``
   - recurring: true
 - cron은 세션 기반이므로 재시작할 때마다 재등록 필요
+- ⚠️ **세션 cron은 7일 후 자동 만료된다** — 마지막 한 번 발동하고 사라진다(조용히).
+  재시작이 7일 안에 일어나면 재등록으로 덮이지만, **니노가 7일 넘게 안 죽고 돌면 브리핑이 말없이 멈춘다.**
+  ⇒ 브리핑이 안 왔으면 죽었는지 보기 전에 **CronList 로 등록 여부부터** 확인할 것(부재는 조용하다).
 
 ## 재부팅 규칙
 - 재부팅 전 현인-업무 채널에 "재부팅할게!" 전송 후 `echo "1" > logs/pending-restart-notify.txt` 저장
