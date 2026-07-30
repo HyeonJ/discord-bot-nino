@@ -107,8 +107,8 @@ grep -q 'verdict=ok' "$LOGF" && bad "429 를 정상으로 판정했다" "ok 아�
 
 echo "── ② 🔑 retry-after 를 기록한다 — 공유 백오프(②)의 설계 근거가 된다 ──"
 # 🔸 룬드가 소비자 구조를 찾은 근거가 로그였다. 값을 안 남기면 조율을 설계할 점이 안 쌓인다.
-grep -q 'retry_after=900' "$LOGF" && ok "retry-after 헤더가 로그에 남는다" \
-  || bad "retry_after=900" "있음" "$(cat "$LOGF")"
+grep -q 'retry_after_s=900' "$LOGF" && ok "retry-after 헤더가 로그에 남는다" \
+  || bad "retry_after_s=900" "있음" "$(cat "$LOGF")"
 
 echo "── ③ 정상(200): 로그 1줄 + 경고 없으면 조용하다 ──"
 run FAKE_CODE=200 FAKE_BODY='{"five_hour":{"utilization":1,"resets_at":"2099-01-01T00:00:00+00:00"}}'

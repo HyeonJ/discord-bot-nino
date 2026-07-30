@@ -39,7 +39,13 @@ API_URL="${USAGE_API_URL:-https://api.anthropic.com/api/oauth/usage}"
 
 VERDICT=unknown      # ok · no_token · http_error · unparseable · network
 CODE=na              # HTTP 상태코드
-RETRY_AFTER=na       # 429 일 때 서버가 준 값 — 공유 백오프 설계의 근거가 된다
+# 🔑 필드명에 **단위를 박는다**(`_s` = 초). HTTP `Retry-After` 는 초지만 로그만 봐서는 모른다.
+#   ⚠️ 2026-07-31 05:5x 실사고: 룬드 하트비트 표지가 `STALE 725` 였고 **바로 옆 괄호에 "30분 주기"**
+#     가 있어서 내가 725 를 분으로 읽었다(실제로는 725**시간**). 12시간 장애로 오판했다.
+#     🔑 **표지에 단위가 없으면 읽는 쪽이 채운다** — 그리고 옆에 있는 단위를 집는다.
+#   🔸 지금 이 로그를 읽는 프로그램이 0곳이라 이름을 바꾸는 게 **공짜다.**
+#     단위를 넣을 마지막 기회는 **읽는 쪽이 생기기 전**이다.
+RETRY_AFTER=na       # 429 일 때 서버가 준 값(초) — 공유 백오프 설계의 근거가 된다
 ALERT=none           # none · sent · send_failed
 NOTE=""
 
@@ -49,7 +55,7 @@ mkdir -p "$(dirname "$LOG")" 2>/dev/null
 #    check-auth.sh 가 같은 형태로 *"죽은 걸 아무도 모른다"* 를 막았다(2026-07-25 사고).
 emit_log() {
     local rc=$?
-    printf '%s verdict=%s code=%s retry_after=%s alert=%s rc=%s%s\n' \
+    printf '%s verdict=%s code=%s retry_after_s=%s alert=%s rc=%s%s\n' \
         "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$VERDICT" "$CODE" "$RETRY_AFTER" "$ALERT" "$rc" \
         "${NOTE:+ note=$NOTE}" >> "$LOG" 2>/dev/null || true
     # 🔑 임시파일 뒤처리도 여기에 둔다 — **조기 종료가 뒤처리를 건너뛰는** 자리를 없앤다.
@@ -149,13 +155,10 @@ except json.JSONDecodeError:
 if not isinstance(data, dict):
     unreadable("not-object")
 
-# 🔴 **JSON 이 맞다고 잰 게 아니다** (2026-07-31, 룬드 지적으로 내 쪽 실측)
-#    옛 코드는 `null`·`[]`·`{"unexpected":1}` 을 전부 통과시켜 rc=0 verdict=ok 로 접었다.
-#    아는 칸을 하나도 못 찾으면 alerts 가 비는데, **빈 alerts 는 "임계 미달" 과 구별되지 않는다.**
-#    ⇒ 스키마가 바뀌면 *못 쟀다* 가 *재보니 낮다* 로 접힌다. #35 이전의 403 과 같은 문장이다.
-if not isinstance(data, dict):
-    sys.exit(4)
-
+# 🔸 여기 있던 `if not isinstance(data, dict): sys.exit(4)` 를 지웠다 — **위에서 이미 걸러
+#   도달 불가**였고, 종료코드 4 는 지금 계약(이유는 stderr·코드는 3 하나)에도 안 맞는다.
+#   🔑 구조를 바꾸면 **바뀌기 전 판의 잔해**가 남는다. 남아 있으면 다음 사람이 그 코드가
+#     의미 있다고 읽는다(계약이 두 벌로 보인다).
 now = datetime.now(timezone.utc)
 alerts = []
 
