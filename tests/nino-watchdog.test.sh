@@ -833,6 +833,92 @@ else
   bad "상태 파일 분리" "watchdog-detector-next 전용" "$(grep -n 'next"' "$WD_SRC" | head -3)"
 fi
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Check 6-b · 감시자 자신의 관측 가능성 (2026-07-30, Darren 승인 M:4ays)
+#
+# 🔴 배경: check-auth 는 cron 이 4.6일 · 약 1,340회 "실행"으로 기록하는 동안
+#    **한 번도 안 돌았다**(syslog CMD 50건 vs check-auth.log 0줄, 15:00~15:50 실측).
+#    `cron → sh -c "source … && script"` 는 `&&` 앞이 끊겨도 cron 이 정상 실행으로 센다.
+#    ⇒ 워치독 자신도 같은 사각에 있었다: 정상이면 완전히 침묵하는 설계라
+#      "조용함"이 **문제없음인지 안 돎인지** 구별되지 않았다(실제로 35분 공백을 오독했다).
+# 🔑 판별법은 **기계 독립**이어야 한다(룬드 M:yrne): launchd `runs` 카운터는 직접 exec
+#    이라 기동을 보증하지만 cron 에는 그런 값이 없다. 파일 하나는 양쪽에서 똑같이 쓴다.
+# ══════════════════════════════════════════════════════════════════════════════
+WDHB="$WORK/logs/watchdog.heartbeat"
+
+det_reset; det_hb 5; rm -f "$WDHB"
+run_wd >/dev/null
+[ -f "$WDHB" ] && ok "워치독이 돌면 자기 하트비트를 남긴다" \
+  || bad "감시자 자기 하트비트" "watchdog.heartbeat 생성" "없음 — 감시자 생사를 못 잰다"
+
+det_reset; det_hb 5; rm -f "$WDHB"
+run_wd >/dev/null
+case "$(cat "$WDHB" 2>/dev/null)" in
+  *rc=0*) ok "하트비트에 완주 표시(rc=0)가 들어간다 — 진입만과 완주를 가른다" ;;
+  *) bad "완주 표시" "rc=0 포함" "${_x:=$(head -c 60 "$WDHB" 2>/dev/null)}${_x:-<빈 파일>}" ;;
+esac
+
+# 🔑 하트비트는 **한 줄**이어야 한다 — 덧붙이기(`>>`)로 바뀌면 옛 `running` 이 남아
+#   "지금 상태"가 모호해지고, rc 를 grep 하는 판정이 옛 줄에 맞아 통과해버린다(변이 E 로 발견).
+det_reset; det_hb 5; rm -f "$WDHB"
+run_wd >/dev/null; run_wd >/dev/null
+wd_lines=$(grep -c . "$WDHB" 2>/dev/null || echo 0)
+[ "$wd_lines" -eq 1 ] && ok "하트비트는 항상 한 줄 (현재 상태만 남긴다)" \
+  || bad "하트비트 한 줄 계약" "1줄" "${wd_lines}줄 — 옛 상태가 섞여 판정이 모호해진다"
+
+det_reset; det_hb 5; rm -f "$WDHB"
+run_wd >/dev/null; touch -d '@100' "$WDHB"; wd_old=$(stat -c %Y "$WDHB")
+run_wd >/dev/null; wd_new=$(stat -c %Y "$WDHB")
+[ "$wd_new" -gt "$wd_old" ] && ok "두 번째 tick 이 하트비트를 갱신한다" \
+  || bad "하트비트 갱신" "mtime 증가" "$wd_old → $wd_new (안 갱신되면 stale 판정이 영원히 참)"
+
+# 🔑 진입했지만 완주 못 한 경우 — trap 이 **실제 rc** 를 담는가.
+#   ⚠️ 처음엔 tmux 스텁을 `exit 9` 로 깨서 죽이려 했는데 **전제가 틀렸다**: 그건 워치독이
+#     죽는 조건이 아니라 *세션 없음 → 재시작* 이라는 **정상 처리 대상**이라 rc=0 으로 완주했다.
+#     (시험이 못 죽인 것을 구현 결함으로 읽을 뻔했다 — 실패의 방향을 확인해야 하는 자리.)
+#   ⇒ 그래서 **변이 사본**으로 잰다: 진입 직후 강제 종료시켜 trap 만 남긴다.
+#     구현을 복제하지 않으므로 항진명제가 아니다 — trap 을 지우면 rc=running 이 남아 빨개진다.
+det_reset; det_hb 5; rm -f "$WDHB"
+python3 - "$WORK/scripts/nino-watchdog.sh" "$WORK/scripts/wd-dies.sh" <<'PY'
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+# 🔴 앵커는 **줄 전체**로 잡는다 — 부분 문자열로 잡았더니 구현 *주석* 안의 같은 문구가
+#   먼저 맞아서 `exit 3` 가 trap 설치 **앞**에 꽂혔고, 시험이 엉뚱한 구간을 쟀다.
+lines = open(src).read().split("\n")
+hit = [i for i, l in enumerate(lines) if l.strip() == "wd_beat running"]
+assert len(hit) == 1, f"진입 하트비트 호출 줄이 {len(hit)}개 — 앵커가 모호하다"
+lines.insert(hit[0] + 1, "exit 3")
+open(dst, "w").write("\n".join(lines))
+PY
+if [ -f "$WORK/scripts/wd-dies.sh" ]; then
+  WORK_MARK="$WORK" PATH="$WORK/bin:$PATH" NINO_HISTORY_CLI="$WORK/bin/yaksu-history" \
+    NINO_SESSION_LOG_DIR="$WORK/sessions" bash "$WORK/scripts/wd-dies.sh" >/dev/null 2>&1 || true
+  case "$(cat "$WDHB" 2>/dev/null)" in
+    *rc=3*)       ok "진입 후 죽으면 trap 이 실제 rc 를 남긴다(rc=3)" ;;
+    *rc=running*) bad "죽었을 때 rc 기록" "rc=3" "rc=running — trap 이 안 돌아 죽음이 '진행 중'으로 보인다" ;;
+    *rc=0*)       bad "죽었을 때 rc 기록" "rc=3" "rc=0 — 죽었는데 완주로 오독된다" ;;
+    *)            bad "죽었을 때 rc 기록" "rc=3" "${_g:=$(head -c 60 "$WDHB" 2>/dev/null)}${_g:-<빈 파일>}" ;;
+  esac
+else
+  skipt "죽었을 때 rc 기록" "변이 사본을 못 만들었다 — 이 갈래는 못 쟀다"
+fi
+
+# 🔴 ㉡ 조용히 시작한 상태는 조용히 끝나서 로그가 **안 닫힌다**.
+#   회복 로그 조건이 백오프 파일(=경보를 보냈을 때만 생긴다)이라, *첫 관측이라 조용히*
+#   기록한 부재는 해소도 조용했다. 그러면 로그 마지막 줄이 영원히 ABSENT 로 남아
+#   나중에 읽는 사람은 **아직 부재 중**으로 읽는다(2026-07-30 15:42→16:05 실제 사례).
+det_reset; det_hb 1; rm -f "$DNEXT"; det_absent_since 3
+run_wd >/dev/null
+grep -q 'DETECTOR-RECOVERED' "$WORK/logs/watchdog.log" 2>/dev/null \
+  && ok "경보 없이 시작한 부재도 해소를 남긴다" \
+  || bad "부재 해소 기록" "DETECTOR-RECOVERED" "없음 — 로그 마지막 줄이 영원히 ABSENT 로 남는다"
+
+det_reset; det_hb 1; rm -f "$DNEXT" "$DABS"
+run_wd >/dev/null
+grep -q 'DETECTOR-RECOVERED' "$WORK/logs/watchdog.log" 2>/dev/null \
+  && bad "부재 이력 없을 때" "조용함" "RECOVERED — 로그가 2분마다 시끄러워진다" \
+  || ok "회귀: 부재 이력이 없으면 조용하다 (매 tick 찍지 않는다)"
+
 echo ""
 echo "결과: $pass pass, $fail fail, $skip 판정 불가"
 # 판정 불가는 rc 를 바꾸지 않는다(자매 파일 catchup-hint 와 같은 관례) — 못 잰 것이지 깨진 게 아니다.

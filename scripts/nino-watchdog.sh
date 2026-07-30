@@ -6,6 +6,27 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 SESSION="nino"
 LOG="$BOT_DIR/logs/watchdog.log"
+
+# ── 감시자 자신의 관측 가능성 ────────────────────────────────────────────────
+# 🔴 2026-07-30: check-auth 는 cron 이 4.6일 · 약 1,340회 실행으로 기록하는 동안
+#    **한 번도 안 돌았다**(syslog CMD 50건 vs 자기 로그 0줄). `sh -c "source … && X"`
+#    는 `&&` 앞이 끊겨도 cron 이 성공으로 센다 ⇒ **스케줄러 기록은 실행을 증명하지 않는다.**
+#    워치독은 정상이면 완전히 침묵하는 설계라 같은 사각에 있었다(35분 공백을 실제로 오독했다).
+# 🔑 파일 하나로 재는 이유는 **판별법이 기계 독립이어야 하기 때문**(룬드 M:yrne):
+#    launchd 는 `runs` 카운터로 기동을 보증하지만 cron 에는 그런 값이 없다.
+# 🔑 진입과 완주를 **한 파일에서** 가른다 — 진입 즉시 `rc=running`, 종료 시 trap 이 실제 rc.
+#    ⚠️ SIGKILL 은 trap 도 못 돌므로 `rc=running` 이 남는다: "죽었다"와 "지금 돌고 있다"가
+#      한 tick 동안 겹친다. 2분 주기라 다음 tick 이 갱신하니 실무상 문제는 없지만,
+#      **완벽히 갈리지는 않는다**는 걸 적어둔다(이걸 "돈다"의 증거로 쓰면 안 되는 유일한 창).
+WD_HEARTBEAT="${NINO_WD_HEARTBEAT:-$BOT_DIR/logs/watchdog.heartbeat}"
+mkdir -p "$(dirname "$WD_HEARTBEAT")" 2>/dev/null || true
+wd_beat() { printf '%s rc=%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$1" > "$WD_HEARTBEAT" 2>/dev/null || true; }
+# 🔴 trap 을 **먼저** 건다 — 반대로 하면 `wd_beat running` 과 trap 설치 사이의 구간이
+#    사각이 된다(그 창에서 죽으면 rc=running 이 남아 "지금 돌고 있다"로 오독된다).
+#    시험이 이 순서를 잡았다: 변이 사본이 rc=3 대신 rc=running 을 남겼다.
+trap 'wd_beat "$?"' EXIT
+wd_beat running
+
 DISCORD_SEND="$BOT_DIR/src/discord-send"
 # jq 미설치 + set -e 조합으로 워치독이 여기서 죽어 자동 재시작이 동작하지 않았다(2026-07-25 발견).
 ALERT_CHANNEL="현인-업무"
@@ -418,8 +439,15 @@ $1
     echo "$(( $(date +%s) + DETECTOR_BACKOFF ))" > "$DETECTOR_STATE"
 }
 detector_recovered() {
-    [ -f "$DETECTOR_STATE" ] && { log "DETECTOR-RECOVERED: 감지기 하트비트 정상"; rm -f "$DETECTOR_STATE"; }
-    rm -f "$DETECTOR_ABSENT"
+    # 🔴 조건이 백오프 파일($DETECTOR_STATE)뿐이면 **경보를 보낸 부재만** 해소가 남는다.
+    #    부재 첫 관측은 *조용히 기록만* 하므로 백오프 파일이 없고 → 해소도 조용했다.
+    #    그러면 로그 마지막 줄이 영원히 `DETECTOR-ABSENT` 로 남아 나중에 읽는 사람은
+    #    **아직 부재 중**으로 읽는다(2026-07-30 15:42 부재 → 16:05 회복이 안 닫혔다).
+    # 🔑 조용히 시작한 상태 전이도 **해소는 남긴다** — 안 그러면 조용한 시작이 조용한 거짓으로 굳는다.
+    if [ -f "$DETECTOR_STATE" ] || [ -f "$DETECTOR_ABSENT" ]; then
+        log "DETECTOR-RECOVERED: 감지기 하트비트 정상"
+    fi
+    rm -f "$DETECTOR_STATE" "$DETECTOR_ABSENT"
     return 0
 }
 
