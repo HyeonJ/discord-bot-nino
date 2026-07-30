@@ -31,7 +31,24 @@ BOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 STATE_DIR="${CHECK_AUTH_STATE_DIR:-$BOT_DIR/logs}"
 LOG="${CHECK_AUTH_LOG:-$STATE_DIR/check-auth.log}"
 CREDENTIALS="${CHECK_AUTH_CREDENTIALS:-$HOME/.claude/.credentials.json}"
-CLAUDE_BIN="${CLAUDE_BIN:-claude}"
+# 🔴 cron 의 PATH 는 `/usr/bin:/bin` 뿐이라 nvm 에 설치된 `claude` 가 안 보인다.
+#    그래서 crontab 이 `source ~/.nvm/nvm.sh && ...` 였는데 **cron 의 sh(dash)엔 `source` 가
+#    없어서** `&&` 가 끊겼고, 이 감지기가 **한 번도 안 불렸다**(2026-07-30 실측: 새로 붙인
+#    로그가 tick 두 번을 지나도 0줄 → cron 쪽을 재서 갈렸다).
+#    ⇒ 해석을 스크립트 안으로 가져와 crontab 을 단순하게 만든다(레포 관례: 다른 10줄은
+#      스크립트를 직접 부른다). 자리마다 절대경로를 박지 않는다 — nvm 버전이 바뀌면 다 깨진다.
+# shellcheck source=scripts/lib/resolve-bin.sh
+. "$SCRIPT_DIR/lib/resolve-bin.sh" 2>/dev/null || true
+# 🔴 명시적으로 준 CLAUDE_BIN 은 **그대로 쓴다.** 없는 경로를 받았을 때 조용히 실물로
+#    갈아타면 (ⓐ)시험의 주입이 무력화되고 (ⓑ)운영에서도 *"지정한 게 없는데 다른 걸 썼다"* 가
+#    된다 — 그건 판정 불가로 남아야 하는 상황이다(2026-07-30: 폴백을 붙였다가 시험 ⑤가 잡았다).
+if [ -n "${CLAUDE_BIN:-}" ]; then
+    :
+elif command -v resolve_bin >/dev/null 2>&1; then
+    CLAUDE_BIN="$(resolve_bin claude || printf 'claude')"
+else
+    CLAUDE_BIN=claude
+fi
 DISCORD_SEND="${DISCORD_SEND:-$BOT_DIR/src/discord-send}"
 ALERT_CHANNEL="${CHECK_AUTH_CHANNEL:-현인-업무}"
 ALERT_INTERVAL="${CHECK_AUTH_ALERT_INTERVAL:-3600}"     # 같은 경보 재발송 간격

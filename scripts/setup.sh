@@ -256,7 +256,7 @@ CRON_ENTRIES=(
     "* * * * * $BOT_DIR/scripts/presence-check.sh"
     "*/2 * * * * $BOT_DIR/scripts/nino-watchdog.sh"
     "*/30 * * * * $BOT_DIR/scripts/check-usage-alert.sh"
-    "*/5 * * * * source $HOME/.nvm/nvm.sh && $BOT_DIR/scripts/check-auth.sh"
+    "*/5 * * * * bash $BOT_DIR/scripts/check-auth.sh"
     "0 * * * * bash $BOT_DIR/scripts/backup-to-nas.sh"
 )
 
