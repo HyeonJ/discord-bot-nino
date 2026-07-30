@@ -19,6 +19,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # 🔴 시각 조작은 정본 하나를 지난다 — `touch -d '@N'`·`stat -c %Y` 는 GNU 전용이라
 #   룬드 맥(BSD)에서 `out of range or illegal time specification` 으로 죽는다.
 . "$SCRIPT_DIR/lib/timeshift.sh"
+# 🔴 `wc -l` 결과는 **산술로 비교한다**(`-eq`), 문자열(`=`)로 하지 않는다.
+#   BSD `wc -l` 은 결과를 우측정렬로 패딩한다: GNU `[2]` vs BSD `[       2]`.
+#   그래서 `[ "$(wc -l < f)" = 1 ]` 이 룬드 맥에서 **항상 거짓**이었다(실측 4 fail).
+#   산술 비교는 앞공백을 무시하므로 안전하다 — 여기 4곳이 그 이유로 `-eq` 다.
 REPO="$(cd "$SCRIPT_DIR/.." && pwd)"
 CHECK="$REPO/scripts/check-auth.sh"
 
@@ -89,7 +93,7 @@ run "$C" FAKE_CLAUDE_OUT="$LOGGED_IN"
 echo "── ② 로그아웃: 알림 1건 + 로그에 흔적 ──"
 C="$(creds 36000)"
 run "$C" FAKE_CLAUDE_OUT="$LOGGED_OUT"
-[ "$(wc -l < "$SENT_LOG")" = 1 ] && ok "로그아웃이면 알림 1건" || bad "로그아웃 알림" "1건" "$(wc -l < "$SENT_LOG")건"
+[ "$(wc -l < "$SENT_LOG")" -eq 1 ] && ok "로그아웃이면 알림 1건" || bad "로그아웃 알림" "1건" "$(wc -l < "$SENT_LOG")건"
 grep -q 'alert=sent' "$LOGF" && ok "로그에 alert=sent 가 남는다" || bad "alert=sent" "있음" "$(cat "$LOGF")"
 
 echo "── ③ 재알림 억제: 두 번째는 안 보내되 **로그는 남는다** ──"
@@ -100,7 +104,7 @@ for _ in 1 2; do
       CHECK_AUTH_LOG="$LOGF" CLAUDE_BIN="$WORK/bin/claude" DISCORD_SEND="$WORK/bin/discord-send" \
       FAKE_CLAUDE_OUT="$LOGGED_OUT" bash "$CHECK" >/dev/null 2>&1
 done
-[ "$(wc -l < "$SENT_LOG")" = 1 ] && ok "1시간 안 두 번째는 안 보낸다" || bad "재알림 억제" "1건" "$(wc -l < "$SENT_LOG")건"
+[ "$(wc -l < "$SENT_LOG")" -eq 1 ] && ok "1시간 안 두 번째는 안 보낸다" || bad "재알림 억제" "1건" "$(wc -l < "$SENT_LOG")건"
 [ "$(wc -l < "$LOGF")" -ge 2 ] && ok "억제돼도 실행 로그는 2줄" || bad "억제 시에도 로그" "2줄 이상" "$(wc -l < "$LOGF")줄"
 grep -q 'alert=skip' "$LOGF" && ok "억제는 alert=skip 으로 구분된다" || bad "alert=skip" "있음" "$(cat "$LOGF")"
 
@@ -133,7 +137,7 @@ grep -qE 'verdict=(unknown|error)' "$LOGF" && ok "판정 불가를 unknown/error
 #   실제 값: `claude` 가 깨진 상태에서 토큰이 만료돼 있으면 그게 가장 위험한 조합이다.
 C="$(creds -3600)"
 run "$C" CLAUDE_BIN="$WORK/bin/does-not-exist"
-[ "$(wc -l < "$SENT_LOG")" = 1 ] && ok "status 불가여도 만료 판정은 계속된다" \
+[ "$(wc -l < "$SENT_LOG")" -eq 1 ] && ok "status 불가여도 만료 판정은 계속된다" \
   || bad "status 독립 만료판정" "1건" "$(wc -l < "$SENT_LOG")건"
 grep -q 'expiry=stale' "$LOGF" && ok "그 판정이 로그에 expiry=stale 로 남는다" \
   || bad "expiry=stale 기록" "있음" "$(cat "$LOGF")"
@@ -157,7 +161,7 @@ run "$C" FAKE_CLAUDE_OUT="$LOGGED_IN"
   || bad "옛 60분 경고 제거" "0건" "$(cat "$SENT_LOG")"
 C="$(creds -3600)"                                   # 1시간 전에 만료됐고 갱신 안 됨
 run "$C" FAKE_CLAUDE_OUT="$LOGGED_IN"
-[ "$(wc -l < "$SENT_LOG")" = 1 ] && ok "만료됐는데 갱신 안 됨 → 알린다 (룬드 8h27m 갈래)" \
+[ "$(wc -l < "$SENT_LOG")" -eq 1 ] && ok "만료됐는데 갱신 안 됨 → 알린다 (룬드 8h27m 갈래)" \
   || bad "만료 후 미갱신 알림" "1건" "$(wc -l < "$SENT_LOG")건"
 C="$(creds -300)"                                    # 막 만료 = 갱신 중일 수 있다
 run "$C" FAKE_CLAUDE_OUT="$LOGGED_IN"
