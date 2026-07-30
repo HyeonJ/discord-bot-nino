@@ -16,6 +16,16 @@
 #    ⇒ 이 변경은 **소비자를 줄이지 않는다. 보이게 만든다.** 그게 다음 단계의 선결이다.
 #
 # 🔸 토큰 출처 해석(env → ~/.secrets → credentials.json)은 **별 PR** 이다. 여기선 경로 override 만 둔다.
+#
+# 🔑 종료코드 계약 (2026-07-28 — 양봇 규약. 룬드 check-usage-alert.sh 와 **같은 문면**):
+#   0  정상        쟀다(경고를 보냈든 안 보냈든)
+#   1  실패        — 이 스크립트엔 없다. 판정과 조치가 분리돼 있어서
+#   2  판정 불가   토큰이 없거나 API 가 답을 안 했다. **못 쟀다** 를 실패로도 정상으로도 접지 않는다
+#
+# 🔴 2026-07-31 04:0x — 여기가 **갈려 있었다**. network 는 2, http_error·no_token·unparseable 은 1.
+#    넷 다 *못 쟀다* 인데 칸이 달랐고, 시험이 `rc -ne 0` 이라 **1이든 2든 초록**이라 안 보였다.
+#    ⇒ 계약은 사본이 두 벌이면 갈린다. **그래서 문면을 링크가 아니라 사본으로 옮겨 적는다** —
+#      링크면 상대가 고쳐도 내 쪽이 안 따라오고, 사본이면 최소한 갈린 것이 눈에 보인다.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -69,7 +79,7 @@ if [ -z "$TOKEN" ]; then
     # 🔴 옛 코드는 여기서 `exit 1` 이 전부였다 — 로그도 알림도 없이 사라졌다.
     VERDICT=no_token
     NOTE="${NOTE:+$NOTE,}credentials-unreadable"
-    exit 1
+    exit 2
 fi
 
 # ── 2. API 호출 — **상태코드와 헤더를 본다** ─────────────────────────────────
@@ -103,7 +113,7 @@ fi
 
 if [ "$CODE" != "200" ]; then
     VERDICT=http_error
-    exit 1
+    exit 2
 fi
 
 # ── 3. 현재 속도로 리셋 전 한도 도달하는지 판단 ──────────────────────────────
@@ -174,7 +184,7 @@ PARSE_RC=$?
 # 🔴 파싱 실패를 정상으로 접지 않는다 — 옛 코드는 `sys.exit(0)` 이라 200 인데 조용히 끝났다.
 if [ "$PARSE_RC" -eq 3 ]; then
     VERDICT=unparseable
-    exit 1
+    exit 2
 fi
 
 VERDICT=ok

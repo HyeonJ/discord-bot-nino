@@ -99,8 +99,11 @@ grep -q 'code=429' "$LOGF" && ok "상태코드가 로그에 수치로 남는다 
   || bad "code=429" "있음" "$(cat "$LOGF")"
 grep -q 'verdict=ok' "$LOGF" && bad "429 를 정상으로 판정했다" "ok 아님" "$(cat "$LOGF")" \
   || ok "429 를 정상으로 접지 않는다"
-[ "$RC" -ne 0 ] && ok "429 는 rc≠0 (조용한 exit 0 이 아니다, rc=$RC)" \
-  || bad "429 종료코드" "0 아님" "rc=0 — 옛 동작"
+# 🔴 `-ne 0` 은 **계약을 안 고정한다** — 1 이든 2 든 통과해서 칸이 갈려도 초록이다.
+#    실제로 갈려 있었다: network 는 2, http_error 는 1 이었다(둘 다 "못 쟀다"인데).
+#    양봇 규약은 `0 정상 / 2 판정 불가` 라 판정 불가는 **2 여야 한다**(룬드 #35 대조로 발견).
+[ "$RC" -eq 2 ] && ok "429 는 rc=2 (판정 불가 — 양봇 규약)" \
+  || bad "429 종료코드" "2" "rc=$RC"
 
 echo "── ② 🔑 retry-after 를 기록한다 — 공유 백오프(②)의 설계 근거가 된다 ──"
 # 🔸 룬드가 소비자 구조를 찾은 근거가 로그였다. 값을 안 남기면 조율을 설계할 점이 안 쌓인다.
@@ -132,6 +135,8 @@ run FAKE_CODE=200 CHECK_USAGE_CREDENTIALS="$WORK/does-not-exist.json"
 [ -s "$LOGF" ] && ok "토큰이 없어도 로그가 남는다" || bad "토큰 부재 로그" "1줄 이상" "빈 파일"
 grep -q 'verdict=no_token' "$LOGF" && ok "verdict=no_token 으로 갈린다" \
   || bad "verdict=no_token" "있음" "$(cat "$LOGF")"
+# 🔴 rc 를 아예 안 봤다 — verdict 만 보면 **로그는 맞는데 종료코드가 틀린** 상태를 못 잡는다.
+[ "$RC" -eq 2 ] && ok "토큰 부재는 rc=2 (판정 불가)" || bad "토큰 부재 종료코드" "2" "rc=$RC"
 
 echo "── ⑦ 네트워크 실패(curl rc≠0)와 HTTP 오류를 **다른 칸**에 넣는다 ──"
 # 🔑 둘을 뭉치면 *못 쟀다* 와 *서버가 거절했다* 가 같은 칸이 된다 — 조치가 다르다.
@@ -145,6 +150,7 @@ echo "── ⑧ 본문이 JSON 이 아니면 unparseable — 정상으로 접�
 run FAKE_CODE=200 FAKE_BODY='<html>oops</html>'
 grep -q 'verdict=unparseable' "$LOGF" && ok "verdict=unparseable" \
   || bad "verdict=unparseable" "있음" "$(cat "$LOGF")"
+[ "$RC" -eq 2 ] && ok "파싱 실패는 rc=2 (판정 불가)" || bad "unparseable 종료코드" "2" "rc=$RC"
 
 echo "── ⑨ 🔑 **어떤 경로로 끝나도 로그 1줄** — 갈래마다 시험을 붙일 수 없으니 성질로 잠근다 ──"
 # 🔴 이 스크립트엔 조기 종료가 여럿이다. 갈래마다 케이스를 만드는 대신 **exit 앞에 로그가 보장되는 구조**
