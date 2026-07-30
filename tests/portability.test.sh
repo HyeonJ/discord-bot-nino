@@ -70,6 +70,39 @@ case "$WC_OUT" in
     *) ok "  → 변수 경유(4행)는 안 잡는다 = 헤더에 적어둔 한계와 일치한다" ;;
 esac
 
+# 🔴 명령 축 — **양쪽이 서로 반대**라 한쪽에 맞추면 다른 쪽이 깨지는 자리
+#   ① `sed -i`  BSD 는 `sed -i '' …`, GNU 는 `sed -i …`. **정반대다**(룬드 맥 실측).
+#   ③ `grep -P` BSD 에 없다 — `grep: invalid option -- P`.
+#   🔑 룬드가 ③에서 하마터면 틀릴 뻔했다: 대화형 셸에선 `ugrep` 이 가려서 **되는 것처럼 보였고**,
+#     `bash -c` 로 껍데기를 벗기고서야 갈렸다. ⇒ *부재 증명은 `bash -c` 로 한다*(새벽 규칙)의 실전.
+#   ⚠️ ② `sort` 로케일은 **일부러 뺐다** — 갈리긴 하는데 BSD/GNU 축이 아니라 **로케일 축**이라
+#     양쪽 다 로케일 따라 갈린다. 결정성 가드는 다른 물건이다(룬드 측정·동의).
+cat > "$WORK/cmd.sh" <<'CMDP'
+#!/bin/bash
+sed -i 's/a/X/' "$f"
+sed -i '' 's/a/X/' "$f"
+grep -P 'a\w+' "$f"
+while read -r x; do :; done < <(grep -oP '\[\[\K[^]]+' "$f")
+CLAUDE_PID=$(pgrep -P "$PANE_PID" -f "claude" | head -1)
+sed -e 's/a/X/' "$f" > "$t" && mv "$t" "$f"
+CMDP
+CMD_OUT="$(portability_scan "$WORK/cmd.sh")"
+CMD_N="$(printf '%s' "$CMD_OUT" | grep -c . || true)"
+[ "${CMD_N:-0}" -eq 4 ] \
+  && ok "🧪 [양성 대조군] sed -i 2건 · grep -P 2건만 잡는다" \
+  || bad "명령 축 검출" "정확히 4건" "${CMD_N:-0}건 — $CMD_OUT"
+# 🔑 **이 두 줄이 이 절의 본론이다.** 규칙을 넣기 전에 이미 오탐 후보가 레포에 있었다 —
+#   `nino-watchdog.sh:95` 의 `pgrep -P`(부모 PID). 이름이 `grep` 으로 끝나서 순진한 패턴에 걸린다.
+#   룬드: *"미탐은 다음 사례가 알려주지만 오탐은 가드 자체를 죽인다."*
+case "$CMD_OUT" in
+    *":6 "*) bad "오탐" "pgrep -P 는 grep 이 아니다" "잡혔다 — 명령 경계가 무너졌다" ;;
+    *) ok "  🔑 pgrep -P 를 grep -P 로 오인하지 않는다 (실재하는 오탐 후보)" ;;
+esac
+case "$CMD_OUT" in
+    *":7 "*) bad "오탐" "-i 없는 sed 는 위반이 아니다" "잡혔다" ;;
+    *) ok "  → 임시파일+mv(-i 없는 sed)는 안 잡는다 = 권장 형태를 벌하지 않는다" ;;
+esac
+
 # 🧪 [양성 대조군] **오탐이 없는가.** 면제 셋이 실제로 동작하나 —
 #   ① 주석 ② 가까운 폴백(두 줄로 갈려도) ③ 문자열 속(설명 문구·가드 자신의 패턴)
 cat > "$WORK/clean.sh" <<'CLEAN'
