@@ -52,3 +52,12 @@ mtime_of() {
     echo "mtime_of: stat 이 -c %Y 도 -f %m 도 안 받는다 — mtime 을 읽을 수 없다" >&2
     return 2
 }
+
+# <epoch> <파일...> → 그 파일들의 mtime 을 **절대 시각**으로
+#   🔸 `touch_ago` 는 상대(초 전)고 이건 절대다. `touch -d '@N'` 이 GNU 전용이라 여기로 온다.
+touch_at() {
+    local epoch="$1"; shift
+    local stamp
+    stamp="$(ts_fmt "$epoch" '+%Y%m%d%H%M.%S')" || return 2
+    touch -t "$stamp" "$@"
+}

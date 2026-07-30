@@ -16,6 +16,9 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# 🔴 시각 조작은 정본 하나를 지난다 — `touch -d '@N'`·`stat -c %Y` 는 GNU 전용이라
+#   룬드 맥(BSD)에서 `out of range or illegal time specification` 으로 죽는다.
+. "$SCRIPT_DIR/lib/timeshift.sh"
 REPO="$(cd "$SCRIPT_DIR/.." && pwd)"
 CHECK="$REPO/scripts/check-auth.sh"
 
@@ -51,9 +54,9 @@ creds() {
   printf '{"claudeAiOauth":{"accessToken":"x","refreshToken":"y","expiresAt":%d,"subscriptionType":"max"}}' \
     "$exp_ms" > "$f"
   if [ "$anchor" = yes ]; then
-    touch -d "@$(( exp_ms / 1000 - 28800 ))" "$f"     # 만료 - 8시간 = 발급 시각
+    touch_at "$(( exp_ms / 1000 - 28800 ))" "$f"      # 만료 - 8시간 = 발급 시각
   else
-    touch -d '@1750000000' "$f"                        # 아주 옛날 = 갱신이 멈춘 상태
+    touch_at 1750000000 "$f"                          # 아주 옛날 = 갱신이 멈춘 상태
   fi
   echo "$f"
 }
@@ -107,11 +110,11 @@ run "$C" FAKE_CLAUDE_OUT="$LOGGED_IN"
 HB="$STATE/check-auth-heartbeat"
 [ -f "$HB" ] && ok "하트비트 파일이 생긴다" || bad "하트비트 파일" "존재" "없음"
 if [ -f "$HB" ]; then
-  touch -d '@1750000000' "$HB"; OLD=$(stat -c %Y "$HB")
+  touch_at 1750000000 "$HB"; OLD="$(mtime_of "$HB")"
   env SENT_LOG="$SENT_LOG" CHECK_AUTH_CREDENTIALS="$C" CHECK_AUTH_STATE_DIR="$STATE" \
       CHECK_AUTH_LOG="$LOGF" CLAUDE_BIN="$WORK/bin/claude" DISCORD_SEND="$WORK/bin/discord-send" \
       FAKE_CLAUDE_OUT="$LOGGED_IN" bash "$CHECK" >/dev/null 2>&1
-  [ "$(stat -c %Y "$HB")" -gt "$OLD" ] && ok "재실행 시 하트비트가 앞으로 간다" || bad "하트비트 갱신" "갱신됨" "그대로"
+  [ "$(mtime_of "$HB")" -gt "$OLD" ] && ok "재실행 시 하트비트가 앞으로 간다" || bad "하트비트 갱신" "갱신됨" "그대로"
 fi
 
 echo "── ⑤ 🔴 죽어도 로그가 남는다 (2026-07-25 사고 회귀) ──"
