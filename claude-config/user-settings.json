@@ -3,7 +3,10 @@
     "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "400000"
   },
   "permissions": {
-    "defaultMode": "bypassPermissions"
+    "defaultMode": "bypassPermissions",
+    "deny": [
+      "AskUserQuestion"
+    ]
   },
   "hooks": {
     "PreToolUse": [
@@ -13,6 +16,10 @@
           {
             "type": "command",
             "command": "bash /home/bpx27/.claude/hooks/darren-mention-guard.sh"
+          },
+          {
+            "type": "command",
+            "command": "bash /home/bpx27/.claude/hooks/mdweb-link-guard.sh"
           }
         ]
       }
