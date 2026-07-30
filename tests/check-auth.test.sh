@@ -181,6 +181,47 @@ SD_HITS=$(grep -c 'src/discord-send' "$CHECK")
 [ "$SD_HITS" -le 1 ] && ok "경로가 기본값 1곳에만 있다 (직접 호출 없음)" \
   || bad "직접 호출 없음" "1곳 이하" "${SD_HITS}곳: $(grep -n 'src/discord-send' "$CHECK" | head -3)"
 
+echo "── ⑩ 🔴 cron 환경(PATH=/usr/bin:/bin)에서도 claude 를 스스로 찾는다 ──"
+#
+# 🔴 2026-07-30 실사고: crontab 이 `source $HOME/.nvm/nvm.sh && check-auth.sh` 였다.
+#   **cron 의 sh(dash)엔 `source` 가 없다** → `&&` 가 끊겨 이 감지기가 **한 번도 안 불렸다.**
+#   *"경보 발송 0건"* 의 진짜 원인이 "죽은 채 있었다"가 아니라 **"아예 안 불렸다"** 였고,
+#   두 상태는 로그가 없으면 같은 모습이다(#83 이 붙인 로그가 tick 두 번 뒤에도 0줄이라 갈렸다).
+#   ⇒ crontab 에서 그 줄을 없애려면 스크립트가 **스스로** claude 를 찾아야 한다.
+#   🔸 같은 부류가 2026-07-28 에 이미 있었다(`check-core-drift.sh` 가 cron 에서 node 를 못 찾아
+#     매 실행 판정 불가). 그래서 `scripts/lib/resolve-bin.sh` 가 생겼는데 이 감지기만 안 옮겨졌다.
+FAKEHOME="$WORK/fakehome"
+mkdir -p "$FAKEHOME/.nvm/versions/node/v24.14.0/bin"
+cp "$WORK/bin/claude" "$FAKEHOME/.nvm/versions/node/v24.14.0/bin/claude"
+C="$(creds 36000)"
+STATE="$WORK/state/cronlike"; mkdir -p "$STATE"
+SENT_LOG="$STATE/sent.tsv"; : > "$SENT_LOG"; LOGF="$STATE/log"
+# 🔑 CLAUDE_BIN 을 **주지 않는다** — 주면 해석 경로를 안 태워서 이 시험이 헛돈다.
+env -i PATH=/usr/bin:/bin HOME="$FAKEHOME" \
+    SENT_LOG="$SENT_LOG" CHECK_AUTH_CREDENTIALS="$C" CHECK_AUTH_STATE_DIR="$STATE" \
+    CHECK_AUTH_LOG="$LOGF" DISCORD_SEND="$WORK/bin/discord-send" \
+    FAKE_CLAUDE_OUT="$LOGGED_IN" \
+    bash "$CHECK" >/dev/null 2>&1
+if grep -q 'verdict=ok' "$LOGF" 2>/dev/null; then
+  ok "cron 유사 환경에서 nvm 의 claude 를 찾아 판정까지 간다"
+else
+  bad "cron 환경 claude 해석" "verdict=ok" "$(cat "$LOGF" 2>/dev/null || echo '<로그 없음>')"
+fi
+
+echo "── ⑪ setup.sh 의 cron 줄에 dash 가 모르는 \`source\` 가 없다 ──"
+# 🔴 라이브 crontab 만 고치면 setup.sh 재실행 때 **되살아난다**(사본이 두 벌인 문제).
+SETUP="$REPO/scripts/setup.sh"
+if [ -f "$SETUP" ]; then
+  line="$(grep 'check-auth' "$SETUP" | head -1)"
+  case "$line" in
+    *source*) bad "setup.sh cron 줄" "source 없음" "$line" ;;
+    *check-auth*) ok "setup.sh 의 cron 줄이 스크립트를 직접 부른다" ;;
+    *) bad "setup.sh cron 줄" "check-auth 등록 줄" "<없음>" ;;
+  esac
+else
+  echo "  ⏭️  판정 불가 — setup.sh 가 없다"
+fi
+
 echo
 # 🔑 형식을 러너 정규식(`통과 ?[0-9]+`)에 맞춘다 — 안 맞으면 `⚠️건수 미상` 이 되고,
 #    그러면 **0개를 쟀어도 초록**이라 시험이 사라진 것을 아무도 모른다(2026-07-30 실측).
