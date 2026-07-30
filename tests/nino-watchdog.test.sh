@@ -723,6 +723,116 @@ print(v if isinstance(v, str) else (v or {}).get("id", ""))
   fi
 fi
 
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 🔴 Check 6: 감지기 축 — **감지기가 죽었는지는 누가 보나**
+#
+#   2026-07-30 실측: `check-auth.sh` 가 cron 5분으로 등록돼 있는데 로그가 한 줄도 없어
+#   **도는 것과 안 도는 것이 같은 모습**이었다. 2026-07-25 에 실제로 `jq` 부재로 즉사해
+#   "인증 만료 알림이 한 번도 안 나간" 사고가 있었고 아무도 몰랐다.
+#   ⇒ 감지기가 하트비트를 찍게 했고(PR #83), **그걸 보는 눈**이 이 축이다.
+#     안 보면 로그만 쌓이고, 그건 내가 룬드에게 지적한 "감지 포기"와 같아진다.
+#
+# 🔑 부재를 다루는 방식이 이 축의 핵심이다 — 세 상태다:
+#     신선            → ok
+#     오래됨          → 감지기가 멈췄다
+#     아예 없음       → **첫 관측은 조용하다**(배포 직후엔 정상적으로 없다).
+#                        부재를 처음 본 시각을 적고, 그때부터 임계를 재서 알린다.
+#     ⚠️ 부재를 "정상"으로 접으면 cron 이 아예 안 걸린 경우를 영구히 놓치고,
+#        "죽었다"로 접으면 배포 직후마다 오탐이 난다. 접지 않고 **시각을 기록**한다.
+# ═══════════════════════════════════════════════════════════════════════════
+echo ""
+echo "🔴 Check 6 — 감지기(check-auth) 하트비트:"
+
+DHB="$WORK/logs/check-auth-heartbeat"
+DABS="$WORK/logs/watchdog-detector-absent-since"
+DNEXT="$WORK/logs/watchdog-detector-next"
+
+# 감지기 축만 남기고 다른 축은 조용한 상태로 만든다(알림이 섞이면 무엇이 울렸는지 안 갈린다)
+det_reset() { reset; rm -f "$DABS" "$DNEXT"; set_hb 1; set_activity 1; make_history Tim; }
+det_hb()    { touch -d "@$(( $(date +%s) - ${1:-0} * 60 ))" "$DHB"; }   # $1 = 분 전
+det_no_hb() { rm -f "$DHB"; }
+det_absent_since() { echo "$(( $(date +%s) - ${1:-0} * 60 ))" > "$DABS"; }  # $1 = 분 전
+
+det_reset; det_hb 5
+out="$(run_wd)"
+case "$out" in
+  *감지기*|*check-auth*) bad "신선한 하트비트엔 조용하다" "알림 0건" "$out" ;;
+  *) ok "신선한 하트비트(5분 전)엔 조용하다" ;;
+esac
+
+det_reset; det_hb 45
+out="$(run_wd)"
+# 🔴 고정 헤더에도 "check-auth" 가 있어서 그걸 grep 하면 **두 갈래가 같은 알림을 내도 통과**한다
+#   (2026-07-30 변이 ⑧이 그래서 헛돌았다). 사유에 **경과 분**이 들어가는지로 가른다.
+case "$out" in
+  *"분째 안 움직"*) ok "오래된 하트비트(45분)면 경과 분과 함께 알린다" ;;
+  *) bad "감지기 멈춤 알림" "경과 분이 담긴 사유" "${out:-<없음>}" ;;
+esac
+
+det_reset; det_no_hb
+out="$(run_wd)"
+if [ -n "$out" ]; then
+  bad "부재 첫 관측은 조용하다" "알림 0건" "$out"
+else
+  ok "하트비트 부재 첫 관측은 조용하다 (배포 직후 오탐 금지)"
+fi
+[ -f "$DABS" ] && ok "부재를 처음 본 시각을 기록한다" || bad "부재 시각 기록" "파일 생성" "없음"
+
+det_reset; det_no_hb; det_absent_since 45
+out="$(run_wd)"
+# 🔑 부재는 "오래됨"과 **다른 문구**여야 한다 — 같으면 사람이 원인을 못 가른다
+#   (파일이 없는 것과 감지기가 멈춘 것은 손볼 데가 다르다: cron 등록 vs 스크립트 자체).
+case "$out" in
+  *"아예 없"*) ok "부재가 임계를 넘기면 '아예 없다'로 알린다 (cron 미등록도 잡는다)" ;;
+  *) bad "영구 부재 알림" "부재 전용 문구" "${out:-<없음>}" ;;
+esac
+
+# 백오프 — 같은 사고로 매 tick 부르지 않는다
+det_reset; det_hb 45
+run_wd >/dev/null
+out="$(run_wd)"
+case "$out" in
+  *check-auth*) bad "감지기 알림 백오프" "두 번째 tick 은 조용" "$out" ;;
+  *) ok "백오프: 두 번째 tick 은 안 부른다" ;;
+esac
+
+# 회복 — 신선해지면 상태를 지워 다음 사고에 **즉시** 부른다
+det_reset; det_hb 45
+run_wd >/dev/null
+det_hb 1
+run_wd >/dev/null
+if [ -f "$DNEXT" ]; then
+  bad "회복 시 백오프 초기화" "상태 파일 삭제" "남아 있다(다음 사고를 늦게 알린다)"
+else
+  ok "회복되면 백오프 상태를 지운다"
+fi
+
+# 🔴 판정 불가(하트비트가 있는데 mtime 을 못 읽는다) — 접지 않는다
+#   재현: 하네스가 PATH 를 주입하므로 `stat` 을 실패하는 스텁으로 덮는다.
+#   ⚠️ 이 갈래를 안 재면 "판정 불가를 고장으로 접는" 구현도 초록이 된다(변이 ⑦).
+det_reset; det_hb 45
+printf '#!/bin/bash\nexit 1\n' > "$WORK/bin/stat"; chmod +x "$WORK/bin/stat"
+out="$(run_wd)"
+rm -f "$WORK/bin/stat"
+if [ -n "$out" ]; then
+  bad "판정 불가로는 안 부른다" "알림 0건" "$out"
+else
+  ok "mtime 을 못 읽으면 알리지 않는다 (판정 불가를 고장으로 접지 않는다)"
+fi
+grep -q 'DETECTOR-UNKNOWN' "$WORK/logs/watchdog.log" 2>/dev/null \
+  && ok "판정 불가 사유가 로그에 남는다" \
+  || bad "판정 불가 로그" "DETECTOR-UNKNOWN" "$(tail -2 "$WORK/logs/watchdog.log" 2>/dev/null)"
+
+# 🔴 상태 파일이 다른 축과 겹치면 **서로를 침묵시킨다** (기존 시험 주석이 실제로 밟은 자리)
+WD_SRC="$WORK/scripts/nino-watchdog.sh"
+if grep -q 'watchdog-detector-next' "$WD_SRC" \
+   && ! grep -qE 'DETECTOR_STATE=.*watchdog-(silence|auth)-next' "$WD_SRC"; then
+  ok "감지기 축은 침묵·인증 축과 다른 상태 파일을 쓴다"
+else
+  bad "상태 파일 분리" "watchdog-detector-next 전용" "$(grep -n 'next"' "$WD_SRC" | head -3)"
+fi
+
 echo ""
 echo "결과: $pass pass, $fail fail, $skip 판정 불가"
 # 판정 불가는 rc 를 바꾸지 않는다(자매 파일 catchup-hint 와 같은 관례) — 못 잰 것이지 깨진 게 아니다.

@@ -378,5 +378,79 @@ $ACTIVITY_NOTE
     fi
 fi
 
+# ── 🔴 Check 6: 감지기 축 — **감지기가 죽었는지는 누가 보나** ─────────────────
+#   (맨 뒤에 둔다 — 앞의 축들이 발동하면 이건 안 본다. 인증이 *실제로* 죽은 것보다
+#    감지기 고장은 덜 급하고, 알림이 겹치면 무엇이 울렸는지가 안 갈린다.)
+#
+# 🔴 왜 필요한가 (2026-07-30 실측):
+#   `check-auth.sh` 가 cron 5분으로 등록돼 있는데 **로그가 한 줄도 없었다** ⇒ 도는 것과
+#   안 도는 것이 같은 모습. 2026-07-25 에 실제로 `jq` 부재로 즉사해 "인증 만료 알림이
+#   한 번도 안 나간" 사고가 있었고 **아무도 몰랐다.** 감지기가 하트비트를 찍게 했으니(#83)
+#   그걸 보는 눈이 여기다. 안 보면 로그만 쌓이고 그건 감지 포기와 같다.
+#
+# 🔑 부재를 접지 않는다 — 세 상태다:
+#     신선      → ok
+#     오래됨    → 감지기가 멈췄다 → 부른다
+#     아예 없음 → **첫 관측은 조용하다**(배포 직후엔 정상적으로 없다). 처음 본 시각을
+#                 적고 그때부터 잰다. "정상"으로 접으면 cron 미등록을 영구히 놓치고,
+#                 "죽었다"로 접으면 배포마다 오탐이 난다.
+# 🔸 부재 기록을 `logs/` 에 두는 이유: `/tmp` 는 재부팅이 지운다. 지워지면 타이머가 매번
+#   리셋돼 **부재가 계속돼도 임계를 영구히 못 넘긴다**(오탐이 아니라 미탐 쪽으로 샌다).
+DETECTOR_HB="${NINO_DETECTOR_HEARTBEAT:-$BOT_DIR/logs/check-auth-heartbeat}"
+DETECTOR_LIMIT=${NINO_DETECTOR_STALE_LIMIT:-1200}     # 20분 = cron 5분 주기의 4배
+DETECTOR_BACKOFF=${NINO_DETECTOR_BACKOFF:-3600}
+DETECTOR_ABSENT="$BOT_DIR/logs/watchdog-detector-absent-since"
+DETECTOR_STATE="$BOT_DIR/logs/watchdog-detector-next"  # 다른 축과 **다른 파일** — 서로 침묵시키지 않게
+
+detector_alert() {   # $1 = 사람이 읽는 사유
+    local next
+    next=$(cat "$DETECTOR_STATE" 2>/dev/null || echo 0)
+    case "$next" in ''|*[!0-9]*) next=0 ;; esac
+    [ "$(date +%s)" -lt "$next" ] && return 0          # 백오프 중
+    log "DETECTOR: $1 — 사람 호출(복구 안 함)."
+    $DISCORD_SEND "$ALERT_CHANNEL" "<@353914579929268226> 🟡 니노 **인증 감지기(check-auth)가 멈춘 것 같아.**
+
+$1
+
+이건 지금 당장 뭐가 고장난 건 아니야 — **인증이 끊겼을 때 알려줄 장치가 없는 상태**라는 뜻이야(감시의 사각). 2026-07-25 에 이 감지기가 죽은 채로 있어서 만료 알림이 한 번도 안 나간 적이 있어.
+
+확인: \`tail -3 ~/discord-bot-nino/logs/check-auth.log\` 랑 \`crontab -l | grep check-auth\`" 2>/dev/null || true
+    echo "$(( $(date +%s) + DETECTOR_BACKOFF ))" > "$DETECTOR_STATE"
+}
+detector_recovered() {
+    [ -f "$DETECTOR_STATE" ] && { log "DETECTOR-RECOVERED: 감지기 하트비트 정상"; rm -f "$DETECTOR_STATE"; }
+    rm -f "$DETECTOR_ABSENT"
+    return 0
+}
+
+DET_NOW=$(date +%s)
+if [ -f "$DETECTOR_HB" ]; then
+    DET_M=$(stat -c %Y "$DETECTOR_HB" 2>/dev/null || echo "")
+    case "$DET_M" in
+        ''|*[!0-9]*)
+            # 🔴 판정 불가를 "정상"으로도 "고장"으로도 접지 않는다 — 로그에만 남긴다.
+            log "DETECTOR-UNKNOWN: 하트비트 mtime 을 못 읽었다($DETECTOR_HB) — 감지기 상태를 가릴 수 없다." ;;
+        *)
+            DET_AGE=$(( DET_NOW - DET_M ))
+            if [ "$DET_AGE" -gt "$DETECTOR_LIMIT" ]; then
+                rm -f "$DETECTOR_ABSENT"
+                detector_alert "check-auth 하트비트가 $((DET_AGE / 60))분째 안 움직였어(임계 $((DETECTOR_LIMIT / 60))분). cron 은 5분마다 돌아야 해."
+            else
+                detector_recovered
+            fi ;;
+    esac
+else
+    DET_SINCE=$(cat "$DETECTOR_ABSENT" 2>/dev/null || echo "")
+    case "$DET_SINCE" in
+        ''|*[!0-9]*)
+            echo "$DET_NOW" > "$DETECTOR_ABSENT"
+            log "DETECTOR-ABSENT: 하트비트 파일이 없다 — **첫 관측이라 조용히 기록만** 한다(배포 직후일 수 있다)." ;;
+        *)
+            if [ $(( DET_NOW - DET_SINCE )) -gt "$DETECTOR_LIMIT" ]; then
+                detector_alert "check-auth 하트비트 파일이 $(( (DET_NOW - DET_SINCE) / 60 ))분째 **아예 없어**. 감지기가 한 번도 안 돌았거나 cron 이 안 걸려 있어."
+            fi ;;
+    esac
+fi
+
 # 정상
 exit 0
