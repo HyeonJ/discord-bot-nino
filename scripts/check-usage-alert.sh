@@ -52,6 +52,11 @@ emit_log() {
     printf '%s verdict=%s code=%s retry_after=%s alert=%s rc=%s%s\n' \
         "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$VERDICT" "$CODE" "$RETRY_AFTER" "$ALERT" "$rc" \
         "${NOTE:+ note=$NOTE}" >> "$LOG" 2>/dev/null || true
+    # 🔑 임시파일 뒤처리도 여기에 둔다 — **조기 종료가 뒤처리를 건너뛰는** 자리를 없앤다.
+    #    ⚠️ `trap 'rm …' EXIT` 를 따로 걸면 안 된다: bash 는 EXIT trap 을 **덮어쓴다**(실측).
+    #    위의 emit_log 가 조용히 사라진다. 뒤처리가 여럿이면 **한 trap 안에** 모은다.
+    [ -n "${PARSE_ERR:-}" ] && rm -f "$PARSE_ERR"
+    return 0
 }
 trap emit_log EXIT
 
@@ -210,7 +215,6 @@ PYEOF
 PARSE_RC=$?
 # 이유는 파이썬이 이름으로 준다. 아는 이름이 아니면 unknown — 트레이스백을 이유로 착각하지 않는다.
 PARSE_WHY="$(tr -d '\r\n' < "$PARSE_ERR" 2>/dev/null)"
-rm -f "$PARSE_ERR"
 case "$PARSE_WHY" in
     empty-body|json-decode|not-object|no-known-buckets) : ;;
     *) PARSE_WHY=unknown ;;
@@ -223,6 +227,12 @@ esac
 #    ⇒ **이유를 모르는 실패도 못 쟀다** 다. 모른다고 정상으로 접지 않는다(parse-unknown).
 if [ "$PARSE_RC" -ne 0 ]; then
     VERDICT="parse-$PARSE_WHY"
+    # 🔑 이유를 모르면 **전문을 보여준다** (룬드 #38 에서 가져옴) —
+    #    이름 한 줄로는 원인을 못 고친다. 아는 이유일 땐 이미 이름이 다 말한다.
+    if [ "$PARSE_WHY" = unknown ] && [ -s "$PARSE_ERR" ]; then
+        echo "⛔ 파서가 예기치 않게 죽었다 (python rc=$PARSE_RC):" >&2
+        sed 's/^/     /' "$PARSE_ERR" >&2
+    fi
     exit 2
 fi
 

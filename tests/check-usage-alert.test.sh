@@ -180,6 +180,34 @@ grep -q 'verdict=ok' "$LOGF" && bad "크래시를 ok 로 접었다" "ok 아님" 
   || ok "  → ok 로 접지 않는다"
 grep -q 'verdict=parse-unknown' "$LOGF" && ok "  → parse-unknown 으로 갈린다" \
   || bad "verdict=parse-unknown" "있음" "$(cat "$LOGF")"
+# 🔑 **전문을 보여준다** (룬드 #38 에서 가져옴) — 첫 줄 이름만으론 원인을 못 고친다.
+#    run() 은 출력을 버리므로 여기서만 stderr 를 직접 받는다.
+_crash_out="$(env PATH="$WORK/bin:$PATH" SENT_LOG="$WORK/s.tsv" \
+  CHECK_USAGE_CREDENTIALS="$CREDS" CHECK_USAGE_LOG="$WORK/c.log" \
+  DISCORD_SEND="$WORK/bin/discord-send" FAKE_CODE=200 \
+  FAKE_BODY='{"five_hour":{"utilization":"abc","resets_at":"2099-01-01T00:00:00Z"}}' \
+  bash "$CHECK" 2>&1)"
+case "$_crash_out" in
+  *Traceback*|*Error*) ok "  → 크래시 전문을 화면에 남긴다" ;;
+  *) bad "크래시 전문" "Traceback 포함" "$_crash_out" ;;
+esac
+
+# 🔴 **임시파일이 실패 경로에서도 지워지는가** — 변이시험이 이 축이 비었다고 알려줬다
+#    (뒤처리를 통째로 지워도 42/0 이었다). 30분 cron 이라 새면 하루 48개씩 쌓인다.
+#    🔑 뒤처리는 `emit_log` 안(= 기존 EXIT trap)에 있다. `trap 'rm …' EXIT` 를 **따로 걸면 안 된다** —
+#      bash 는 EXIT trap 을 덮어써서 하트비트 로깅이 조용히 사라진다(실측).
+_TMP="$(mktemp -d)"
+for _ in 1 2 3; do
+  env PATH="$WORK/bin:$PATH" TMPDIR="$_TMP" SENT_LOG="$WORK/s2.tsv" \
+    CHECK_USAGE_CREDENTIALS="$CREDS" CHECK_USAGE_LOG="$WORK/c2.log" \
+    DISCORD_SEND="$WORK/bin/discord-send" FAKE_CODE=200 \
+    FAKE_BODY='{"five_hour":{"utilization":"abc","resets_at":"2099-01-01T00:00:00Z"}}' \
+    bash "$CHECK" >/dev/null 2>&1
+done
+_left="$(ls -A "$_TMP" | tr -d '[:space:]')"
+[ -z "$_left" ] && ok "  → 실패로 끝나도 임시파일을 안 남긴다" \
+  || bad "임시파일 누수" "0개" "$_left"
+rm -rf "$_TMP"
 
 # 🔴 **섞인 본문** — 한 칸은 멀쩡하고 다른 칸만 타입이 틀린 경우.
 #    변이시험이 이 축이 비어 있다고 알려줬다(루프의 isinstance 를 되돌려도 39/0 이었다).
