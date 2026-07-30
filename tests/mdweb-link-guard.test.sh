@@ -73,6 +73,23 @@ check "다른 URL 은 안 건드림 → 통과"                0 'discord-send �
 check "discord-send 아닌 명령의 깨진 링크 → 통과"   0 'curl -s http://darren/md-web/memory/절대없는파일xyz'
 
 echo
+echo "판정 범위가 'discord-send 호출의 인자'인가 (본문 인용만으로 막으면 안 된다):"
+# darren-mention-guard 가 2026-07-27 에 이미 고친 것과 **같은 종류의 오탐**이다:
+#   명령 문자열 전체 grep → 다른 명령의 본문에 낱말/URL 을 인용만 해도 차단 →
+#   그 오탐 때문에 보고에서 채널명을 빼게 되어 **정보가 깎이는** 부작용이 났다.
+# 실제로 이 훅이 자기 PR 본문(`discord-send` 라는 낱말 + 예시 URL 포함)을 막았다.
+check "PR 본문에 낱말+예시 URL 인용 → 통과"         0 'gh pr create --body "표: | `discord-send` 아닌 명령 | 통과 | 예시 http://darren/md-web/memory/절대없는파일xyz"'
+check "메모리에 실패 예시를 적는 것 → 통과"         0 'python3 -c "open(\"/tmp/m.md\",\"w\").write(\"discord-send 로 http://darren/md-web/memory/절대없는파일xyz 를 보내면 막힌다\")"'
+check "URL 이 discord-send 인자 밖이면 → 통과"      0 'curl -s http://darren/md-web/memory/절대없는파일xyz && discord-send 봇-놀이터 "확인했어"'
+check "구분자 뒤의 실제 호출은 → 차단"              2 'echo 준비완료 && discord-send 현인-업무 "@Darren http://darren/md-web/memory/절대없는파일xyz"'
+# 이름에 discord-send 가 들어간 **다른** 명령은 호출이 아니다 (basename 완전일치여야 한다)
+check "discord-send* 다른 스크립트 → 통과"          0 'bash scripts/lint-discord-send-callers.sh --report http://darren/md-web/memory/절대없는파일xyz'
+# 영역은 구분자에서 끝나야 한다 — 안 끝나면 뒤에 붙은 확인용 curl 까지 인자로 먹는다
+check "호출 뒤 구분자 다음의 URL → 통과"            0 'discord-send 봇-놀이터 "확인" && curl -s http://darren/md-web/memory/절대없는파일xyz'
+# 쿼팅이 안 맞아 파싱 불가 → 폴백은 **차단** 쪽이어야 한다 (조용한 누락보다 시끄러운 오탐)
+check "파싱 불가(쿼팅 깨짐) → 차단"                 2 'discord-send 현인-업무 "@Darren http://darren/md-web/memory/절대없는파일xyz'
+
+echo
 echo ".md 가 붙은 링크를 잡는가 (Darren 지시 — 붙이면 렌더링본이 아니라 raw 가 온다):"
 checkr "프록시 URL + .md → 차단(이유까지)"     '`\.md` 를 떼고' 'discord-send 현인-업무 "@Darren http://darren/md-web/memory/current-tasks.md 봐줘"'
 checkr "포트 URL + .md → 차단(이유까지)"       '`\.md` 를 떼고' 'discord-send 현인-업무 "@Darren http://darren:58082/#/memory/current-tasks.md"'

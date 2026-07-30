@@ -36,13 +36,9 @@ if [ ! -f "$CHECKER" ]; then
   exit 2
 fi
 
-# 파일 경유 본문($(cat /tmp/xxx))도 검사 대상 — 내 관례가 파일에 쓰고 보내는 것이라 인라인만 보면 다 빠진다
-content="$command"
-for f in $(printf '%s' "$command" | grep -oE "/tmp/[^ )\"']+" 2>/dev/null); do
-  [ -f "$f" ] && content="$content $(cat "$f" 2>/dev/null)"
-done
-
-reason=$(printf '%s' "$content" | python3 "$CHECKER" 2>/dev/null)
+# 명령을 **그대로** 넘긴다. 판정 범위(discord-send 호출의 인자)와 파일 경유 본문($(cat /tmp/xxx))
+# 확장은 검사기가 한다 — 여기서 /tmp 를 긁으면 그 영역 밖 파일까지 판정에 들어간다(2026-07-30 실측 오탐).
+reason=$(printf '%s' "$command" | python3 "$CHECKER" 2>/dev/null)
 
 [ -z "$reason" ] && exit 0
 
