@@ -146,33 +146,27 @@ grep -q 'verdict=network' "$LOGF" && ok "curl 실패는 verdict=network" \
 grep -q 'verdict=http_error' "$LOGF" && bad "네트워크 실패를 http_error 로 접었다" "network" "$(cat "$LOGF")" \
   || ok "네트워크와 HTTP 오류가 안 섞인다"
 
-echo "── ⑧ 본문이 JSON 이 아니면 unparseable — 정상으로 접지 않는다 ──"
-run FAKE_CODE=200 FAKE_BODY='<html>oops</html>'
-grep -q 'verdict=unparseable' "$LOGF" && ok "verdict=unparseable" \
-  || bad "verdict=unparseable" "있음" "$(cat "$LOGF")"
-[ "$RC" -eq 2 ] && ok "파싱 실패는 rc=2 (판정 불가)" || bad "unparseable 종료코드" "2" "rc=$RC"
+echo "── ⑧ 본문 축: 200 인데 못 읽으면 **이유를 갈라** rc=2 ──"
+# 🔴 옛 코드는 {"unexpected":1} · null · [] 을 전부 rc=0 verdict=ok 로 접었다(실측).
+#    빈 alerts 는 *임계 미달* 과 구별되지 않는다 ⇒ 스키마가 바뀌면 *못 쟀다* 가 *재보니 낮다* 로 접힌다.
+# 🔑 갈래 이름은 룬드 check-usage-alert.sh 와 **같은 문면**이다(계약은 링크가 아니라 사본).
+#    특히 empty-body 와 json-decode 는 조치가 다르다 —
+#    *서버가 아무것도 안 줬다* vs *뭔가 줬는데 JSON 이 아니다*(프록시 오류 페이지 등).
+_parse_case() {  # $1=본문  $2=기대 이유  $3=설명
+  run FAKE_CODE=200 FAKE_BODY="$1"
+  grep -q "verdict=parse-$2" "$LOGF" && ok "$3 → parse-$2" \
+    || bad "$3" "verdict=parse-$2" "$(cat "$LOGF")"
+  [ "$RC" -eq 2 ] && ok "  → rc=2" || bad "$3 종료코드" "2" "rc=$RC"
+}
+_parse_case ''                  'empty-body'       '빈 본문'
+_parse_case '<html>oops</html>' 'json-decode'      'JSON 아님'
+_parse_case 'null'              'not-object'       'null(파싱은 됨)'
+_parse_case '[]'                'not-object'       '배열'
+_parse_case '{"unexpected":1}'  'no-known-buckets' '아는 칸 0개'
 
-# 🔴 **JSON 은 맞는데 재지 못한 경우**가 통째로 `ok` 로 접혀 있었다 (2026-07-31 04:2x, 룬드 지적)
-#    실측: {"unexpected":1} · null · [] 셋 다 **rc=0 verdict=ok**.
-#    루프가 아는 칸을 하나도 못 찾으면 alerts 가 비고, 빈 alerts 는 *임계 미달* 과 구별되지 않는다.
-#    ⇒ **스키마가 바뀌면 "못 쟀다" 가 "재보니 낮다" 로 접힌다** — #35 이전 403 과 같은 문장이다.
-#    🔑 갈래 이름은 룬드 쪽과 **같은 문면**으로 맞춘다(계약은 링크가 아니라 사본).
-echo "── ⑧-2 🔴 JSON 이어도 **아는 칸이 없으면 못 잰 것** — ok 로 접지 않는다 ──"
-run FAKE_CODE=200 FAKE_BODY='{"unexpected":1}'
-grep -q 'verdict=no_known_buckets' "$LOGF" && ok "아는 버킷 0개 → verdict=no_known_buckets" \
-  || bad "verdict=no_known_buckets" "있음" "$(cat "$LOGF")"
-[ "$RC" -eq 2 ] && ok "  → rc=2 (판정 불가)" || bad "no_known_buckets 종료코드" "2" "rc=$RC"
-
-for _b in 'null' '[]'; do
-  run FAKE_CODE=200 FAKE_BODY="$_b"
-  grep -q 'verdict=not_object' "$LOGF" && ok "본문이 객체가 아니면 not_object ($_b)" \
-    || bad "verdict=not_object ($_b)" "있음" "$(cat "$LOGF")"
-  [ "$RC" -eq 2 ] && ok "  → rc=2 ($_b)" || bad "not_object 종료코드 ($_b)" "2" "rc=$RC"
-done
-
-# 🔑 대조군 — 아는 칸이 **있고** 임계 미달이면 조용히 rc=0. 위 단언들이 항진명제가 아님을 보인다.
+# 🔑 대조군 — 아는 칸이 있고 임계 미달이면 조용히 rc=0. 위 단언들이 항진명제가 아님을 보인다.
 run FAKE_CODE=200 FAKE_BODY='{"five_hour":{"utilization":1,"resets_at":"2099-01-01T00:00:00Z"}}'
-[ "$RC" -eq 0 ] && ok "대조군: 아는 칸이 있고 임계 미달이면 rc=0" || bad "대조군" "0" "rc=$RC"
+[ "$RC" -eq 0 ] && ok "대조군: 아는 칸 있고 임계 미달 → rc=0" || bad "대조군" "0" "rc=$RC"
 grep -q 'verdict=ok' "$LOGF" && ok "  → verdict=ok" || bad "대조군 verdict" "ok" "$(cat "$LOGF")"
 
 echo "── ⑨ 🔑 **어떤 경로로 끝나도 로그 1줄** — 갈래마다 시험을 붙일 수 없으니 성질로 잠근다 ──"

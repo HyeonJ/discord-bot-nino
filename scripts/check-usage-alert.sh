@@ -117,18 +117,31 @@ if [ "$CODE" != "200" ]; then
 fi
 
 # ── 3. 현재 속도로 리셋 전 한도 도달하는지 판단 ──────────────────────────────
-ALERT_MSG="$(RESPONSE="$RESPONSE" python3 << 'PYEOF'
+PARSE_ERR="$(mktemp)"
+ALERT_MSG="$(RESPONSE="$RESPONSE" python3 2>"$PARSE_ERR" << 'PYEOF'
 import json, os, sys
 from datetime import datetime, timezone
 
+# 🔑 **이유를 이름으로 stderr 에 보내고 종료코드는 3 하나** (룬드 #37 구조를 따름).
+#    갈래마다 종료코드를 새로 배정하면 갈래가 늘 때 파이썬도 셸도 같이 바뀐다.
+#    이름으로 보내면 **확장 지점이 파이썬 한 곳**뿐이다.
+def unreadable(why):
+    print(why, file=sys.stderr)
+    sys.exit(3)
+
 response_str = os.environ.get("RESPONSE", "")
 if not response_str:
-    sys.exit(3)
+    unreadable("empty-body")
 
 try:
     data = json.loads(response_str)
 except json.JSONDecodeError:
-    sys.exit(3)
+    unreadable("json-decode")
+
+# 🔴 **JSON 이 맞다고 잰 게 아니다** — null·[]·{"unexpected":1} 이 전부 rc=0 ok 로 접히고 있었다(실측).
+#    빈 alerts 는 *임계 미달* 과 구별되지 않아 스키마가 바뀌면 *못 쟀다* 가 *재보니 낮다* 로 접힌다.
+if not isinstance(data, dict):
+    unreadable("not-object")
 
 # 🔴 **JSON 이 맞다고 잰 게 아니다** (2026-07-31, 룬드 지적으로 내 쪽 실측)
 #    옛 코드는 `null`·`[]`·`{"unexpected":1}` 을 전부 통과시켜 rc=0 verdict=ok 로 접었다.
@@ -149,7 +162,8 @@ windows = {
 # 아는 칸이 하나라도 응답에 있었는지 — 없으면 이 응답으로는 **아무것도 못 쟀다**.
 # ⚠️ 경계: *키는 있는데 값이 전부 못 쓰는* 경우는 여기서 안 가른다(#91 이 소유한 칸이다).
 #    그 칸도 사실상 못 잰 것이라 별건으로 남긴다 — 안 잰 것을 여기서 몰래 바꾸지 않는다.
-known_seen = any(k in data for k in windows)
+if not any(k in data for k in windows):
+    unreadable("no-known-buckets")
 
 for key, (label, window_hours) in windows.items():
     bucket = data.get(key)
@@ -187,28 +201,23 @@ for key, (label, window_hours) in windows.items():
             f"이 속도면 **{projected:.0f}%** 도달 예상"
         )
 
-if not known_seen:
-    sys.exit(5)
-
 if alerts:
     print("⚠️ **니노 사용량 경고**\n" + "\n".join(alerts))
 PYEOF
 )"
 PARSE_RC=$?
+# 이유는 파이썬이 이름으로 준다. 아는 이름이 아니면 unknown — 트레이스백을 이유로 착각하지 않는다.
+PARSE_WHY="$(tr -d '\r\n' < "$PARSE_ERR" 2>/dev/null)"
+rm -f "$PARSE_ERR"
+case "$PARSE_WHY" in
+    empty-body|json-decode|not-object|no-known-buckets) : ;;
+    *) PARSE_WHY=unknown ;;
+esac
 
 # 🔴 파싱 실패를 정상으로 접지 않는다 — 옛 코드는 `sys.exit(0)` 이라 200 인데 조용히 끝났다.
+# 🔑 갈래 이름은 룬드 check-usage-alert.sh 와 **같은 문면**이다(계약은 링크가 아니라 사본).
 if [ "$PARSE_RC" -eq 3 ]; then
-    VERDICT=unparseable
-    exit 2
-fi
-
-# 🔑 갈래 이름은 룬드 check-usage-alert.sh 와 **같은 문면**으로 맞춘다(계약은 링크가 아니라 사본).
-if [ "$PARSE_RC" -eq 4 ]; then
-    VERDICT=not_object
-    exit 2
-fi
-if [ "$PARSE_RC" -eq 5 ]; then
-    VERDICT=no_known_buckets
+    VERDICT="parse-$PARSE_WHY"
     exit 2
 fi
 
