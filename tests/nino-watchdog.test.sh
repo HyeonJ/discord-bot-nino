@@ -24,6 +24,14 @@ bad() { echo "  ❌ $1"; echo "     want: $2"; echo "     got:  $3"; fail=$((fai
 #   통과로 접으면 안 잰 계약이 초록불이 되고, 실패로 접으면 남의 기계에서 못 재는 것이 결함이 된다.
 skipt(){ echo "  ⛔ $1"; echo "     사유: $2"; skip=$((skip + 1)); }
 
+# 🔴 시각 조작은 **정본 하나**를 지난다 — `tests/lib/timeshift.sh`.
+#   그 파일 머리말이 이 규칙을 이미 적어놨는데(*"사본 금지 · 시각 조작은 전부 여기를 지난다"*)
+#   이 시험은 정작 **source 를 안 하고** `touch -d '@N'`·`stat -c %Y` 를 직접 썼다.
+#   ⇒ 룬드 맥에서 `touch: out of range or illegal time specification` 으로 죽고,
+#     그 죽음이 **무관한 단언 4개를 빨갛게** 만들었다(2026-07-31 `#93` 리뷰 실측).
+#   🔑 정본을 세워두고 안 쓰면 정본이 아니다.
+. "$SCRIPT_DIR/lib/timeshift.sh"
+
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK/logs" "$WORK/scripts" "$WORK/src" "$WORK/bin"
 
@@ -567,6 +575,13 @@ echo "🔴 이식성 — 상대 봇(macOS·bash 3.2·BSD)이 이 시험을 셀 �
 #   실사용이 그대로여도 카운트가 흔들린다 — 오늘 코어에서 잡은 *계측 상수* 형태이자,
 #   *검사기가 자기를 센다* 의 네 번째 사례다.
 #   ⇒ 개수가 아니라 **구조**를 본다: iso_off 밖에 있으면 몇 개든 빨간불.
+# 🔴 **명령 목록이 아니라 성질로 잡는다** (2026-07-31 룬드 `#93` 리뷰).
+#   이 가드는 원래 `date -u -d` **하나만** 봤다. 그래서 428행 주석이
+#   *"`touch -d` 는 GNU 전용이라 룬드 맥에서 깨진다 → python os.utime 으로(이식성 가드가 잡아줬다)"*
+#   라고 증언하고 있는데도, 890·1007 행에 `touch -d '@N'` 과 `stat -c %Y` 가 새로 들어왔다.
+#   **한 번 잡혔고, 그 자리만 고쳤고, 가드는 안 넓혔다.**
+#   🔑 내가 코어 `#106` 에서 룬드에게 한 지적과 같은 축이다 — *가드가 자기 범위 밖의 같은 병을 못 본다.*
+#   ⇒ 성질: **"GNU 전용 시각 도구가 정본 헬퍼 밖에 있다"**. 명령이 늘어도 형태로 걸린다.
 gnu=$(python3 - "$0" <<'PYEOF'
 import re, sys
 src = open(sys.argv[1]).read()
@@ -576,12 +591,45 @@ if not m:
     print("iso_off 헬퍼가 없다"); raise SystemExit
 outside = src.replace(m.group(0), "")
 outside = "\n".join(l for l in outside.splitlines() if not l.lstrip().startswith("#"))
-n = len(re.findall(r'date\s+-u\s+-d', outside))
-print(f"iso_off 밖에서 {n}곳" if n else "")
+
+# GNU 전용 시각 구문 — 이 목록은 *예시*고, 판정은 "정본 밖에 있나"로 한다.
+PATTERNS = [
+    (r'\bdate\s+(?:-u\s+)?-d\b',  "date -d"),      # BSD 는 -v / -r
+    (r'\btouch\s+-d\b',           "touch -d"),     # BSD 는 -t 만
+    (r'\bstat\s+-c\b',            "stat -c"),      # BSD 는 -f
+    (r'\bdate\s+-r\b',            "date -r"),      # 반대쪽(BSD 전용)도 직접 쓰면 안 된다
+    (r'\bstat\s+-f\b',            "stat -f"),
+]
+hits = []
+for pat, name in PATTERNS:
+    n = len(re.findall(pat, outside))
+    if n:
+        hits.append(f"{name} {n}곳")
+print(" · ".join(hits))
 PYEOF
 )
-[[ -z "$gnu" ]] && ok "GNU 전용 date -d 는 iso_off 안에만 있다" \
-  || bad "GNU date -d" "iso_off 안에만" "$gnu"
+# 🔴 **시험 파일만 보면 반쪽이다** — 시험은 스크립트를 실행하므로, 스크립트 안의 GNU 전용 구문도
+#   룬드 맥에서 그대로 터진다. 실제로 `nino-watchdog.sh:490` 의 `stat -c %Y` 가 남아 있었고
+#   BSD 흉내 PATH 로 재보니 감지기 축 2건이 빨갰다(가드는 아무 말도 안 했다).
+#   ⇒ 스크립트도 본다. 다만 스크립트는 헬퍼를 못 쓰니(운영 코드) **같은 줄의 폴백**을 인정한다.
+wd_gnu=$(python3 - "$WD" <<'PYEOF'
+import re, sys
+PAIRS = [(r'stat\s+-c', r'stat\s+-f', 'stat -c'),
+         (r'date\s+(?:-u\s+)?-d', r'date\s+-[vr]', 'date -d')]
+bad = []
+for i, line in enumerate(open(sys.argv[1]), 1):
+    if line.lstrip().startswith('#'):
+        continue
+    for gnu, bsd, name in PAIRS:
+        if re.search(gnu, line) and not re.search(bsd, line):
+            bad.append(f"{i}행 {name}(폴백 없음)")
+print(" · ".join(bad))
+PYEOF
+)
+[[ -z "$wd_gnu" ]] && ok "스크립트에도 폴백 없는 GNU 전용 시각 구문이 없다" \
+  || bad "이식성: 스크립트" "같은 줄에 BSD 폴백" "$wd_gnu"
+[[ -z "$gnu" ]] && ok "GNU/BSD 갈리는 시각 도구는 iso_off·timeshift 정본 안에만 있다" \
+  || bad "이식성: 시각 도구" "정본 헬퍼 안에만(touch_ago·mtime_of·iso_off)" "$gnu"
 
 echo ""
 echo "🔴 러너 계약 — 예상 못 한 stderr 는 실패다 (룬드 제안 2026-07-29):"
@@ -825,6 +873,28 @@ else
   rm -f "$CLASH_PROBE"
 fi
 
+# ②-b 런타임 경고 — **시험이 안 돌 때의 창을 메운다**(룬드 `#93` 제안)
+#   위 계약은 *시험이 돌 때만* 말한다. 사람이 `.env` 를 손으로 고치고 시험을 안 돌리면 조용하다.
+#   ⇒ 워치독이 매 tick 자기 `.env` 를 보고 **경고만** 남긴다. 🔑 값은 안 읽는다 — 읽으면 사슬이 는다.
+reset; set_hb 1; set_activity 1; make_history Tim
+printf 'DISCORD_SEND=%s\n' "$WORK/bin/env-send" > "$WORK/.env"
+run_wd >/dev/null
+grep -q 'ENV-NAME-CLASH' "$WORK/logs/watchdog.log" 2>/dev/null \
+  && ok "런타임: .env 이름 충돌을 경고한다" \
+  || bad "런타임 이름 충돌 경고" "ENV-NAME-CLASH" "없음 — 시험을 안 돌리는 사람에겐 아무 말도 안 한다"
+# 🔴 **경고만 하고 값은 안 쓴다** — 경고와 동시에 그 값으로 보내면 사슬을 늘린 것과 같다.
+: > "$WORK/envsend.txt"
+reset; set_hb 120; make_history Tim; run_wd >/dev/null
+[ ! -s "$WORK/envsend.txt" ] \
+  && ok "런타임: 경고만 하고 .env 값을 전송에 쓰지 않는다" \
+  || bad "값 미사용" "envsend.txt 비어있음" "$(cat "$WORK/envsend.txt") — 경고하면서 그 값으로 보냈다"
+rm -f "$WORK/.env"
+# 🧪 [양성 대조군] 충돌이 없으면 조용한가 — 매 tick 찍으면 로그가 무의미해진다
+reset; set_hb 1; set_activity 1; make_history Tim; run_wd >/dev/null
+grep -q 'ENV-NAME-CLASH' "$WORK/logs/watchdog.log" 2>/dev/null \
+  && bad "🧪 [양성 대조군] 충돌 없을 때" "조용함" "ENV-NAME-CLASH — 항상 찍으면 경고가 아니다" \
+  || ok "🧪 [양성 대조군] 충돌이 없으면 조용하다"
+
 # ③ 정적 — **스텁을 안 탈 수 있는 자리가 남아 있는가**
 #   위 동적 축은 "스텁을 탄 것"만 본다. 샌 전송은 스텁을 안 지나가므로 거기엔 절대 안 남는다.
 #   ⇒ 소스에서 직접 센다: 주입점 한 줄 말고 `src/discord-send` 를 직접 부르는 자리가 있으면 위반.
@@ -887,7 +957,7 @@ DNEXT="$WORK/logs/watchdog-detector-next"
 
 # 감지기 축만 남기고 다른 축은 조용한 상태로 만든다(알림이 섞이면 무엇이 울렸는지 안 갈린다)
 det_reset() { reset; rm -f "$DABS" "$DNEXT"; set_hb 1; set_activity 1; make_history Tim; }
-det_hb()    { touch -d "@$(( $(date +%s) - ${1:-0} * 60 ))" "$DHB"; }   # $1 = 분 전
+det_hb()    { touch_ago "$(( ${1:-0} * 60 ))" "$DHB"; }   # $1 = 분 전 (GNU/BSD 공용 정본을 지난다)
 det_no_hb() { rm -f "$DHB"; }
 det_absent_since() { echo "$(( $(date +%s) - ${1:-0} * 60 ))" > "$DABS"; }  # $1 = 분 전
 
@@ -1004,8 +1074,8 @@ wd_lines=$(grep -c . "$WDHB" 2>/dev/null || echo 0)
   || bad "하트비트 한 줄 계약" "1줄" "${wd_lines}줄 — 옛 상태가 섞여 판정이 모호해진다"
 
 det_reset; det_hb 5; rm -f "$WDHB"
-run_wd >/dev/null; touch -d '@100' "$WDHB"; wd_old=$(stat -c %Y "$WDHB")
-run_wd >/dev/null; wd_new=$(stat -c %Y "$WDHB")
+run_wd >/dev/null; touch_ago "$(( 365 * DAY ))" "$WDHB"; wd_old="$(mtime_of "$WDHB")"
+run_wd >/dev/null; wd_new="$(mtime_of "$WDHB")"
 [ "$wd_new" -gt "$wd_old" ] && ok "두 번째 tick 이 하트비트를 갱신한다" \
   || bad "하트비트 갱신" "mtime 증가" "$wd_old → $wd_new (안 갱신되면 stale 판정이 영원히 참)"
 

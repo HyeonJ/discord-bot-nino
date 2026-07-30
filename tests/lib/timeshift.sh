@@ -41,3 +41,14 @@ touch_ago() {
 # 자주 쓰는 단위 — 호출부에서 86400 곱셈이 반복되지 않게
 DAY=86400
 HOUR=3600
+
+# <파일> → mtime(epoch). `stat -c %Y` 는 GNU 전용이고 BSD 는 `-f %m` 이다.
+#   🔑 `touch -d` 와 **같은 병이다** — 시각 도구가 GNU/BSD 로 갈리는 자리.
+#   개별로 고치면 다음 자리가 남으므로 여기(정본)에 둔다. 못 읽으면 rc=2(판정 불가).
+mtime_of() {
+    local f="$1" out
+    out="$(stat -c %Y "$f" 2>/dev/null)" && { printf '%s' "$out"; return 0; }
+    out="$(stat -f %m "$f" 2>/dev/null)" && { printf '%s' "$out"; return 0; }
+    echo "mtime_of: stat 이 -c %Y 도 -f %m 도 안 받는다 — mtime 을 읽을 수 없다" >&2
+    return 2
+}

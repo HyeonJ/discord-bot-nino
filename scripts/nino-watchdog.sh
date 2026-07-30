@@ -55,6 +55,25 @@ ALERT_CHANNEL="${ALERT_CHANNEL:-현인-업무}"
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG"; }
 
+# 🔸 이름 충돌 경고 — **읽지는 않는다**(룬드 `#93` 리뷰 제안).
+#    시험이 "`.env` 가 이 두 이름을 안 쓴다"를 계약으로 잡지만, **사람이 `.env` 를 손으로 고치고
+#    시험을 안 돌리면** 그 계약은 아무 말도 안 한다. 그 창을 런타임에서 메운다.
+#    🔑 값을 *쓰지* 않는 게 핵심이다 — 쓰면 폴백 사슬이 한 칸 늘고, 그게 06:46 사고였다.
+# 🔴 **`log()` 정의 아래**에 둔다. 처음엔 대입 바로 옆(52행)에 뒀는데, `log` 은 65행에서야
+#    정의되므로 `set -e` 아래에서 rc=127 로 **워치독이 통째로 죽는다** — 이 파일 34행 주석이
+#    증언하는 2026-07-25 `jq` 사고와 **같은 형태**다. 죽으면 감시가 조용히 사라진다.
+# ⚠️ `grep` rc 를 갈라 본다. `if grep …; then` 만 쓰면 grep 이 죽었을 때(rc=2) 조건이 거짓이 되어
+#    **가드가 실패하면서 열린다** — 내가 코어 `#106` 에서 지적한 그 형태다.
+if [ -f "$BOT_DIR/.env" ]; then
+    _clash_rc=0
+    grep -qE '^[[:space:]]*(export[[:space:]]+)?(DISCORD_SEND|ALERT_CHANNEL)=' "$BOT_DIR/.env" || _clash_rc=$?
+    case "$_clash_rc" in
+        0) log "ENV-NAME-CLASH: .env 가 DISCORD_SEND/ALERT_CHANNEL 을 정의한다 — 주입점을 조용히 덮는다(값은 안 읽었다)" ;;
+        1) : ;;   # 충돌 없음 = 정상
+        *) log "ENV-NAME-CLASH-UNKNOWN: .env 를 못 읽어 이름 충돌을 **판정 못 했다**(grep rc=$_clash_rc)" ;;
+    esac
+fi
+
 # Check 1: tmux 세션 살아있는지
 if ! tmux has-session -t "$SESSION" 2>/dev/null; then
     log "DEAD-SESSION: tmux session '$SESSION' not found. Restarting..."
@@ -468,7 +487,10 @@ detector_recovered() {
 
 DET_NOW=$(date +%s)
 if [ -f "$DETECTOR_HB" ]; then
-    DET_M=$(stat -c %Y "$DETECTOR_HB" 2>/dev/null || echo "")
+    # ⚠️ `stat -c` 는 GNU 전용, BSD 는 `-f %m`. 폴백이 없으면 룬드 맥에서 이 축이
+    #   **조용히 죽는다**(mtime 이 늘 빈 값 → 영원히 판정 불가 → 감지기 감시가 없는 것과 같다).
+    #   시험으로 실측했다(BSD 흉내 PATH): 폴백 전 2 fail → 후 0 fail.
+    DET_M=$(stat -c %Y "$DETECTOR_HB" 2>/dev/null || stat -f %m "$DETECTOR_HB" 2>/dev/null || echo "")
     case "$DET_M" in
         ''|*[!0-9]*)
             # 🔴 판정 불가를 "정상"으로도 "고장"으로도 접지 않는다 — 로그에만 남긴다.
