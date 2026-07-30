@@ -163,6 +163,32 @@ _parse_case '<html>oops</html>' 'json-decode'      'JSON 아님'
 _parse_case 'null'              'not-object'       'null(파싱은 됨)'
 _parse_case '[]'                'not-object'       '배열'
 _parse_case '{"unexpected":1}'  'no-known-buckets' '아는 칸 0개'
+# 🔴 **키만 세면 값의 타입을 안 본다** (룬드 대조 실측 2026-07-31 04:4x).
+#    {"five_hour": null} · {"five_hour":"abc"} 는 키가 있어 통과하고, 뒤에서 continue 되어
+#    alerts 가 비어 **rc=0 "임계 미달"** 이 됐다 — 고치려던 그 문장 그대로.
+_parse_case '{"five_hour":null}'  'no-known-buckets' '칸은 있는데 값이 null'
+_parse_case '{"five_hour":"abc"}' 'no-known-buckets' '칸은 있는데 값이 문자열'
+
+# 🔴 **파이썬이 예상 밖으로 죽으면 셸이 그걸 정상으로 접고 있었다.**
+#    셸이 `PARSE_RC -eq 3` 만 봐서, 크래시(rc=1)는 어느 분기에도 안 걸리고 verdict=ok 로 흘렀다.
+#    아래 본문은 utilization 이 문자열이라 `util <= 0` 에서 TypeError 가 난다 —
+#    isinstance(bucket, dict) 로는 안 막히는, **타입이 바뀐 스키마**의 실제 모양이다.
+#    🔑 이유를 모르는 실패도 *못 쟀다* 다. 모른다고 정상으로 접지 않는다.
+run FAKE_CODE=200 FAKE_BODY='{"five_hour":{"utilization":"abc","resets_at":"2099-01-01T00:00:00Z"}}'
+[ "$RC" -eq 2 ] && ok "파이썬이 예상 밖으로 죽어도 rc=2" || bad "예상 밖 크래시 종료코드" "2" "rc=$RC"
+grep -q 'verdict=ok' "$LOGF" && bad "크래시를 ok 로 접었다" "ok 아님" "$(cat "$LOGF")" \
+  || ok "  → ok 로 접지 않는다"
+grep -q 'verdict=parse-unknown' "$LOGF" && ok "  → parse-unknown 으로 갈린다" \
+  || bad "verdict=parse-unknown" "있음" "$(cat "$LOGF")"
+
+# 🔴 **섞인 본문** — 한 칸은 멀쩡하고 다른 칸만 타입이 틀린 경우.
+#    변이시험이 이 축이 비어 있다고 알려줬다(루프의 isinstance 를 되돌려도 39/0 이었다).
+#    탐지 가드는 *하나라도 dict 면* 통과시키므로, 망가진 칸은 **루프에서** 걸러야 한다.
+#    🔑 기대는 rc=2 가 아니라 **rc=0** 이다 — #91 이 세운 원칙(한 칸이 죽어도 나머지는 잰다) 그대로.
+run FAKE_CODE=200 FAKE_BODY='{"five_hour":{"utilization":1,"resets_at":"2099-01-01T00:00:00Z"},"seven_day":"abc"}'
+[ "$RC" -eq 0 ] && ok "섞인 본문: 멀쩡한 칸이 있으면 잰다 (rc=0)" || bad "섞인 본문 rc" "0" "rc=$RC"
+grep -q 'verdict=ok' "$LOGF" && ok "  → verdict=ok (망가진 칸은 건너뛴다)" \
+  || bad "섞인 본문 verdict" "ok" "$(cat "$LOGF")"
 
 # 🔑 대조군 — 아는 칸이 있고 임계 미달이면 조용히 rc=0. 위 단언들이 항진명제가 아님을 보인다.
 run FAKE_CODE=200 FAKE_BODY='{"five_hour":{"utilization":1,"resets_at":"2099-01-01T00:00:00Z"}}'

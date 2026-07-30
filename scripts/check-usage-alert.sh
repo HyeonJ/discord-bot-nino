@@ -162,12 +162,14 @@ windows = {
 # 아는 칸이 하나라도 응답에 있었는지 — 없으면 이 응답으로는 **아무것도 못 쟀다**.
 # ⚠️ 경계: *키는 있는데 값이 전부 못 쓰는* 경우는 여기서 안 가른다(#91 이 소유한 칸이다).
 #    그 칸도 사실상 못 잰 것이라 별건으로 남긴다 — 안 잰 것을 여기서 몰래 바꾸지 않는다.
-if not any(k in data for k in windows):
+# 🔴 **키 존재만 보면 값의 타입을 안 본다** (룬드 대조 실측). {"five_hour": null} 은 키가 있어
+#    통과하고 뒤에서 continue 되어 alerts 가 비어 rc=0 "임계 미달" 이 됐다 — 고치려던 그 문장 그대로.
+if not any(isinstance(data.get(k), dict) for k in windows):
     unreadable("no-known-buckets")
 
 for key, (label, window_hours) in windows.items():
     bucket = data.get(key)
-    if not bucket or bucket.get("utilization") is None:
+    if not isinstance(bucket, dict) or bucket.get("utilization") is None:
         continue
 
     util = bucket["utilization"]
@@ -216,7 +218,10 @@ esac
 
 # 🔴 파싱 실패를 정상으로 접지 않는다 — 옛 코드는 `sys.exit(0)` 이라 200 인데 조용히 끝났다.
 # 🔑 갈래 이름은 룬드 check-usage-alert.sh 와 **같은 문면**이다(계약은 링크가 아니라 사본).
-if [ "$PARSE_RC" -eq 3 ]; then
+# 🔴 `-eq 3` 이었다 — 그래서 **파이썬이 예상 밖으로 죽으면(rc=1) 어느 분기에도 안 걸리고
+#    verdict=ok 로 흘렀다.** 크래시가 정상으로 접히는 자리였다(2026-07-31 04:4x 실측).
+#    ⇒ **이유를 모르는 실패도 못 쟀다** 다. 모른다고 정상으로 접지 않는다(parse-unknown).
+if [ "$PARSE_RC" -ne 0 ]; then
     VERDICT="parse-$PARSE_WHY"
     exit 2
 fi
