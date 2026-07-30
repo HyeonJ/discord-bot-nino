@@ -48,12 +48,22 @@ printf '# 할 일\n- [x] 끝난 것만 있음\n' > "$ROOT/empty-todo.md"
 run() {  # run <TODO_FILE> <WEATHER_JSON> [DRIFT_HEARTBEAT] — 항상 DRY_RUN
   # 하트비트를 안 주면 **신선한 것**을 기본으로 깐다 — 안 그러면 기존 시험 전부가
   # "하트비트 없음" 경고를 달고 나와서, 다른 섹션을 보는 단언이 흔들린다.
+  # ⚠️ PR_LIST_CMD 를 안 주면 기본값이 **진짜 gh 를 친다** — 시험이 네트워크·계정에 매달리고,
+  #    조회가 느리거나 실패하면 다른 단언까지 흔들린다. 기본은 항상 "0건 스텁"으로 막는다.
+  #    (같은 자리를 룬드 `#35` 리뷰에서 잡았다: 시험이 진짜 API 를 치고 있었다.)
   DRY_RUN=1 TODO_FILE="$1" WEATHER_JSON="$2" \
     DRIFT_HEARTBEAT="${3:-$ROOT/hb-fresh}" \
+    PR_LIST_CMD="${PR_LIST_CMD:-$ROOT/pr-none}" \
     DISCORD_SEND="$ROOT/should-not-be-called" \
     bash "$SCRIPT" 2>&1
 }
 printf '%s rc=0\n' "$(date '+%Y-%m-%d %H:%M:%S')" > "$ROOT/hb-fresh"
+
+# 스텁 만들기 — `run()` 의 기본 스텁(pr-none)은 **여기서** 만들어야 한다.
+# ⚠️ 처음엔 ⑪ 구간에서 만들었다가 앞쪽 시험이 전부 "PR 못 읽음" 경고를 달고 나왔고,
+#    ④(빈 상태 ≠ 실패)가 그걸 잡았다 — **기본값이 없는 파일을 가리키면 조회 실패가 된다.**
+_mk() { printf '#!/usr/bin/env bash\n%s\n' "$2" > "$ROOT/$1"; chmod +x "$ROOT/$1"; }
+_mk pr-none 'exit 0'                                   # 조회 성공 · 0건
 
 echo "① 정상 — 날씨 수치와 상위 3개가 들어간다"
 out="$(run "$ROOT/todo.md" "$ROOT/weather.json")"
@@ -294,6 +304,86 @@ if grep -qE '시간째|한 번도' <<<"$(grep '드리프트' <<<"$out")"; then
 out="$(run "$ROOT/todo.md" "$ROOT/weather.json" "$ROOT/hb-stale")"
 if grep -q '27°C' <<<"$out" && grep -q '첫째 항목' <<<"$out"; then
   ok "하트비트가 낡아도 날씨·할 일은 그대로"; else bad "다른 섹션이 같이 죽었다" "$out"; fi
+
+echo
+echo "⑪ 리뷰 안 달린 PR — 조용한 큐를 소리 내게 한다"
+# 🔑 이 섹션의 본체도 ⑩ 과 같다: **0건(확인된 정상)과 못 읽음(판정 불가)을 가르는가.**
+#    실사고 — 룬드 `#29` 가 이틀 묻혔고, 같은 시각 내 레포에 리뷰 0건이 6개 있었다.
+
+D2="$(fmt_ago $(( 2 * DAY )) '+%Y-%m-%d')T09:00:00Z"
+D0="$(fmt_ago 0            '+%Y-%m-%d')T09:00:00Z"
+
+_mk pr-fail 'exit 1'                                   # 조회 실패
+_mk pr-two  "printf '91\t$D2\t버킷 하나가 죽으면\n80\t$D2\t미응답 리마인더\n'"
+_mk pr-today "printf '99\t$D0\t오늘 연 것\n'"
+_mk pr-bad  "printf '77\tnot-a-date\t날짜가 깨진 것\n'"
+_mk pr-five "for n in 1 2 3 4 5; do printf '%s\t$D2\t제목 %s\n' \"\$n\" \"\$n\"; done"
+_mk pr-echo 'printf "%s\n" "$1" >> '"$ROOT/repos-seen"
+
+# ⑪-1 0건이면 **줄이 없다** (확인된 정상은 조용하다)
+out="$(PR_LIST_CMD="$ROOT/pr-none" run "$ROOT/todo.md" "$ROOT/weather.json")"
+if ! grep -q '리뷰 안 달린' <<<"$out"; then ok "0건이면 섹션을 뺀다"; else bad "0건인데 줄이 났다" "$out"; fi
+
+# ⑪-2 있으면 번호·나이가 보인다
+out="$(PR_LIST_CMD="$ROOT/pr-two" PR_REPOS=a/b run "$ROOT/todo.md" "$ROOT/weather.json")"
+if grep -q 'b#91' <<<"$out" && grep -q '2일째' <<<"$out"; then
+  ok "PR 번호와 묵은 날수를 낸다"; else bad "번호/나이 누락" "$out"; fi
+if grep -q '리뷰 안 달린 PR 2건' <<<"$out"; then ok "총 건수를 낸다"; else bad "건수 없음" "$out"; fi
+
+# ⑪-3 🔴 조회 실패는 **0건과 달라야 한다** — 이 시험 하나가 이 섹션의 존재 이유다
+out="$(PR_LIST_CMD="$ROOT/pr-fail" PR_REPOS=a/b run "$ROOT/todo.md" "$ROOT/weather.json")"
+if grep -q '못 읽음' <<<"$out"; then ok "조회 실패는 소리를 낸다(0건과 안 섞인다)"; else
+  bad "못 읽었는데 조용하다 — 0건과 구별 불가" "$out"; fi
+
+# ⑪-4 오늘 연 PR 은 안 센다 (임계 미만) — 상시로 차면 배경이 된다
+out="$(PR_LIST_CMD="$ROOT/pr-today" PR_REPOS=a/b run "$ROOT/todo.md" "$ROOT/weather.json")"
+if ! grep -q '리뷰 안 달린' <<<"$out"; then ok "오늘 연 것은 아직 안 센다"; else bad "임계가 안 먹는다" "$out"; fi
+
+# ⑪-5 나이를 **못 쟀다고 빼면 안 된다** — 빼면 그 PR 이 사라진다(무음이 곧 없음이 된다)
+out="$(PR_LIST_CMD="$ROOT/pr-bad" PR_REPOS=a/b run "$ROOT/todo.md" "$ROOT/weather.json")"
+if grep -q 'b#77' <<<"$out"; then ok "나이를 못 재도 목록에 남긴다"; else bad "못 쟀다고 통째로 빠졌다" "$out"; fi
+if grep -q '못 읽음' <<<"$(grep 'b#77' <<<"$out")"; then ok "못 쟀다고 적는다(0일째로 단정 안 함)"; else
+  bad "못 쟀는데 나이를 단정했다" "$out"; fi
+
+# ⑪-6 상위 N 개만 읽고 나머지는 건수로 — 할 일 섹션과 같은 규약
+out="$(PR_LIST_CMD="$ROOT/pr-five" PR_REPOS=a/b PR_TOP=3 run "$ROOT/todo.md" "$ROOT/weather.json")"
+if [[ "$(grep -c 'b#' <<<"$out")" -eq 3 ]] && grep -q '외 2건' <<<"$out"; then
+  ok "상위 3개 + 나머지 건수"; else bad "상위/나머지 규약 어긋남" "$out"; fi
+
+# ⑪-7 레포를 **둘 다** 본다 — 한쪽만 보면 "내가 밀린 것"이 안 보인다(#29 가 그 자리였다)
+: > "$ROOT/repos-seen"
+PR_LIST_CMD="$ROOT/pr-echo" PR_REPOS="x/one y/two" run "$ROOT/todo.md" "$ROOT/weather.json" >/dev/null
+if grep -q '^x/one$' "$ROOT/repos-seen" && grep -q '^y/two$' "$ROOT/repos-seen"; then
+  ok "설정된 레포를 전부 조회한다"; else bad "일부 레포를 안 봤다" "$(cat "$ROOT/repos-seen")"; fi
+
+# ⑪-8 한 레포가 죽어도 다른 레포는 그대로 보고한다 (오늘 반복된 원칙)
+_mk pr-mixed 'case "$1" in dead/one) exit 1 ;; *) printf "55\t'"$D2"'\t살아있는 쪽\n" ;; esac'
+out="$(PR_LIST_CMD="$ROOT/pr-mixed" PR_REPOS="dead/one live/two" run "$ROOT/todo.md" "$ROOT/weather.json")"
+if grep -q '못 읽음' <<<"$out" && grep -q 'two#55' <<<"$out"; then
+  ok "한 레포가 죽어도 나머지는 보고한다"; else bad "한쪽 실패가 전체를 삼켰다" "$out"; fi
+
+# ⑪-9 이 섹션이 죽어도 날씨·할 일은 그대로 (섹션 격리)
+if grep -q '27°C' <<<"$out" && grep -q '첫째 항목' <<<"$out"; then
+  ok "PR 조회가 실패해도 다른 섹션은 살아있다"; else bad "다른 섹션이 같이 죽었다" "$out"; fi
+
+# ⑪-10·11 은 함수를 직접 부른다 — 아래 두 이유로 프로세스를 새로 띄우면 안 된다.
+#   ⚠️ PATH 를 비워 gh 부재를 만들면 **bash·date 까지 사라진다**. 처음에 `PATH=/nonexistent`
+#      로 스크립트를 통째로 돌렸다가 `bash: command not found` 로 시험 자체가 죽었다 —
+#      *재려던 조건(gh 없음)이 아니라 재는 도구를 없앤 것*이다.
+#   ⇒ 소스해서 함수만 부르면 `command -v` 는 빌트인이라 PATH 가 비어도 돈다.
+# shellcheck source=/dev/null
+source "$SCRIPT"   # main 은 소스 가드가 막는다 — 순수 함수만 꺼내 쓴다
+
+# ⑪-10 gh 가 없으면 **조용히 넘어가지 않는다**
+mkdir -p "$ROOT/empty"
+out="$(PATH="$ROOT/empty" PR_LIST_CMD="" unreviewed_pr_section 2>&1)"
+if grep -q 'gh 없음' <<<"$out"; then ok "gh 부재는 판정 불가로 낸다"; else bad "gh 가 없는데 조용하다" "$out"; fi
+
+# ⑪-11 iso_epoch 단위 — 못 쟀을 때 **0 을 돌려주면 안 된다**(file_mtime 과 같은 함정)
+if iso_epoch "$(fmt_ago 0 '+%Y-%m-%d')" >/dev/null; then ok "iso_epoch: 정상 날짜는 재진다"; else
+  bad "iso_epoch 이 정상 날짜를 못 잰다" "GNU/BSD 분기 확인"; fi
+if ! iso_epoch "not-a-date" >/dev/null 2>&1; then ok "iso_epoch: 못 재면 실패로 낸다(0 아님)"; else
+  bad "못 쟀는데 값을 돌려줬다" "$(iso_epoch 'not-a-date')"; fi
 
 echo
 echo "  통과 $pass · 실패 $fail"
