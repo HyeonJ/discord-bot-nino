@@ -671,7 +671,12 @@ echo "🔴 실물 계약 — 스텁이 받은 argv 를 **진짜 discord-send** �
 #     네트워크 없이 해석까지만 태운다. 인자를 시험이 다시 적지 않으므로 드리프트가 없다.
 REAL_SEND="$REPO/src/discord-send"
 # 채널명을 시험에 다시 적지 않는다 — 스크립트에서 뽑는다(적으면 드리프트가 난다)
+# 🔴 주입점이 생기면서 그 줄이 `ALERT_CHANNEL="${ALERT_CHANNEL:-현인-업무}"` 가 됐다.
+#   **추출기는 자기가 낡은 걸 스스로 알리지 않는다** — 안 고치면 리터럴 `${ALERT_CHANNEL:-…}` 를
+#   뽑아 channel-map 조회가 빈 값이 되고, 그건 "채널이 안 잡힌다"는 **엉뚱한 실패**로 보인다.
+#   ⇒ 감싼 형태에서 기본값만 벗겨낸다. 두 형태 다 받는다.
 ALERT_CH="$(sed -n 's/^ALERT_CHANNEL="\([^"]*\)".*/\1/p' "$WD" | head -1)"
+ALERT_CH="${ALERT_CH#\$\{ALERT_CHANNEL:-}"; ALERT_CH="${ALERT_CH%\}}"
 
 # 🔴 **이 계약은 니노 기계에서만 잴 수 있다 — 그건 결함이 아니라 설계다.**
 #   src/discord-send 는 BOT_DIR·CORE_CLI·BUN 을 **절대경로로 고정**한다:
@@ -722,6 +727,138 @@ print(v if isinstance(v, str) else (v or {}).get("id", ""))
     bad "channel-map 에서 $ALERT_CH 를 찾았다" "채널 ID" "<없음>"
   fi
 fi
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 🔴 주입 축 — **시험이 실물을 건드릴 수 있는가**
+#
+#   2026-07-31 06:28~06:32, 룬드의 `check-usage-alert` 시험이 형 채널로 **84건을 실제로 쐈다.**
+#   원인은 하나였다: 전송 경로가 하드코딩이라 **시험이 다른 데로 돌릴 방법이 없었다.**
+#   여기는 지금 안 샌다 — 시험이 가짜 `$BOT_DIR` 트리를 깔기 때문이다. 하지만 그건
+#   *경로 조작에 기댄 간접 안전*이고, 다음 시험이 그 전제를 안 지키면 그대로 샌다.
+#
+# 🔑 두 축이 재는 게 다르다 (룬드 정리):
+#     동적 — 스텁을 **탔을 때** 무엇이 갔나
+#     정적 — 스텁을 **안 탈 수 있는가**
+#   샌 전송은 정의상 스텁을 안 지나갔으니 **스텁 로그에는 영원히 안 나온다.**
+#   그래서 동적 축만으로는 "안 샌다"를 절대 못 잰다 — 정적 축이 그걸 잰다.
+# ═══════════════════════════════════════════════════════════════════════════
+echo ""
+echo "🔴 주입 축 — 시험이 실채널로 샐 수 있는가:"
+
+INJ_SEND="$WORK/bin/injected-send"
+printf '#!/bin/bash\nprintf "%%s|%%s\\n" "$1" "$2" >> "$WORK_MARK/injected.txt"\nexit 0\n' > "$INJ_SEND"
+chmod +x "$INJ_SEND"
+
+run_wd_inject() {   # $1=DISCORD_SEND $2=ALERT_CHANNEL ; 나머지는 run_wd 와 같은 환경
+  : > "$WORK/sent.txt"; : > "$WORK/injected.txt"; : > "$WORK/restarted.txt"
+  WORK_MARK="$WORK" PATH="$WORK/bin:$PATH" NINO_SILENCE_LIMIT="${LIMIT:-3600}" \
+    NINO_HISTORY_CLI="$WORK/bin/yaksu-history" \
+    NINO_SESSION_LOG_DIR="$WORK/sessions" \
+    DISCORD_SEND="$1" ALERT_CHANNEL="$2" \
+    bash "$WORK/scripts/nino-watchdog.sh" >/dev/null 2>"$WORK/stderr.txt"
+}
+
+# 🧪 [양성 대조군] 먼저 — **주입 안 했을 때 기본 경로가 실제로 받는가.**
+#   이걸 안 재면 아래 "기본 경로가 안 받았다"가 *주입이 먹혀서*인지 *애초에 알림이 안 떴는지*
+#   구별이 안 된다. 두 상태가 같은 모습이면 그 시험은 아무것도 안 잰 것이다.
+reset; set_hb 120; make_history Tim
+CTRL="$(run_wd)"
+[ -n "$CTRL" ] \
+  && ok "🧪 [양성 대조군] 주입이 없으면 기본 경로가 받는다" \
+  || bad "🧪 [양성 대조군] 기본 경로 수신" "sent.txt 에 한 건 이상" "<없음> — 알림 자체가 안 떴다면 아래 축은 무의미하다"
+
+# ① 동적 — 주입하면 **모든** 호출이 그리로 간다
+reset; set_hb 120; make_history Tim
+run_wd_inject "$INJ_SEND" "주입-채널"
+INJ_OUT="$(cat "$WORK/injected.txt" 2>/dev/null)"
+DEF_OUT="$(cat "$WORK/sent.txt" 2>/dev/null)"
+[ -n "$INJ_OUT" ] \
+  && ok "주입한 전송 경로로 간다" \
+  || bad "주입한 경로 수신" "injected.txt 에 한 건 이상" "<없음> — DISCORD_SEND 주입이 안 먹는다"
+[ -z "$DEF_OUT" ] \
+  && ok "기본 경로(=운영 경로)는 한 건도 안 받는다" \
+  || bad "기본 경로 무수신" "<없음>" "$DEF_OUT — 주입해도 일부가 실물로 샌다"
+case "$INJ_OUT" in
+  주입-채널*) ok "채널도 주입한 값으로 간다" ;;
+  *) bad "주입 채널" "주입-채널|…" "${INJ_OUT:-<없음>} — 채널이 하드코딩이면 실채널로 쏜다" ;;
+esac
+
+# ② 이름의 소유 — **`.env` 는 이 두 이름을 정의하면 안 된다**
+#   🔴 이 시험을 처음엔 "주입이 `.env` 를 이긴다"로 썼다가 빨갛게 나왔고, **빨간 게 맞았다.**
+#     `.env` 의 평범한 `DISCORD_SEND=…` 는 해석을 앞에 두든 뒤에 두든 **항상 이긴다**(나중 대입이 이긴다).
+#     이기게 하려면 주입값을 미리 대피시키는 폴백 사슬이 필요한데 — 06:46 사고가 정확히
+#     **사슬을 한 칸 늘렸다가** 난 것이다(`${DISCORD_SEND_BIN:-…}` 가 실물 경로를 되돌려놨다).
+#   🔑 ⇒ 사슬로 이기려 하지 말고 **충돌 자체를 금지**한다. 이 두 이름은 주입점이 소유한다.
+#     못 이기는 싸움을 없애는 쪽이, 이기는 장치를 덧대는 쪽보다 잴 것이 적다.
+# 🔴 worktree 에는 `.env` 가 없다(untracked 라 본체에만 있다). 여기서 멈추면 이 계약은
+#   **내가 일하는 모든 자리에서 판정 불가**가 된다 — 즉 사실상 안 재는 계약이다.
+#   ⇒ 운영이 실제로 읽는 파일을 본다. 워치독은 `$BOT_DIR/.env` 를 읽고, 운영 BOT_DIR 은 본체다.
+REAL_ENV="${WD_ENV:-}"
+if [ -z "$REAL_ENV" ]; then
+  for _c in "$REPO/.env" "$HOME/discord-bot-nino/.env"; do
+    [ -r "$_c" ] && { REAL_ENV="$_c"; break; }
+  done
+fi
+if [ -z "$REAL_ENV" ] || [ ! -r "$REAL_ENV" ]; then
+  skipt "이름 소유: .env 가 DISCORD_SEND/ALERT_CHANNEL 을 안 쓴다" \
+    "$REAL_ENV 를 못 읽는다 — 니노 기계에서만 잴 수 있다"
+else
+  ENV_CLASH="$(sed 's/#.*//' "$REAL_ENV" | grep -E '^[[:space:]]*(export[[:space:]]+)?(DISCORD_SEND|ALERT_CHANNEL)=')"
+  if [ -z "$ENV_CLASH" ]; then
+    ok "이름 소유: .env 가 DISCORD_SEND/ALERT_CHANNEL 을 정의하지 않는다"
+  else
+    bad "이름 소유" "<없음>" "$ENV_CLASH — .env 대입이 주입을 조용히 덮는다(순서로는 못 이긴다)"
+  fi
+  # 🧪 [양성 대조군] 이 검사기가 실제로 잡는가 — `_BIN` 접미사에 낚이지 않는지까지.
+  #   `.env` 에 있는 `DISCORD_SEND_BIN` 을 위반으로 세면 이 시험은 영원히 빨갛고, 그것도 못 재는 것이다.
+  CLASH_PROBE="$WORK/env-probe"
+  printf 'DISCORD_SEND_BIN=/x/y\nexport ALERT_CHANNEL=현인-업무\n#DISCORD_SEND=/주석\n' > "$CLASH_PROBE"
+  PROBE_OUT="$(sed 's/#.*//' "$CLASH_PROBE" | grep -E '^[[:space:]]*(export[[:space:]]+)?(DISCORD_SEND|ALERT_CHANNEL)=')"
+  case "$PROBE_OUT" in
+    *ALERT_CHANNEL*) case "$PROBE_OUT" in
+        *DISCORD_SEND_BIN*) bad "🧪 [양성 대조군] 이름 충돌 검사기" "_BIN 은 위반이 아니다" "$PROBE_OUT" ;;
+        *) ok "🧪 [양성 대조군] 이름 충돌 검사기가 export/주석/_BIN 을 정확히 가른다" ;;
+      esac ;;
+    *) bad "🧪 [양성 대조군] 이름 충돌 검사기" "심어둔 ALERT_CHANNEL 검출" "${PROBE_OUT:-<없음>} — 검사가 공허하다" ;;
+  esac
+  rm -f "$CLASH_PROBE"
+fi
+
+# ③ 정적 — **스텁을 안 탈 수 있는 자리가 남아 있는가**
+#   위 동적 축은 "스텁을 탄 것"만 본다. 샌 전송은 스텁을 안 지나가므로 거기엔 절대 안 남는다.
+#   ⇒ 소스에서 직접 센다: 주입점 한 줄 말고 `src/discord-send` 를 직접 부르는 자리가 있으면 위반.
+hardcoded_send_lines() {   # $1 = 파일 ; stdout = 위반 줄 ; rc 0=쟀다 2=못 쟀다
+  local f="$1" stripped
+  # 주석을 먼저 지운다 — 주석 속 경로는 호출이 아니다
+  stripped="$(sed 's/#.*//' "$f")" || return 2
+  printf '%s\n' "$stripped" | grep 'src/discord-send' | grep -v 'DISCORD_SEND:-'
+  return 0
+}
+VIOL="$(hardcoded_send_lines "$WD")"; VRC=$?
+if [ "$VRC" -ne 0 ]; then
+  # 🔴 검사 도구가 죽은 것을 **통과로 접지 않는다.** 오늘 룬드 `#106` 이 바로 그 형태였다
+  #   (가드가 실패하면 열려서 항상 초록).
+  skipt "정적: 하드코딩된 전송 자리 없음" "검사기가 파일을 못 읽었다(rc=$VRC) — 못 쟀다"
+elif [ -z "$VIOL" ]; then
+  ok "정적: 주입점 밖에서 src/discord-send 를 직접 부르는 자리가 없다"
+else
+  bad "정적: 하드코딩된 전송 자리" "<없음>" "$VIOL"
+fi
+
+# 🧪 [양성 대조군] 정적 검사기 자체가 일을 하는가 — 하드코딩을 심은 사본을 잡아야 한다.
+#   안 재면 정규식이 아무것도 안 맞아도 초록이다(= 빈 검사가 통과로 보인다).
+MUT="$WORK/mutant-wd.sh"
+cp "$WD" "$MUT" && printf '\n"$BOT_DIR/src/discord-send" "현인-업무" "샌다"\n' >> "$MUT"
+MVIOL="$(hardcoded_send_lines "$MUT")"; MRC=$?
+if [ "$MRC" -ne 0 ]; then
+  skipt "🧪 [양성 대조군] 정적 검사기" "변이 사본을 못 만들었다 — 검사기가 일하는지 못 쟀다"
+elif [ -n "$MVIOL" ]; then
+  ok "🧪 [양성 대조군] 정적 검사기가 심어둔 하드코딩을 잡는다"
+else
+  bad "🧪 [양성 대조군] 정적 검사기" "위반 검출" "<없음> — 검사기가 아무것도 안 잰다(위 초록은 공허하다)"
+fi
+rm -f "$MUT"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
