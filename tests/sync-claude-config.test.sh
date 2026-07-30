@@ -75,21 +75,103 @@ echo "⑥ 🔴 **변경이 있으면 커밋 단계까지 도달한다** (2026-07
 #    ⚠️ 복사는 눈에 보이고(파일이 생긴다) 커밋은 안 보인다 — **절반이 성공하면 성공처럼 보인다.**
 #       그래서 ①~⑤(복사 결과)만으로는 이 결함을 영원히 못 잡는다. 마지막 단계를 봐야 한다.
 GITREPO="$ROOT/repo"
-( cd "$GITREPO" && git init -q 2>/dev/null && git config user.email t@t && git config user.name t \
+# 진짜 origin(bare)을 둔다 — push 가 도달했는지 **원격에서** 확인해야 판정이 된다
+git -c init.defaultBranch=main init -q --bare "$ROOT/origin.git"
+( cd "$GITREPO" && git -c init.defaultBranch=main init -q && git config user.email t@t && git config user.name t \
   && mkdir -p .claude && printf '{}\n' > .claude/settings.json \
-  && git add -A >/dev/null 2>&1 && git commit -qm init 2>/dev/null ) || true
+  && git add -A >/dev/null 2>&1 && git commit -qm init >/dev/null 2>&1 \
+  && git remote add origin "$ROOT/origin.git" && git push -q -u origin main ) || true
+
+# gh 스텁: 호출을 기록하고, 열린 PR 여부를 GH_STUB_PR_OPEN 으로 조종한다
+cat > "$ROOT/gh" <<'GHEOF'
+#!/bin/bash
+echo "$*" >> "$GH_CALLS"
+case "$1 $2" in
+  "pr list") [ "${GH_STUB_PR_OPEN:-0}" = 1 ] && echo 42; exit 0 ;;
+  "pr create") echo "https://example.invalid/pr/99"; exit 0 ;;
+esac
+exit 0
+GHEOF
+chmod +x "$ROOT/gh"
+SYNC_BRANCH=chore/claude-config-sync
+
+run_git() {  # git 단계까지 도는 실행 (gh 스텁 + sync worktree 주입)
+  BOT_DIR="$ROOT/repo" CLAUDE_DIR="$ROOT/live" CONFIG_DIR="$ROOT/repo/claude-config" \
+  LOG_FILE="$ROOT/repo/logs/sync.log" GH_BIN="$ROOT/gh" GH_CALLS="$ROOT/gh-calls.log" \
+  SYNC_WORKTREE="$ROOT/sync-wt" GH_STUB_PR_OPEN="${GH_STUB_PR_OPEN:-0}" bash "$SCRIPT" 2>&1
+}
+main_commits() { git -C "$GITREPO" rev-list --count main; }
+branch_commits() { git -C "$ROOT/origin.git" rev-list --count "$SYNC_BRANCH" 2>/dev/null || echo 0; }
+
+before_main="$(main_commits)"
 printf '# demo v3\n' > "$ROOT/live/skills/demo/SKILL.md"
-out="$(run)"; rc=$?
-grep -q 'synced and pushed' "$ROOT/repo/logs/sync.log" \
+out="$(run_git)"; rc=$?
+[ "$rc" -eq 0 ] && ok "종료코드 0" || bad "종료코드 $rc — 중간에 죽었다" "$out"
+grep -q 'committed' "$ROOT/repo/logs/sync.log" \
   && ok "커밋 단계 로그에 도달한다" \
   || bad "복사만 하고 죽었다 — 마지막 줄에 도달 못 함" "$(tail -3 "$ROOT/repo/logs/sync.log")"
-[ "$rc" -eq 0 ] && ok "종료코드 0" || bad "종료코드 $rc — 중간에 죽었다" "$out"
 
-echo "⑦ 변경이 없을 때도 정상 종료한다 (대조군 — ⑥이 그냥 항상 참이 아님을 보인다)"
-run >/dev/null; rc2=$?
+echo "⑦ 🔴 **main 에는 커밋하지 않는다** (Darren 승인 2026-07-30 — PR 게이트 우회 차단)"
+# 이 시험이 없던 동안 sync cron 이 main 에 직접 커밋+push 해서, claude-config 아래 파일은
+# "기능/변경은 브랜치 → PR → 리뷰" 규칙을 **구조적으로 우회**했다(#81 훅이 실제로 그렇게 들어갔다).
+[ "$(main_commits)" -eq "$before_main" ] && ok "main 커밋 수가 그대로 ($before_main)" \
+  || bad "main 에 커밋했다 ($before_main → $(main_commits))" "$(git -C "$GITREPO" log --oneline -2 main)"
+[ -z "$(git -C "$GITREPO" status --porcelain --untracked-files=no -- .claude claude-config 2>/dev/null | grep -v '^$' || true)" ] \
+  && ok "main 워킹트리 인덱스를 스테이징하지 않는다" \
+  || ok "main 워킹트리는 dirty (복사 결과 — 커밋만 안 하면 된다)"
+[ "$(branch_commits)" -ge 1 ] && ok "origin 의 $SYNC_BRANCH 에 커밋이 도달했다 ($(branch_commits)개)" \
+  || bad "push 가 원격에 안 닿았다" "$(tail -4 "$ROOT/repo/logs/sync.log")"
+git -C "$ROOT/origin.git" show "$SYNC_BRANCH:claude-config/skills/demo/SKILL.md" 2>/dev/null | grep -q v3 \
+  && ok "원격 브랜치 내용이 라이브와 같다" || bad "원격 브랜치에 새 내용이 없다"
+
+echo "⑧ PR 이 없으면 만들고, 있으면 또 만들지 않는다"
+grep -q 'pr create' "$ROOT/gh-calls.log" 2>/dev/null && ok "PR 생성을 시도했다" \
+  || bad "PR 을 만들지 않았다 — 커밋만 브랜치에 쌓이면 아무도 안 본다" "$(cat "$ROOT/gh-calls.log" 2>/dev/null)"
+: > "$ROOT/gh-calls.log"
+printf '# demo v4\n' > "$ROOT/live/skills/demo/SKILL.md"
+GH_STUB_PR_OPEN=1 run_git >/dev/null
+grep -q 'pr create' "$ROOT/gh-calls.log" 2>/dev/null \
+  && bad "PR 이 열려 있는데 또 만들었다" "$(cat "$ROOT/gh-calls.log")" \
+  || ok "열린 PR 이 있으면 생성 안 함"
+[ "$(branch_commits)" -ge 2 ] && ok "열린 PR 위에 커밋을 더 쌓는다 ($(branch_commits)개)" \
+  || bad "두 번째 변경이 브랜치에 안 올라갔다"
+
+echo "⑨ gh 가 없어도 커밋·push 는 남는다 (판정 불가를 실패로 접지 않는다)"
+: > "$ROOT/gh-calls.log"
+printf '# demo v5\n' > "$ROOT/live/skills/demo/SKILL.md"
+before_b="$(branch_commits)"
+out9="$(BOT_DIR="$ROOT/repo" CLAUDE_DIR="$ROOT/live" CONFIG_DIR="$ROOT/repo/claude-config" \
+  LOG_FILE="$ROOT/repo/logs/sync.log" GH_BIN="$ROOT/없는gh" GH_CALLS="$ROOT/gh-calls.log" \
+  SYNC_WORKTREE="$ROOT/sync-wt" bash "$SCRIPT" 2>&1)"; rc9=$?
+[ "$rc9" -eq 0 ] && ok "gh 없음에도 종료코드 0" || bad "gh 없으면 죽는다 (rc=$rc9)" "$out9"
+[ "$(branch_commits)" -gt "$before_b" ] && ok "커밋·push 는 그대로 진행됐다" \
+  || bad "gh 부재가 커밋까지 막았다"
+grep -q 'WARN.*gh' "$ROOT/repo/logs/sync.log" && ok "gh 부재를 로그에 남긴다 (조용히 넘기지 않는다)" \
+  || bad "gh 부재가 로그에 없다 — 부재는 조용하다" "$(tail -3 "$ROOT/repo/logs/sync.log")"
+
+echo "⑩ 라이브는 바뀌었지만 tracked 내용이 같으면 **빈 커밋을 만들지 않는다**"
+# 실제로 나는 경우: 누가 tracked 사본을 되돌려 놓으면 다음 회차가 그걸 다시 복사한다(CHANGED>0)
+# → 그런데 워크트리 내용은 HEAD 와 같다. 여기서 커밋을 시도하면 `git commit` 이 실패해
+#   스크립트가 rc=1 로 죽는다(cron 이라 아무도 안 읽는 조용한 실패).
+: > "$ROOT/gh-calls.log"
+# PR 이 열려 있어야 브랜치가 초기화되지 않아 "브랜치 HEAD == 새 내용" 상태를 만들 수 있다
+rm -rf "$ROOT/repo/claude-config/skills/demo"           # tracked 만 되돌린 상태
+b_same="$(branch_commits)"
+out10="$(GH_STUB_PR_OPEN=1 run_git)"; rc10=$?
+[ "$rc10" -eq 0 ] && ok "tracked 되돌림 후에도 종료코드 0" || bad "커밋할 게 없는데 죽었다 (rc=$rc10)" "$out10"
+[ "$(branch_commits)" -eq "$b_same" ] && ok "빈 커밋을 만들지 않는다 ($b_same 유지)" \
+  || bad "빈/중복 커밋이 쌓였다 ($b_same → $(branch_commits))"
+grep -q 'tracked 내용은 동일' "$ROOT/repo/logs/sync.log" && ok "그 갈래를 로그로 구분한다" \
+  || bad "무엇 때문에 커밋을 안 했는지 로그에 없다" "$(tail -2 "$ROOT/repo/logs/sync.log")"
+
+echo "⑪ 변경이 없을 때도 정상 종료한다 (대조군 — 위 검사가 항상 참이 아님을 보인다)"
+b_before="$(branch_commits)"
+run_git >/dev/null; rc2=$?
 [ "$rc2" -eq 0 ] && ok "무변경 종료코드 0" || bad "무변경인데 종료코드 $rc2"
 tail -1 "$ROOT/repo/logs/sync.log" | grep -q 'no changes' && ok "무변경 경로는 다른 줄을 남긴다" \
   || bad "무변경 로그가 다르지 않다" "$(tail -1 "$ROOT/repo/logs/sync.log")"
+[ "$(branch_commits)" -eq "$b_before" ] && ok "무변경이면 빈 커밋을 만들지 않는다" \
+  || bad "빈 커밋이 쌓였다 ($b_before → $(branch_commits))"
 
 echo
 echo "  통과 $pass · 실패 $fail"
