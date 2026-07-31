@@ -146,3 +146,117 @@ describe('health-checker', () => {
     });
   });
 });
+
+/**
+ * 🔴 경보 발송 축 — **두 시험 파일 다 이 축을 안 재고 있었다** (2026-07-31)
+ *
+ * `sendAlert` 는 `execSync` 실패를 `console.error` 로 삼킨다. 헬스체커가 *"봇이 아프다"* 를
+ * 알리려다 실패하면 **그 실패조차 아무도 모른다** — `#88`(check-auth 가 발송 실패를 삼키고
+ * "보냈다"로 기록)과 같은 부류인데, 여기선 **감시기 자신의 알림 경로**다.
+ *
+ * 🔑 그리고 기본값이 틀렸다:
+ *   `path.join(process.cwd(), 'src', 'discord-send')`
+ *   relay 의 실제 cwd 는 `/home/bpx27/yaksu-bot-core-live` (systemd WorkingDirectory) 라
+ *   존재하지 않는 경로가 만들어진다. 지금 안 터지는 건 `.env` 가 `DISCORD_SEND_BIN` 을
+ *   덮고 있어서일 뿐이다 — **막아둔 게 아니라 안 밟고 있을 뿐.**
+ *   레포 규칙: *"기본값 넣지 말고 필수면 에러로 안내"*.
+ *
+ * 🔸 룬드 M:6y6k: *"안 잡히면 고장이 없는 게 아니라 재는 시험이 없는 것"* — 정확히 그 자리였다.
+ */
+describe('health-checker — 경보 발송 실패를 삼키지 않는다', () => {
+  const fs = require('fs');
+  const os = require('os');
+  const path = require('path');
+  const KEY = require.resolve('../relay-addons/health-checker');
+
+  function freshLoad(envVal) {
+    delete require.cache[KEY];
+    if (envVal === undefined) delete process.env.DISCORD_SEND_BIN;
+    else process.env.DISCORD_SEND_BIN = envVal;
+    return require('../relay-addons/health-checker');
+  }
+
+  test('🧪 [양성 대조군] 성공하면 true — 실패 단언이 항진명제가 아님을 고정한다', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hcbin-'));
+    const bin = path.join(dir, 'send-ok');
+    fs.writeFileSync(bin, '#!/bin/bash\nexit 0\n', { mode: 0o755 });
+    const hc = freshLoad(bin);
+    expect(hc.sendAlert('메시지', 'DM-Darren')).toBe(true);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  test('발송이 실패하면 false 를 돌려준다 (조용히 성공으로 접지 않는다)', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hcbin-'));
+    const bin = path.join(dir, 'send-bad');
+    fs.writeFileSync(bin, '#!/bin/bash\necho boom >&2\nexit 3\n', { mode: 0o755 });
+    const hc = freshLoad(bin);
+    expect(hc.sendAlert('메시지', 'DM-Darren')).toBe(false);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  test('DISCORD_SEND_BIN 이 없으면 cwd 기준 경로를 지어내지 않고 그 사실을 말한다', () => {
+    const hc = freshLoad(undefined);
+    expect(() => hc.discordSendBin()).toThrow(/DISCORD_SEND_BIN/);
+  });
+
+  test('경로를 호출 시점에 읽는다 (require 때 얼지 않는다 — 시험 파일이 둘이다)', () => {
+    const hc = freshLoad('/tmp/first-value');
+    process.env.DISCORD_SEND_BIN = '/tmp/second-value';
+    expect(hc.discordSendBin()).toBe('/tmp/second-value');
+  });
+});
+
+/**
+ * 🔴 배선 축 — **만든 것이 배선한 것으로 자동 승격되지 않는다** (룬드 리뷰 M:eikt)
+ *
+ * 앞 절 19건은 `sendAlert` 를 **직접 호출**해서 반환값을 잠갔다. 그런데 호출부(:116)는
+ * 그 값을 **버리고** 있었고, 시험은 그걸 그대로 둬도 초록이었다.
+ *   🔑 *"셀 수 있게 만든 것"* 과 *"세는 것"* 은 다르다. 주석은 *"부르는 쪽이 셀 수 있어야
+ *     보냈다와 보내려다 실패했다가 갈린다"* 라고 약속했는데, **아무도 안 세고 있었다.**
+ *     — 내가 같은 날 코어 `#110` 에 한 지적을 내가 그대로 했다(약속이 기제보다 넓다).
+ *
+ * 🔴 그리고 파보니 한 겹 더 있었다:
+ *   :117 `lastAlertTime.set(...)`  실패해도 쿨다운을 시작한다 → **재시도가 5분 막힌다**
+ *   :118 `console.log('alert sent')` 실패해도 "보냈다"로 남는다 → `#88` 그 자체
+ *   ⇒ 발송이 깨진 채로 "보냈다" 로그가 쌓이고, 그동안 재시도는 억제된다.
+ */
+describe('health-checker — 실패한 발송을 "보냈다"로 만들지 않는다 (배선)', () => {
+  const fs = require('fs');
+  const os = require('os');
+  const path = require('path');
+  const KEY = require.resolve('../relay-addons/health-checker');
+
+  function loadWith(binBody) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hcwire-'));
+    const bin = path.join(dir, 'send');
+    fs.writeFileSync(bin, binBody, { mode: 0o755 });
+    delete require.cache[KEY];
+    process.env.DISCORD_SEND_BIN = bin;
+    // 닿지 않는 주소 → fetchHealth 실패 → issues 발생 → 경보 경로로 들어간다
+    process.env.HEALTH_TARGETS = '하루:http://127.0.0.1:1/health';
+    return { hc: require('../relay-addons/health-checker'), dir };
+  }
+
+  test('🧪 [양성 대조군] 발송이 성공하면 실패 집계가 0 이다', async () => {
+    const { hc, dir } = loadWith('#!/bin/bash\nexit 0\n');
+    await hc.checkAll();
+    expect(hc.alertSendFailures()).toBe(0);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  test('발송이 실패하면 집계에 남는다 (호출부가 반환값을 실제로 읽는다)', async () => {
+    const { hc, dir } = loadWith('#!/bin/bash\nexit 3\n');
+    await hc.checkAll();
+    expect(hc.alertSendFailures()).toBe(1);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  test('🔴 실패한 발송은 쿨다운을 시작하지 않는다 (다음 tick 에 재시도된다)', async () => {
+    const { hc, dir } = loadWith('#!/bin/bash\nexit 3\n');
+    await hc.checkAll();
+    await hc.checkAll();
+    // 쿨다운이 걸렸다면 두 번째 시도가 아예 없어 집계는 1 에 머문다
+    expect(hc.alertSendFailures()).toBe(2);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+});
