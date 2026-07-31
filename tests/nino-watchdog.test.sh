@@ -85,6 +85,11 @@ _sn2="$(skip=2; skip_assert=6; skip_note)"
 echo ""
 
 cp "$WD" "$WORK/scripts/"
+# 🔴 스크립트가 `scripts/lib/cli-guard-boot.sh` 를 자기 위치 기준으로 찾는다.
+#   가짜 트리에 안 깔면 부트가 코어를 못 찾은 것이 아니라 **부트 자체가 없어서** exit 2 가
+#   나고, 시험 전체가 같은 이유로 빨개진다(실측 64 fail). 의존이 늘면 픽스처도 늘어야 한다.
+mkdir -p "$WORK/scripts/lib"
+cp "$REPO/scripts/lib/cli-guard-boot.sh" "$WORK/scripts/lib/"
 # 재시작 스크립트는 **불려선 안 되는** 것들이다. 불리면 흔적이 남게 한다.
 for s in start-nino.sh restart-nino.sh; do
   printf '#!/bin/bash\necho "%s" >> "$WORK_MARK/restarted.txt"\nexit 0\n' "$s" > "$WORK/scripts/$s"
@@ -1170,16 +1175,17 @@ WD_SRC="$WORK/scripts/nino-watchdog.sh"
 
 # 🧪 [양성 대조군] **검사기 먼저.** 경계가 틀리면 아래 개수는 아무것도 안 잰 것이다
 #   (오늘만 경로조각·주석·따옴표문자열·행두앵커로 네 번 틀렸다).
-chk_calls() { grep -cE '^[[:space:]]*"?\$\{?DISCORD_SEND' "$1" 2>/dev/null || true; }
+chk_calls() { grep -cE '^[[:space:]]*(cli_guard_send[[:space:]]+)?"?\$\{?DISCORD_SEND' "$1" 2>/dev/null || true; }
 PROBE="$WORK/chk-probe.sh"
 { printf '%s\n' '    $DISCORD_SEND "$C" "본문"'
+  printf '%s\n' '    cli_guard_send $DISCORD_SEND "$C" "본문"'
   printf '%s\n' '# $DISCORD_SEND 는 주석 안이다'
   printf '%s\n' "    grep -qE '(DISCORD_SEND|ALERT_CHANNEL)=' \"\$F\""
   printf '%s\n' '    log "DISCORD_SEND 를 조용히 덮는다"'; } > "$PROBE"
 PN="$(chk_calls "$PROBE")"
-[ "$PN" = "1" ] \
-  && ok "🧪 [양성 대조군] 호출 검사기: 호출만 1건 잡고 주석·grep패턴·로그문자열은 안 잡는다" \
-  || bad "🧪 [양성 대조군] 검사기 경계" "1" "$PN — 경계가 틀리면 아래 개수는 무의미하다"
+[ "$PN" = "2" ] \
+  && ok "🧪 [양성 대조군] 호출 검사기: 맨호출·가드경유 2건만 잡고 주석·grep패턴·로그문자열은 안 잡는다" \
+  || bad "🧪 [양성 대조군] 검사기 경계" "2" "$PN — 경계가 틀리면 아래 개수는 무의미하다"
 
 N_CALL="$(chk_calls "$WD_SRC")"
 [ "$N_CALL" = "1" ] \
@@ -1188,7 +1194,7 @@ N_CALL="$(chk_calls "$WD_SRC")"
 
 # 그 1곳이 **목 함수 안**인가 — 개수만 맞고 자리가 밖이면 목이 아니다
 FN_LN="$(grep -nE '^wd_send\(\)' "$WD_SRC" 2>/dev/null | head -1 | cut -d: -f1)"
-CALL_LN="$(grep -nE '^[[:space:]]*"?\$\{?DISCORD_SEND' "$WD_SRC" 2>/dev/null | head -1 | cut -d: -f1)"
+CALL_LN="$(grep -nE '^[[:space:]]*(cli_guard_send[[:space:]]+)?"?\$\{?DISCORD_SEND' "$WD_SRC" 2>/dev/null | head -1 | cut -d: -f1)"
 if [ -z "$FN_LN" ]; then
   bad "목 함수 wd_send()" "정의 존재" "<없음>"
 else
@@ -1223,6 +1229,77 @@ run_wd_inject "$INJ_SEND" "주입-채널"
 grep -q 'SEND-FAILED' "$WORK/logs/watchdog.log" 2>/dev/null \
   && bad "🧪 [양성 대조군] 성공 시" "SEND-FAILED 없음" "성공했는데도 실패로 남는다" \
   || ok "🧪 [양성 대조군] 발송이 성공하면 SEND-FAILED 는 안 남는다"
+
+# ⑤ 인자 계약 (코어 cli-guard) — 진단이 **발송도 재시작도** 만들지 않는다
+# 🔴 여기서 09:50 사고가 나면 발송보다 큰 게 열린다: 워치독은 **니노를 재시작한다.**
+#   그래서 이 절은 발송 0건만이 아니라 **재시작 0건**을 같은 무게로 잰다.
+
+rung() {   # $1 = CLI_DRY_RUN 환경값("" = 미설정) ; 나머지 = 인자
+  local envdry="$1"; shift
+  : > "$WORK/sent.txt"; : > "$WORK/restarted.txt"; : > "$WORK/logs/watchdog.log"
+  rm -f "$WORK/logs/watchdog-restart-"* "$WORK/logs/watchdog-auth-next"
+  # 🔴 `env` 를 앞에 둔다. 없으면 확장된 `CLI_DRY_RUN=1` 이 대입이 아니라 **명령어**로
+  #   읽혀 rc=127 이 난다(대입 판정은 확장보다 먼저 끝난다). 배치 3 에서 실측했다.
+  G_OUT="$(env WORK_MARK="$WORK" PATH="$WORK/bin:$PATH" NINO_SILENCE_LIMIT="${LIMIT:-3600}" \
+      NINO_HISTORY_CLI="$WORK/bin/yaksu-history" NINO_SESSION_LOG_DIR="$WORK/sessions" \
+      ${envdry:+CLI_DRY_RUN="$envdry"} \
+      bash "$WORK/scripts/nino-watchdog.sh" "$@" 2>"$WORK/g-err")"
+  G_RC=$?
+}
+# 🔴 `|| echo 0` 을 붙이지 않는다. `grep -c` 는 0건일 때 **"0" 을 찍고 rc=1** 이라
+#   `||` 가 또 0 을 찍어 값이 "0\n0" 이 된다 — 숫자 비교가 조용히 다 깨진다(실측).
+g_sends()    { local n; n="$(grep -c . "$WORK/sent.txt" 2>/dev/null)"; echo "${n:-0}"; }
+g_restarts() { local n; n="$(grep -c . "$WORK/restarted.txt" 2>/dev/null)"; echo "${n:-0}"; }
+
+# 🧪 [대조군] **먼저.** 인자 없이 부르면 재시작과 발송이 실제로 일어나는가.
+#   이게 초록이 아니면 아래 "0건"들이 가드 덕인지 이 상태가 원래 조용한 건지 못 가른다.
+make_tmux 1; rung ""
+[ "$(g_restarts)" -ge 1 ] && ok "🧪 [대조군] 인자 없이 부르면 실제로 재시작한다" \
+  || bad "🧪 [대조군] 재시작" "1건 이상" "$(g_restarts)건 — 아래 '재시작 0건'이 무의미해진다"
+[ "$(g_sends)" -ge 1 ] && ok "🧪 [대조군] 그리고 실제로 발송한다" \
+  || bad "🧪 [대조군] 발송" "1건 이상" "$(g_sends)건"
+
+# 모르는 인자 → rc=2 로 거절, 부작용 0
+make_tmux 1; rung "" --report
+[ "$G_RC" = 2 ] && ok "모르는 인자 --report 를 rc=2 로 거절한다 (1 아님 — 못 쟀다)" \
+  || bad "모르는 인자" "rc=2" "rc=$G_RC — 조용히 무시하고 평소 동작이 돌았다면 09:50 그대로다"
+[ "$(g_sends)" = 0 ] && ok "  🔑 거절되면 발송 0건" || bad "거절 발송" "0건" "$(g_sends)건"
+[ "$(g_restarts)" = 0 ] && ok "  🔑 거절되면 **재시작도** 0건" \
+  || bad "거절 재시작" "0건" "$(g_restarts)건 — 진단 한 번이 니노 맥락을 날린다"
+grep -q 'CLI-GUARD-REJECT: bad_args' "$WORK/logs/watchdog.log" 2>/dev/null \
+  && ok "  → 거절이 로그에 남는다 (bad_args)" \
+  || bad "거절 로그" "CLI-GUARD-REJECT: bad_args" "$(cat "$WORK/logs/watchdog.log" 2>/dev/null || echo '<없음>')"
+
+# --dry-run → 검사는 돌되 부작용 0
+make_tmux 1; rung "" --dry-run
+[ "$(g_sends)" = 0 ] && ok "--dry-run 이면 발송 0건" || bad "dry-run 발송" "0건" "$(g_sends)건"
+[ "$(g_restarts)" = 0 ] && ok "  🔑 --dry-run 이면 **재시작도** 0건" \
+  || bad "dry-run 재시작" "0건" "$(g_restarts)건 — 발송만 막고 더 큰 쪽이 열려 있었다"
+grep -q 'DRY-RUN-RESTART' "$WORK/logs/watchdog.log" 2>/dev/null \
+  && ok "  → 무엇을 안 했는지 로그에 남긴다(DRY-RUN-RESTART)" \
+  || bad "dry-run 흔적" "DRY-RUN-RESTART" "<없음> — 안 한 것과 안 걸린 것이 같은 모습이 된다"
+# 🔴 표지를 **발송/복구로 갈라** 센다. 하나로 두면 사후 집계가 두 원인을 뭉친다
+#   (이 파일의 '표지 고유성' 절이 실제로 DRY-RUN×2 를 잡아냈다).
+grep -q 'DRY-RUN-SEND' "$WORK/logs/watchdog.log" 2>/dev/null \
+  && ok "  → 발송 억제도 따로 남긴다(DRY-RUN-SEND)" \
+  || bad "dry-run 발송 흔적" "DRY-RUN-SEND" "<없음>"
+
+# 환경 상속 → 거절. `.env` 한 줄이 조용히 dry-run 을 켜는 형태를 막는다
+make_tmux 1; rung 1
+[ "$G_RC" = 2 ] && ok "🔴 CLI_DRY_RUN 을 환경에서 물려받으면 rc=2 로 거절한다" \
+  || bad "환경 상속" "rc=2" "rc=$G_RC — 플래그 없이 dry-run 이 켜졌다"
+grep -q 'CLI-GUARD-REJECT: bad_env' "$WORK/logs/watchdog.log" 2>/dev/null \
+  && ok "  🔑 bad_args 와 갈라 센다 (고칠 곳이 환경이라서)" \
+  || bad "환경 거절 표지" "bad_env" "$(cat "$WORK/logs/watchdog.log" 2>/dev/null || echo '<없음>')"
+
+# --help 도 부작용 0
+make_tmux 1; rung "" --help
+[ "$(g_sends)" = 0 ] && [ "$(g_restarts)" = 0 ] \
+  && ok "--help 는 발송·재시작 0건" \
+  || bad "help 부작용" "0건/0건" "발송 $(g_sends)건 · 재시작 $(g_restarts)건"
+case "$G_OUT" in *usage:*) ok "  → 사용법을 stdout 으로 낸다" ;;
+  *) bad "usage 출력" "usage: 줄" "${G_OUT:-<조용함>}" ;; esac
+make_tmux 0
 
 echo ""
 echo "결과: $pass pass, $fail fail, $skip 판정 불가$(skip_note)"
