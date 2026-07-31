@@ -57,11 +57,24 @@ check "@Darren 표기도 멘션으로 인정 → 통과"       0 'discord-send �
 
 echo ""
 echo "파일 경유 메시지(기존 기능 보존):"
-TMPMSG="$(mktemp)"; trap 'rm -f "$TMPMSG"' EXIT
+# 🔴 템플릿을 **명시**한다. 인자 없는 `mktemp` 는 `$TMPDIR` 을 쓰는데 맥은 그게
+#    `/var/folders/…/T/` 라, 훅의 경로 필터(86행 `/tmp/…` 하드코딩)에 안 걸린다.
+#    ⇒ 훅이 파일을 아예 안 읽어 **멘션이 있어도 차단**된다(룬드 맥 20/20 결정론).
+#    시험이 훅의 실제 계약(= /tmp 아래만 읽는다)을 밟으려면 /tmp 에 만들어야 한다.
+TMPMSG="$(mktemp /tmp/mention-guard-test.XXXXXX)"
+OUTMSG="$SCRIPT_DIR/mention-guard-outside.$$"
+trap 'rm -f "$TMPMSG" "$OUTMSG"' EXIT
 printf '%s 파일로 보내는 보고\n' "$MENTION" > "$TMPMSG"
 check "파일 안에 멘션 있으면 통과"                0 "discord-send 현인-업무 \"\$(cat $TMPMSG)\""
 printf '멘션 없는 파일 본문\n' > "$TMPMSG"
 check "파일 안에도 멘션 없으면 차단"              2 "discord-send 현인-업무 \"\$(cat $TMPMSG)\""
+
+# 🧪 [미탐 대조군] 위 '차단'이 **파일을 읽고 멘션이 없어서**인지 **파일을 못 읽어서**인지,
+#   두 상태는 같은 exit 2 를 낸다. 훅은 `/tmp/` 아래만 읽으므로 /tmp 밖 파일은 멘션이
+#   있어도 차단된다 — 그게 실제 계약이다. 여기서 고정해두면 위 두 줄이 *"읽었다"* 를
+#   전제로 한다는 게 드러난다(맥에서 20/20 빨갛던 자리가 정확히 이 전제였다).
+printf '%s /tmp 밖 파일\n' "$MENTION" > "$OUTMSG"
+check "🧪 [경계] /tmp 밖 파일은 멘션이 있어도 차단(훅이 안 읽는다)" 2 "discord-send 현인-업무 \"\$(cat $OUTMSG)\""
 
 echo ""
 echo "알려진 한계 (수정 범위 밖 — 문서화용 고정):"
