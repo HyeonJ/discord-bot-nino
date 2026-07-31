@@ -205,3 +205,58 @@ describe('health-checker — 경보 발송 실패를 삼키지 않는다', () =>
     expect(hc.discordSendBin()).toBe('/tmp/second-value');
   });
 });
+
+/**
+ * 🔴 배선 축 — **만든 것이 배선한 것으로 자동 승격되지 않는다** (룬드 리뷰 M:eikt)
+ *
+ * 앞 절 19건은 `sendAlert` 를 **직접 호출**해서 반환값을 잠갔다. 그런데 호출부(:116)는
+ * 그 값을 **버리고** 있었고, 시험은 그걸 그대로 둬도 초록이었다.
+ *   🔑 *"셀 수 있게 만든 것"* 과 *"세는 것"* 은 다르다. 주석은 *"부르는 쪽이 셀 수 있어야
+ *     보냈다와 보내려다 실패했다가 갈린다"* 라고 약속했는데, **아무도 안 세고 있었다.**
+ *     — 내가 같은 날 코어 `#110` 에 한 지적을 내가 그대로 했다(약속이 기제보다 넓다).
+ *
+ * 🔴 그리고 파보니 한 겹 더 있었다:
+ *   :117 `lastAlertTime.set(...)`  실패해도 쿨다운을 시작한다 → **재시도가 5분 막힌다**
+ *   :118 `console.log('alert sent')` 실패해도 "보냈다"로 남는다 → `#88` 그 자체
+ *   ⇒ 발송이 깨진 채로 "보냈다" 로그가 쌓이고, 그동안 재시도는 억제된다.
+ */
+describe('health-checker — 실패한 발송을 "보냈다"로 만들지 않는다 (배선)', () => {
+  const fs = require('fs');
+  const os = require('os');
+  const path = require('path');
+  const KEY = require.resolve('../relay-addons/health-checker');
+
+  function loadWith(binBody) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hcwire-'));
+    const bin = path.join(dir, 'send');
+    fs.writeFileSync(bin, binBody, { mode: 0o755 });
+    delete require.cache[KEY];
+    process.env.DISCORD_SEND_BIN = bin;
+    // 닿지 않는 주소 → fetchHealth 실패 → issues 발생 → 경보 경로로 들어간다
+    process.env.HEALTH_TARGETS = '하루:http://127.0.0.1:1/health';
+    return { hc: require('../relay-addons/health-checker'), dir };
+  }
+
+  test('🧪 [양성 대조군] 발송이 성공하면 실패 집계가 0 이다', async () => {
+    const { hc, dir } = loadWith('#!/bin/bash\nexit 0\n');
+    await hc.checkAll();
+    expect(hc.alertSendFailures()).toBe(0);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  test('발송이 실패하면 집계에 남는다 (호출부가 반환값을 실제로 읽는다)', async () => {
+    const { hc, dir } = loadWith('#!/bin/bash\nexit 3\n');
+    await hc.checkAll();
+    expect(hc.alertSendFailures()).toBe(1);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  test('🔴 실패한 발송은 쿨다운을 시작하지 않는다 (다음 tick 에 재시도된다)', async () => {
+    const { hc, dir } = loadWith('#!/bin/bash\nexit 3\n');
+    await hc.checkAll();
+    await hc.checkAll();
+    // 쿨다운이 걸렸다면 두 번째 시도가 아예 없어 집계는 1 에 머문다
+    expect(hc.alertSendFailures()).toBe(2);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+});

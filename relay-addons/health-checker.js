@@ -18,6 +18,10 @@ const CHECK_INTERVAL_MS = 60 * 1000;
 const STALE_THRESHOLD_MS = 90 * 1000;
 const COOLDOWN_MS = 5 * 60 * 1000;
 
+// 🔑 발송 실패를 **센다.** 로그 한 줄만으로는 "보냈다"와 "보내려다 실패했다"가 안 갈린다 —
+//   여긴 감시기 자신의 알림 경로라, 실패가 조용하면 **그 실패조차 아무도 모른다.**
+let alertSendFailureCount = 0;
+
 // 봇별 알림 대상: rund 이상은 Tim에게, nino/haru 이상은 Darren에게
 const OWNER_MAP = { rund: DM_TIM, nino: DM_DARREN, haru: DM_DARREN };
 
@@ -113,9 +117,23 @@ async function checkBot(target) {
     const dmChannel = OWNER_MAP[target.name] || DM_DARREN;
     const issueList = issues.map(i => `• ${i}`).join('\n');
     const alert = `⚠️ **${target.name} 이상 감지**\n${issueList}\n확인 필요`;
-    sendAlert(alert, dmChannel);
-    lastAlertTime.set(target.name, Date.now());
-    console.log(`[health-checker] alert sent for ${target.name} via ${dmChannel}: ${issues.join(', ')}`);
+    // 🔴 **반환값을 실제로 읽는다** (2026-07-31, 룬드 리뷰 M:eikt).
+    //   전엔 `sendAlert(...)` 의 값을 버리고 아래 두 줄을 **무조건** 실행했다. 결과:
+    //     ① `alert sent` 로그가 **실패해도** 남는다 — `#88`(발송 실패를 삼키고 "보냈다"로 기록) 그 자체
+    //     ② `lastAlertTime.set` 이 **실패해도** 돌아 쿨다운이 시작된다 → 재시도가 5분 막힌다
+    //   ⇒ 발송이 깨진 채로 "보냈다" 로그가 쌓이고, 그동안 재시도는 억제된다.
+    //   🔑 *"셀 수 있게 만든 것"* 과 *"세는 것"* 은 다르다. 앞 절 시험은 `sendAlert` 직접 호출만
+    //     잠갔고, 이 호출부는 그대로 둬도 초록이었다 — **만든 것이 배선한 것으로 자동 승격된다.**
+    if (sendAlert(alert, dmChannel)) {
+      lastAlertTime.set(target.name, Date.now());   // 쿨다운은 **보낸 뒤에만**
+      console.log(`[health-checker] alert sent for ${target.name} via ${dmChannel}: ${issues.join(', ')}`);
+    } else {
+      alertSendFailureCount += 1;
+      console.error(
+        `[health-checker] ALERT-SEND-FAILED for ${target.name} via ${dmChannel} — ` +
+        `쿨다운을 시작하지 않는다(다음 tick 에 재시도). 누적 ${alertSendFailureCount}건`
+      );
+    }
   }
 }
 
@@ -149,6 +167,7 @@ module.exports = {
   // 순수/테스트용 export (구 src/health-checker.js와 동일 시그니처)
   startChecking,
   sendAlert,        // 시험이 발송 축을 잴 수 있게 연다 (전엔 아무도 못 쟀다)
+  alertSendFailures: () => alertSendFailureCount,
   discordSendBin,
   stopChecking,
   checkAll,
