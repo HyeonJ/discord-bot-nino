@@ -79,25 +79,24 @@ trap emit_log EXIT
 #   ⇒ 거절은 stderr(부른 사람용) + 로그 1줄(사후용) **양쪽**에 남긴다.
 # 🔸 `unknown` 에 섞지 않고 `bad_args`/`bad_env` 로 따로 센다. 셋 다 *못 쟀다*지만
 #   **고칠 곳이 다르다** — API 가 답을 안 한 것(서버)과 잘못 부른 것(부른 쪽)은 다른 일이다.
-CORE_REPO="${CORE_REPO:-$HOME/yaksu-bot-core-live}"
-CLI_GUARD="$CORE_REPO/scripts/cli-guard.sh"
+# 🔑 배선은 `scripts/lib/cli-guard-boot.sh` **한 벌**만 쓴다. 여기 사본으로 두면
+#   코어 후보 순서·거절 판정 같은 규칙이 스크립트마다 갈린다. 실제로 이 파일의 옛 사본은
+#   코어를 `$HOME` **하나로만** 찾았고, 그건 cron 환경(HOME 이 다르다)에서 못 찾는다 —
+#   `check-auth` 의 FAKEHOME 시험이 그 형태를 잡아서 부트 쪽은 자기 위치를 먼저 본다.
+#   ⇒ 사본을 남겨두면 **고친 곳과 안 고친 곳이 생기고, 안 고친 쪽은 조용하다.**
 cli_guard_usage() {
     echo "usage: $(basename "$0") [--dry-run] [-h|--help]"
     echo "  --dry-run   판정까지 하되 Discord 발송은 하지 않는다 (진단용)"
 }
-if [ ! -r "$CLI_GUARD" ]; then
-    # 🔴 가드가 없으면 **가드 없이 돌지 않는다.** 붙였다고 믿는 채로 안 붙은 상태는
-    #   붙이기 전보다 나쁘다 — 믿음이 생기면 아무도 다시 안 본다.
-    VERDICT=no_cli_guard
-    printf '⛔ 판정 불가 — cli-guard 를 못 읽었다: %s\n' "$CLI_GUARD" >&2
-    printf '   코어 클론이 없거나 낡았다: git -C %s pull\n' "$CORE_REPO" >&2
-    exit 2
-fi
-. "$CLI_GUARD"
-if ! cli_guard_parse "$@"; then
-    if [ "$CLI_GUARD_ENV_DRY" = "1" ]; then VERDICT=bad_env; else VERDICT=bad_args; fi
-    exit 2
-fi
+# 🔴 가드가 없으면 **가드 없이 돌지 않는다.** 붙였다고 믿는 채로 안 붙은 상태는
+#   붙이기 전보다 나쁘다 — 믿음이 생기면 아무도 다시 안 본다. (부트가 exit 2 로 끊는다)
+# 🔑 거절 사유를 VERDICT 에 실어 **EXIT trap 의 로그 1줄**로 내보낸다. cron 은 stderr 를
+#   버리므로, 이 한 줄이 없으면 crontab 을 잘못 고친 순간 감시기가 흔적 없이 멈춘다.
+cli_guard_reject_log() { VERDICT="$1"; }
+CLI_GUARD_ON_REJECT=cli_guard_reject_log
+# shellcheck source=scripts/lib/cli-guard-boot.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/cli-guard-boot.sh"
+cli_guard_boot "$@"
 
 # 🔴 발송 실패를 삼키지 않는다 — 실패했는데 `sent` 로 남으면 알림 경로가 조용히 죽는다(#88 과 같은 계약).
 notify() {
