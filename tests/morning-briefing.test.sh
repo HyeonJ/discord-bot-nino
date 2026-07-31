@@ -45,17 +45,17 @@ cat > "$ROOT/todo.md" <<'MD'
 MD
 printf '# 할 일\n- [x] 끝난 것만 있음\n' > "$ROOT/empty-todo.md"
 
-run() {  # run <TODO_FILE> <WEATHER_JSON> [DRIFT_HEARTBEAT] — 항상 DRY_RUN
+run() {  # run <TODO_FILE> <WEATHER_JSON> [DRIFT_HEARTBEAT] — 항상 --dry-run
   # 하트비트를 안 주면 **신선한 것**을 기본으로 깐다 — 안 그러면 기존 시험 전부가
   # "하트비트 없음" 경고를 달고 나와서, 다른 섹션을 보는 단언이 흔들린다.
   # ⚠️ PR_LIST_CMD 를 안 주면 기본값이 **진짜 gh 를 친다** — 시험이 네트워크·계정에 매달리고,
   #    조회가 느리거나 실패하면 다른 단언까지 흔들린다. 기본은 항상 "0건 스텁"으로 막는다.
   #    (같은 자리를 룬드 `#35` 리뷰에서 잡았다: 시험이 진짜 API 를 치고 있었다.)
-  DRY_RUN=1 TODO_FILE="$1" WEATHER_JSON="$2" \
+  TODO_FILE="$1" WEATHER_JSON="$2" \
     DRIFT_HEARTBEAT="${3:-$ROOT/hb-fresh}" \
     PR_LIST_CMD="${PR_LIST_CMD:-$ROOT/pr-none}" \
     DISCORD_SEND="$ROOT/should-not-be-called" \
-    bash "$SCRIPT" 2>&1
+    bash "$SCRIPT" --dry-run 2>"$ROOT/stderr"
 }
 printf '%s rc=0\n' "$(date '+%Y-%m-%d %H:%M:%S')" > "$ROOT/hb-fresh"
 
@@ -180,12 +180,12 @@ if PATH="$STUB:$PATH" bash -c 'source "$1"; file_mtime "$2"' _ "$SCRIPT" "$ROOT/
 else ok "정수가 아니면 실패(rc≠0)로 낸다"; fi
 
 # ⑪-3 그 실패가 브리핑에서 **조용히 신선**이 되면 안 된다
-out="$(PATH="$STUB:$PATH" DRY_RUN=1 TODO_FILE="$ROOT/todo.md" WEATHER_JSON="$ROOT/weather.json" \
+out="$(PATH="$STUB:$PATH" TODO_FILE="$ROOT/todo.md" WEATHER_JSON="$ROOT/weather.json" \
         DRIFT_HEARTBEAT="$ROOT/hb-fresh" DISCORD_SEND="$ROOT/should-not-be-called" \
-        bash "$SCRIPT" 2>&1)"
+        bash "$SCRIPT" --dry-run 2>&1)"
 if grep -q '판정 불가' <<<"$out"; then ok "못 읽으면 '판정 불가'가 브리핑에 뜬다"; else bad "조용히 넘어갔다" "$out"; fi
 
-echo "⑨ DRY_RUN 은 전송하지 않는다"
+echo "⑨ --dry-run 은 전송하지 않는다"
 if [[ ! -e "$ROOT/should-not-be-called" ]]; then ok "discord-send 미호출"; else bad "전송이 일어났다"; fi
 
 echo "⑩ 코어 드리프트 하트비트 — cron 이 죽은 상태가 무음이면 안 된다 (승인 ③ 후속)"

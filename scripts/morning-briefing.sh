@@ -28,7 +28,31 @@ TODO_FILE="${TODO_FILE:-$HOME/yaksu-shared-data/todo-list.md}"
 WTTR_URL="${WTTR_URL:-https://wttr.in/Seoul?format=j1}"
 WEATHER_JSON="${WEATHER_JSON:-}"          # 있으면 curl 대신 이 파일을 읽는다(테스트용)
 DISCORD_SEND="${DISCORD_SEND:-$BOT_DIR/src/discord-send}"
-DRY_RUN="${DRY_RUN:-0}"                   # 1이면 전송하지 않고 stdout 으로만 낸다
+# ── 인자 계약 (코어 cli-guard) ───────────────────────────────────────────────
+# 🔴 옛 형태는 `DRY_RUN="${DRY_RUN:-0}"` 였다 — **환경에서만** 켤 수 있는 dry-run 이라,
+#   환경에 그 값이 있는 것만으로 브리핑이 **발송 0건 · rc=0** 으로 조용히 멈춘다.
+#   그리고 인자 파싱이 없어 모르는 플래그를 조용히 먹었다(09:50 사고와 같은 형태).
+#
+# 🔴 **이 스크립트는 이미 한 번 조용히 안 나갔다.** 07-30 23:03 재시작에 세션 cron 이 같이
+#   사라져 **금요일 07시 브리핑이 말없이 빠졌고 아무도 몰랐다**(CLAUDE.md 에 기록).
+#   ⇒ 그래서 여기선 거절을 **반드시 파일로** 남긴다. 이 스크립트엔 로그가 없었다 —
+#     무음이 기본값인 자리에 무음으로 실패하는 갈래를 하나 더 얹을 수 없다.
+BRIEFING_LOG="${BRIEFING_LOG:-$BOT_DIR/logs/morning-briefing.log}"
+cli_guard_usage() {
+    echo "usage: $(basename "$0") [--dry-run] [-h|--help]"
+    echo "  --dry-run   브리핑을 만들되 Discord 발송은 하지 않고 stdout 으로만 낸다"
+}
+cli_guard_reject_log() {
+    mkdir -p "$(dirname "$BRIEFING_LOG")" 2>/dev/null || true
+    printf '%s verdict=%s rc=2\n' "$(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M:%S')" "$1" \
+        >> "$BRIEFING_LOG" 2>/dev/null || true
+}
+CLI_GUARD_ON_REJECT=cli_guard_reject_log
+# 🔴 `$0` 이 아니라 **`${BASH_SOURCE[0]}`** 로 유도한다. 이 파일은 **source 되기도 한다**
+#   (`morning-briefing.test.sh` ⑪ 이 `file_mtime` 하나만 부르려고 source 한다).
+#   `$0` 기반 `SCRIPT_DIR` 은 그때 `.` 이 되어 `<repo>/lib/` 를 가리켰다 — 실측으로 깨졌다.
+# shellcheck source=scripts/lib/cli-guard-boot.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/cli-guard-boot.sh"
 TODO_TOP="${TODO_TOP:-3}"                 # 상위 몇 개를 읽어줄지
 STALE_DAYS="${STALE_DAYS:-3}"             # 며칠 이상 안 바뀌면 그 사실을 덧붙인다
 DRIFT_HEARTBEAT="${DRIFT_HEARTBEAT:-$BOT_DIR/logs/core-drift.heartbeat}"
@@ -316,14 +340,22 @@ $(unreviewed_pr_section)"
 # 섹션이 빠지면서 생긴 3줄 이상의 빈 줄을 정리한다(내용이 없는 건 티 안 나야 한다)
 MSG="$(printf '%s\n' "$MSG" | cat -s)"
 
-if [[ "$DRY_RUN" == "1" ]]; then
+# 🔴 **억제와 가시성을 갈라 둔다** — 억제는 `cli_guard_send` 한 곳, 여기는 *보여주기*만.
+#   갈래에서 `exit` 까지 하면 억제 기제가 두 벌이 되고, 뒤엣것은 갈래에 가려
+#   **아무 시험도 안 밟는다**(`#103` 변이 M2 실측).
+if [[ "$CLI_DRY_RUN" == "1" ]]; then
   printf '%s\n' "$MSG"
-  exit 0
 fi
 
-"$DISCORD_SEND" "$CHANNEL_ID" "$MSG"
+cli_guard_send "$DISCORD_SEND" "$CHANNEL_ID" "$MSG"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  # 🔴 인자 파싱은 **실행할 때만** 한다. 최상위에 두면 이 파일을 `source` 하는 쪽
+  #   (시험이 `file_mtime` 하나를 부르려고 그렇게 한다)에서도 파싱이 돌고,
+  #   그쪽 `"$@"` 는 전혀 다른 것이라 **모르는 인자로 판정돼 exit 2** 가 된다.
+  #   🔑 코어 계약 ⑦(*source 는 부작용이 없다*)은 **소비자 쪽에서도 지켜야 한다** —
+  #     계약을 지키는 라이브러리를 부작용 있는 자리에 배선하면 계약이 사라진다.
+  cli_guard_boot "$@"
   main "$@"
 fi
