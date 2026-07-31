@@ -36,8 +36,14 @@ STUB
 chmod +x "$WORK/bin/claude"
 
 # ── 가짜 discord-send: 전송을 파일로 기록만 한다 ─────────────────────────────
+# 🔑 `FAKE_SEND_RC` 로 **발송 실패**를 주입한다. 실패하면 SENT_LOG 에 안 적는다 —
+#    "보냈다고 기록됐는데 실제론 안 갔다" 를 시험이 재현할 수 있어야 하기 때문이다.
 cat > "$WORK/bin/discord-send" <<'STUB'
 #!/bin/bash
+if [ "${FAKE_SEND_RC:-0}" != 0 ]; then
+  echo "discord-send: 전송 실패(주입)" >&2
+  exit "$FAKE_SEND_RC"
+fi
 printf '%s\t%s\n' "$1" "$2" >> "$SENT_LOG"
 STUB
 chmod +x "$WORK/bin/discord-send"
@@ -221,6 +227,58 @@ if [ -f "$SETUP" ]; then
 else
   echo "  ⏭️  판정 불가 — setup.sh 가 없다"
 fi
+
+echo "── ⑫ 🔴 발송 실패를 삼키지 않는다 — **부르는 경로가 조용히 실패하는 자리** ──"
+# 🔴 옛 코드:  notify(){ "$DISCORD_SEND" … >/dev/null 2>&1 || true; }
+#             notify "…"; mark_alert …; ALERT=sent      ← **무조건** sent
+#   ⇒ discord-send 가 죽어도 로그엔 `alert=sent` 가 남고, 게다가 백오프까지 찍혀
+#     **1시간 침묵**한다. 인증이 진짜 끊긴 상황에서 이건 유일한 복구 수단이 사라지는 것이다.
+# 🔑 이 시험의 본체는 "실패를 감지하나"가 아니라 **"실패했는데 성공으로 기록하나"** 다.
+#    (룬드가 자기 check-auth 에서 먼저 밟고 고친 자리 — `send_failed` 로 가른다)
+C="$(creds 36000)"
+run "$C" FAKE_CLAUDE_OUT="$LOGGED_OUT" FAKE_SEND_RC=1
+[ ! -s "$SENT_LOG" ] && ok "발송이 실제로 실패했다(대조군: 전송 기록 0건)" \
+  || bad "실패 주입" "전송 0건" "$(wc -l < "$SENT_LOG")건"
+grep -q 'alert=sent' "$LOGF" && bad "실패인데 alert=sent 로 기록" "sent 아님" "$(cat "$LOGF")" \
+  || ok "실패를 sent 로 기록하지 않는다"
+grep -q 'alert=send_failed' "$LOGF" && ok "alert=send_failed 로 갈린다" \
+  || bad "alert=send_failed" "있음" "$(cat "$LOGF")"
+
+echo "── ⑬ 🔑 발송 실패면 **백오프를 안 찍는다** — 다음 기회를 스스로 지우지 않는다 ──"
+# 🔴 여기가 ⑫보다 아프다. 실패를 로그에 정직히 적어도 **백오프를 찍으면 1시간 동안 재시도가 없다.**
+#    첫 시도가 일시 장애(네트워크·relay 재시작)였으면 그 1시간이 통째로 사라진다.
+STATE="$WORK/state/failretry"; mkdir -p "$STATE"
+SENT_LOG="$STATE/sent.tsv"; : > "$SENT_LOG"; LOGF="$STATE/log"
+C="$(creds 36000)"
+# 1회차: 실패 주입 · 2회차: 정상 — 백오프를 안 찍었다면 2회차가 **즉시** 나가야 한다
+env SENT_LOG="$SENT_LOG" CHECK_AUTH_CREDENTIALS="$C" CHECK_AUTH_STATE_DIR="$STATE" \
+    CHECK_AUTH_LOG="$LOGF" CLAUDE_BIN="$WORK/bin/claude" DISCORD_SEND="$WORK/bin/discord-send" \
+    FAKE_CLAUDE_OUT="$LOGGED_OUT" FAKE_SEND_RC=1 bash "$CHECK" >/dev/null 2>&1
+env SENT_LOG="$SENT_LOG" CHECK_AUTH_CREDENTIALS="$C" CHECK_AUTH_STATE_DIR="$STATE" \
+    CHECK_AUTH_LOG="$LOGF" CLAUDE_BIN="$WORK/bin/claude" DISCORD_SEND="$WORK/bin/discord-send" \
+    FAKE_CLAUDE_OUT="$LOGGED_OUT" bash "$CHECK" >/dev/null 2>&1
+[ "$(wc -l < "$SENT_LOG")" = 1 ] && ok "실패 뒤 다음 실행이 **즉시** 재시도해서 도달한다" \
+  || bad "실패 후 재시도" "1건 도달" "$(wc -l < "$SENT_LOG")건 — 백오프를 찍어 침묵했다"
+
+# ⚠️ 백오프 파일 유무는 **실패 실행만 격리해서** 본다. 위 2회차는 성공이라 파일을 만드니,
+#    거기서 재면 어느 쪽이든 설명이 붙어 **항진명제**가 된다(처음에 그렇게 썼다가 고침).
+STATE2="$WORK/state/failonly"; mkdir -p "$STATE2"
+env SENT_LOG="$STATE2/sent.tsv" CHECK_AUTH_CREDENTIALS="$C" CHECK_AUTH_STATE_DIR="$STATE2" \
+    CHECK_AUTH_LOG="$STATE2/log" CLAUDE_BIN="$WORK/bin/claude" DISCORD_SEND="$WORK/bin/discord-send" \
+    FAKE_CLAUDE_OUT="$LOGGED_OUT" FAKE_SEND_RC=1 bash "$CHECK" >/dev/null 2>&1
+[ ! -f "$STATE2/check-auth-last-alert" ] && ok "실패했을 땐 백오프 파일을 안 만든다" \
+  || bad "실패 시 백오프" "파일 없음" "파일 생성됨 — 다음 기회를 스스로 지운다"
+
+echo "── ⑭ 만료 갈래도 같은 계약이다 — 한 자리만 고치면 다른 자리가 남는다 ──"
+# 🔴 `notify` 호출부는 **둘**이다(로그아웃·만료 후 미갱신). 오늘 밤 계속 본 형태 —
+#    같은 계약이 여러 자리에서 실현되면 한 자리만 덮고도 초록이 된다.
+C="$(creds -7200)"                                   # 2시간 전 만료 + 갱신 안 됨
+run "$C" FAKE_CLAUDE_OUT="$LOGGED_IN" FAKE_SEND_RC=1
+grep -q 'expiry_failed' "$LOGF" && ok "만료 알림 실패도 expiry_failed 로 갈린다" \
+  || bad "expiry_failed" "있음" "$(cat "$LOGF")"
+grep -qE 'alert=[a-z_]*\+expiry(\b|[^_])' "$LOGF" \
+  && bad "만료 발송 실패인데 +expiry(성공)로 기록" "+expiry 아님" "$(cat "$LOGF")" \
+  || ok "실패를 +expiry(성공)로 기록하지 않는다"
 
 echo
 # 🔑 형식을 러너 정규식(`통과 ?[0-9]+`)에 맞춘다 — 안 맞으면 `⚠️건수 미상` 이 되고,
