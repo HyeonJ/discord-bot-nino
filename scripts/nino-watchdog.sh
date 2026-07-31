@@ -55,6 +55,34 @@ ALERT_CHANNEL="${ALERT_CHANNEL:-현인-업무}"
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG"; }
 
+# ── 인자 계약 (코어 cli-guard) ────────────────────────────────────────────────
+# 🔴 2026-07-31 09:50 사고의 형태: 진단하려고 모르는 플래그로 불렀는데 파싱이 없어
+#    조용히 무시되고 **평소 동작이 통째로** 돌았다. 여기서 그게 나면 발송만이 아니라
+#    **니노를 실제로 재시작한다** — 진단 한 번이 대화 맥락을 날린다.
+#    ⇒ 이 파일의 `--dry-run` 은 발송과 복구를 **둘 다** 막는다. 한쪽만 막으면
+#      "부작용 없음"이라 믿고 부르는데 더 큰 쪽이 열려 있다.
+# 🔑 `trap` 뒤에 둔다 — 거절되면 EXIT trap 이 하트비트에 실제 rc(2)를 남긴다.
+#    거절이 하트비트에 안 남으면 *"안 돌았다"* 와 *"잘못 불렀다"* 가 같은 모습이 된다.
+cli_guard_usage() {
+    echo "usage: $(basename "$0") [--dry-run] [-h|--help]"
+    echo "  --dry-run   검사는 하되 Discord 발송·재시작은 하지 않는다 (진단용)"
+}
+cli_guard_reject_log() { log "CLI-GUARD-REJECT: $1 — 인자를 거절했다(발송·복구 없음)"; }
+CLI_GUARD_ON_REJECT=cli_guard_reject_log
+# shellcheck source=scripts/lib/cli-guard-boot.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/cli-guard-boot.sh"
+cli_guard_boot "$@"
+
+# ── 복구 목 ──────────────────────────────────────────────────────────────────
+# 발송에 `wd_send` 가 있듯 복구엔 여기 하나. 세 곳(start·restart×2)이 전부 지난다.
+wd_restart() {   # $@ = 복구 명령
+    if [ "$CLI_DRY_RUN" = "1" ]; then
+        log "DRY-RUN-RESTART: 복구를 실행하지 않았다 → $*"
+        return 0
+    fi
+    "$@" >> "$LOG" 2>&1
+}
+
 # ── 발송 목 ──────────────────────────────────────────────────────────────────
 # 🔴 경보 발송은 **여기 한 곳**만 지난다. 예전엔 네 곳에 흩어져 있었는데, 그러면
 #    가드든 로깅이든 3곳만 덮었을 때 **덮인 3곳이 안 덮인 1곳을 가린다** — 시험은
@@ -68,7 +96,13 @@ log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG"; }
 #    돌린다. 사실 자체는 로그에 남으니 잃는 게 없다 — 버리는 건 문구이지 신호가 아니다.
 wd_send() {   # $@ = 본문. 채널은 $ALERT_CHANNEL 고정
     local rc=0
-    $DISCORD_SEND "$ALERT_CHANNEL" "$@" 2>/dev/null || rc=$?
+    # 🔴 dry-run 이어도 **여기서 return 하지 않는다.** 억제를 두 벌로 두면 뒤엣것
+    #   (`cli_guard_send`)이 가려져 시험이 안 닿고, 변이를 걸어도 안 죽는다(#103 M2).
+    #   ⇒ 보이게 하는 일(로그)만 여기서 하고, 막는 일은 코어 계약에 맡긴다.
+    if [ "$CLI_DRY_RUN" = "1" ]; then
+        log "DRY-RUN-SEND: 경보를 보내지 않았다"
+    fi
+    cli_guard_send $DISCORD_SEND "$ALERT_CHANNEL" "$@" 2>/dev/null || rc=$?
     if [ "$rc" -ne 0 ]; then
         log "SEND-FAILED: 경보를 못 보냈다 rc=$rc — 이 줄이 없으면 '안 왔다'와 구별이 안 된다"
     fi
@@ -136,7 +170,7 @@ restart_notify() {
 # Check 1: tmux 세션 살아있는지
 if ! tmux has-session -t "$SESSION" 2>/dev/null; then
     log "DEAD-SESSION: tmux session '$SESSION' not found. Restarting..."
-    "$SCRIPT_DIR/start-nino.sh" >> "$LOG" 2>&1
+    wd_restart "$SCRIPT_DIR/start-nino.sh"
     restart_notify DEAD-SESSION "니노가 죽어서 자동 재시작했어! (tmux 세션 없음)" || true
     exit 0
 fi
@@ -145,7 +179,7 @@ fi
 PANE_PID=$(tmux list-panes -t "$SESSION" -F '#{pane_pid}' 2>/dev/null | head -1)
 if [ -z "$PANE_PID" ] || ! kill -0 "$PANE_PID" 2>/dev/null; then
     log "DEAD-PROC: pane process gone (PID: $PANE_PID). Respawning..."
-    "$SCRIPT_DIR/restart-nino.sh" >> "$LOG" 2>&1
+    wd_restart "$SCRIPT_DIR/restart-nino.sh"
     restart_notify DEAD-PROC "니노 프로세스가 죽어서 자동 재시작했어! (pane 프로세스 없음)" || true
     exit 0
 fi
@@ -156,7 +190,7 @@ if [ -n "$CLAUDE_PID" ]; then
     STATE=$(awk '/^State:/{print $2}' /proc/$CLAUDE_PID/status 2>/dev/null || echo "?")
     if [ "$STATE" = "D" ]; then
         log "FROZEN: Claude PID $CLAUDE_PID in D state. Restarting..."
-        "$SCRIPT_DIR/restart-nino.sh" >> "$LOG" 2>&1
+        wd_restart "$SCRIPT_DIR/restart-nino.sh"
         restart_notify FROZEN "니노가 얼어서 자동 재시작했어! (프로세스 D state)" || true
         exit 0
     fi
