@@ -265,6 +265,95 @@ PYEOF
 )"
 [ -z "$viol" ] && ok "GNU 전용 명령 0건" || bad "이식성 위반" "0건" "$viol"
 
+# ─────────────────────────────────────────────────────────────────────────────
+echo "── ⑪ 🔴 인자 계약 (코어 cli-guard) — 09:50 사고의 **형태**를 막는다 ──"
+# 🔴 사고 재구성: 진단하려고 `--report` 로 불렀다. 그런 플래그는 없었고 인자 파싱 자체가 없어
+#   조용히 무시된 뒤 **평소 검사(=발송 포함)** 가 돌았다. `rc=0` · stdout 0바이트라
+#   *"아무 일도 안 났다"* 로 읽혔는데 실제로는 Discord 로 **두 방**이 나간 뒤였다.
+#   🔑 고칠 것은 습관이 아니라 형태다 — 양봇 다 **조심하려다** 밟았다.
+#
+# 🔑 계약 ③: *"플래그가 있나"* 가 아니라 **"스텁이 몇 번 불렸나"** 로 잠근다.
+#   `--dry-run` 을 받아들이는지만 보면 **받아놓고 그냥 보내는** 구현이 초록으로 통과한다.
+
+# 인자를 넘기는 갈래. 기존 run() 은 **환경변수만** 앞에 붙인다 —
+# 한 헬퍼에 두 뜻을 담으면 나중에 어느 축이 안 잠겼는지 안 보여서 이름을 가른다.
+runargs() {   # runargs <스크립트 인자…>   (GUARD_ENV 를 세우면 CLI_DRY_RUN 을 상속시킨다)
+  STATE="$WORK/arg$RANDOM"; mkdir -p "$STATE"
+  SENT_LOG="$STATE/sent.tsv"; : > "$SENT_LOG"
+  LOGF="$STATE/usage.log"; OUTF="$STATE/out.txt"
+  env PATH="$WORK/bin:$PATH" SENT_LOG="$SENT_LOG" \
+      CHECK_USAGE_CREDENTIALS="$CREDS" CHECK_USAGE_LOG="$LOGF" \
+      DISCORD_SEND="$WORK/bin/discord-send" \
+      FAKE_CODE=200 FAKE_BODY="$ALERT_BODY" \
+      ${GUARD_ENV:+CLI_DRY_RUN="$GUARD_ENV"} \
+      bash "$CHECK" "$@" > "$OUTF" 2>&1
+  RC=$?
+  return 0
+}
+ALERT_BODY="$(alerting_body)"
+
+# 🧪 [대조군] **이게 먼저다.** 아래 "발송 0건" 들이 가드 덕인지, 애초에 이 조건에서
+#   아무것도 안 보내는 건지 못 가른다 — 대조군이 초록이 아니면 나머지 빨간불은 증거가 아니다.
+GUARD_ENV="" runargs
+[ "$(nlines "$SENT_LOG")" = 1 ] && ok "🧪 [대조군] 인자 없이 부르면 실제로 1건 나간다" \
+  || bad "대조군" "1건" "$(nlines "$SENT_LOG")건 — 이 픽스처는 원래 안 보낸다. 아래 0건은 증거가 아니다"
+[ "$RC" = 0 ] && ok "  → 대조군 rc=0" || bad "대조군 rc" "0" "$RC"
+
+# ① 모르는 인자는 **거절**한다. 사고 당시의 그 플래그를 그대로 쓴다.
+GUARD_ENV="" runargs --report
+[ "$RC" = 2 ] && ok "모르는 인자 --report 를 rc=2 로 거절한다" || bad "모르는 인자 rc" "2" "$RC"
+# 🔑 rc=1 이 아니라 2 다 — 모르는 인자는 *틀린 것*이 아니라 **못 쟀다**이고,
+#   이 호출로는 아무것도 판정되지 않았다는 뜻이다(양봇 종료코드 규약).
+[ "$(nlines "$SENT_LOG")" = 0 ] && ok "  🔑 거절되면 발송 0건 (사고 재현 차단)" \
+  || bad "거절인데 발송" "0건" "$(nlines "$SENT_LOG")건 — 09:50 사고가 그대로 재현된다"
+grep -q '모르는 인자' "$OUTF" && ok "  → 왜 거절했는지 말한다" || bad "거절 사유" "'모르는 인자' 문구" "$(cat "$OUTF")"
+
+# ② --dry-run 은 **부작용 0**. 진단하려는 사람에게 실행 말고 다른 선택지를 준다.
+GUARD_ENV="" runargs --dry-run
+[ "$(nlines "$SENT_LOG")" = 0 ] && ok "--dry-run 이면 발송 0건" \
+  || bad "dry-run 발송" "0건" "$(nlines "$SENT_LOG")건"
+[ "$RC" = 0 ] && ok "  → dry-run 은 정상 종료(rc=0) — 못 잰 게 아니라 안 보낸 것" || bad "dry-run rc" "0" "$RC"
+# 🔑 **조용하면 고장과 구별이 안 된다.** dry-run 은 *보려고* 부르는 것이라 왜 조용한지 말해야 한다.
+grep -q 'DRY-RUN' "$OUTF" && ok "  → 안 보냈다는 것을 알린다(무음 아님)" || bad "dry-run 안내" "DRY-RUN 문구" "$(cat "$OUTF")"
+# 🔴 **기록도 같이 잠근다.** 발송 0건만 재면 로그가 뭐라 남는지는 안 잰 것이다 —
+#   실제로 감싸기만 했을 때 `alert=sent` 로 남았다(안 보냈는데 보냈다고). 나중에 이 로그로
+#   발송 이력을 세는 쪽이 **없는 발송을 센다.** 🔑 억제를 재는 것과 기록을 재는 것은 다른 축이다.
+grep -q 'alert=dry_run' "$LOGF" && ok "  🔑 로그에 alert=dry_run 으로 남는다" \
+  || bad "dry-run 기록" "alert=dry_run" "$(cat "$LOGF")"
+grep -q 'alert=sent' "$LOGF" && bad "안 보냈는데 sent" "sent 아님" "$(cat "$LOGF")" \
+  || ok "  → 안 보낸 것을 sent 로 기록하지 않는다"
+
+# ③ 🔴 환경 상속 거절 — 이 계약이 **자기 자신에게서** 발견한 자리(코어 계약 ④).
+#   무시하면 dry-run 을 기대한 쪽이 발송당하고, 따르면 발송을 기대한 쪽이 조용해진다.
+#   cron 은 stderr 를 버리므로 후자는 **발송 0건 · rc=0** 으로 성공처럼 보인다.
+GUARD_ENV=1 runargs
+[ "$RC" = 2 ] && ok "🔴 CLI_DRY_RUN 을 환경에서 물려받으면 rc=2 로 거절한다" \
+  || bad "환경 상속" "rc=2" "rc=$RC — 플래그 없이 dry-run 이 켜졌거나 조용히 무시됐다"
+[ "$(nlines "$SENT_LOG")" = 0 ] && ok "  → 거절이므로 발송 0건" || bad "상속 거절 발송" "0건" "$(nlines "$SENT_LOG")건"
+
+# ④ --help 도 부작용 0. 도움말 보려다 발송당하면 가드가 새는 것과 같다.
+GUARD_ENV="" runargs --help
+[ "$(nlines "$SENT_LOG")" = 0 ] && ok "--help 는 발송 0건" || bad "help 발송" "0건" "$(nlines "$SENT_LOG")건"
+grep -q 'usage:' "$OUTF" && ok "  → 사용법을 출력한다" || bad "usage 출력" "usage: 줄" "$(cat "$OUTF")"
+
+# ⑤ 🔴 **가드 파일이 없으면 조용히 가드 없이 돌지 않는다.**
+#   코어는 별 레포라 클론이 없거나 낡을 수 있다. 그때 `. …/cli-guard.sh` 가 실패하고
+#   스크립트가 계속 돌면 **가드를 붙였다고 믿는 채로 안 붙은 상태**가 된다 —
+#   붙이기 전보다 나쁘다(붙였다는 믿음이 생겼으니까). 부재는 조용하므로 여기서 시끄럽게 만든다.
+STATE="$WORK/nocore$RANDOM"; mkdir -p "$STATE"; SENT_LOG="$STATE/sent.tsv"; : > "$SENT_LOG"
+_nc_out="$(env PATH="$WORK/bin:$PATH" SENT_LOG="$SENT_LOG" \
+    CHECK_USAGE_CREDENTIALS="$CREDS" CHECK_USAGE_LOG="$STATE/usage.log" \
+    DISCORD_SEND="$WORK/bin/discord-send" FAKE_CODE=200 FAKE_BODY="$ALERT_BODY" \
+    CORE_REPO="$WORK/no-such-core" bash "$CHECK" 2>&1)"
+_nc_rc=$?
+[ "$_nc_rc" = 2 ] && ok "🔴 cli-guard 가 없으면 rc=2 로 죽는다 (조용히 무가드 실행 금지)" \
+  || bad "가드 부재" "rc=2" "rc=$_nc_rc — 가드 없이 돌았다. '붙였다'는 믿음만 남는다"
+[ "$(nlines "$SENT_LOG")" = 0 ] && ok "  → 가드 부재 시 발송 0건" || bad "가드 부재 발송" "0건" "$(nlines "$SENT_LOG")건"
+case "$_nc_out" in
+    *cli-guard*) ok "  → 무엇이 없는지 말한다" ;;
+    *) bad "가드 부재 안내" "cli-guard 경로 언급" "${_nc_out:-<조용함>}" ;;
+esac
+
 echo
 echo "  통과 $pass · 실패 $fail"
 [ "$fail" -eq 0 ]

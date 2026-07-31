@@ -46,7 +46,7 @@ CODE=na              # HTTP 상태코드
 #   🔸 지금 이 로그를 읽는 프로그램이 0곳이라 이름을 바꾸는 게 **공짜다.**
 #     단위를 넣을 마지막 기회는 **읽는 쪽이 생기기 전**이다.
 RETRY_AFTER=na       # 429 일 때 서버가 준 값(초) — 공유 백오프 설계의 근거가 된다
-ALERT=none           # none · sent · send_failed
+ALERT=none           # none · sent · send_failed · dry_run
 NOTE=""
 
 mkdir -p "$(dirname "$LOG")" 2>/dev/null
@@ -66,10 +66,52 @@ emit_log() {
 }
 trap emit_log EXIT
 
+# ── 인자 계약 (코어 cli-guard) ───────────────────────────────────────────────
+# 🔴 2026-07-31 09:50 사고: 진단하려고 `--report` 로 불렀다. 그런 플래그는 **없었고**
+#   인자 파싱 자체가 없어 조용히 무시된 뒤 **평소 검사(=발송 포함)** 가 돌았다.
+#   `rc=0` · stdout 0바이트라 *"아무 일도 안 났다"* 로 읽혔는데 Discord 로 두 방이 나간 뒤였다.
+#   같은 날 룬드도 자기 감시기를 진단으로 두 번 돌려 알림 두 건을 냈다(10:44·10:48).
+#   🔑 **고칠 것은 습관이 아니라 형태다** — 양봇 다 *조심하려다* 밟았다.
+#
+# 🔑 **왜 `trap` 뒤에 두나** — 거절도 로그 1줄로 남기기 위해서다.
+#   cron 은 stderr 를 버린다. 거절이 로그에 안 남으면 crontab 을 잘못 고친 순간
+#   이 감시기는 **아무 흔적 없이 멈춘다** — 감시기가 조용히 죽는 그 형태 그대로다.
+#   ⇒ 거절은 stderr(부른 사람용) + 로그 1줄(사후용) **양쪽**에 남긴다.
+# 🔸 `unknown` 에 섞지 않고 `bad_args`/`bad_env` 로 따로 센다. 셋 다 *못 쟀다*지만
+#   **고칠 곳이 다르다** — API 가 답을 안 한 것(서버)과 잘못 부른 것(부른 쪽)은 다른 일이다.
+CORE_REPO="${CORE_REPO:-$HOME/yaksu-bot-core-live}"
+CLI_GUARD="$CORE_REPO/scripts/cli-guard.sh"
+cli_guard_usage() {
+    echo "usage: $(basename "$0") [--dry-run] [-h|--help]"
+    echo "  --dry-run   판정까지 하되 Discord 발송은 하지 않는다 (진단용)"
+}
+if [ ! -r "$CLI_GUARD" ]; then
+    # 🔴 가드가 없으면 **가드 없이 돌지 않는다.** 붙였다고 믿는 채로 안 붙은 상태는
+    #   붙이기 전보다 나쁘다 — 믿음이 생기면 아무도 다시 안 본다.
+    VERDICT=no_cli_guard
+    printf '⛔ 판정 불가 — cli-guard 를 못 읽었다: %s\n' "$CLI_GUARD" >&2
+    printf '   코어 클론이 없거나 낡았다: git -C %s pull\n' "$CORE_REPO" >&2
+    exit 2
+fi
+. "$CLI_GUARD"
+if ! cli_guard_parse "$@"; then
+    if [ "$CLI_GUARD_ENV_DRY" = "1" ]; then VERDICT=bad_env; else VERDICT=bad_args; fi
+    exit 2
+fi
+
 # 🔴 발송 실패를 삼키지 않는다 — 실패했는데 `sent` 로 남으면 알림 경로가 조용히 죽는다(#88 과 같은 계약).
 notify() {
     local err rc
-    err="$("$DISCORD_SEND" "$DISCORD_CHANNEL" "$1" 2>&1 >/dev/null)"
+    # 🔴 dry-run 을 **여기서 먼저 가른다.** 감싸기만 하면 안 된다:
+    #   `cli_guard_send` 는 안내를 stderr 로 내고 rc=0 을 주는데, 아래 `2>&1 >/dev/null` 이
+    #   그 안내를 `err` 로 삼키고 rc=0 이라 **안 보냈는데 `alert=sent`** 로 남는다.
+    #   🔑 코어 계약이 덮는 범위는 *발송 억제*까지고 **기록을 고치는 것은 소비자 몫**이다.
+    #     (계약 ② 머리말: "이 범위 밖은 약속하지 않는다" — 그 경계가 정확히 여기다.)
+    if [ "$CLI_DRY_RUN" = "1" ]; then
+        cli_guard_send "$DISCORD_SEND" "$DISCORD_CHANNEL" "$1"
+        return 3
+    fi
+    err="$(cli_guard_send "$DISCORD_SEND" "$DISCORD_CHANNEL" "$1" 2>&1 >/dev/null)"
     rc=$?
     [ "$rc" -eq 0 ] && return 0
     NOTE="${NOTE:+$NOTE,}discord-send-failed(rc=$rc)"
@@ -244,11 +286,14 @@ VERDICT=ok
 
 # ── 4. 경고 메시지가 있으면 Discord로 전송 ───────────────────────────────────
 if [ -n "$ALERT_MSG" ]; then
-    if notify "$ALERT_MSG"; then
-        ALERT=sent
-    else
-        ALERT=send_failed
-    fi
+    notify "$ALERT_MSG"; nrc=$?
+    # 🔸 `if notify` 두 갈래로는 **세 상태를 못 담는다.** dry-run 을 실패로 접으면
+    #   `send_failed` 가 되고, 성공으로 접으면 `sent` 가 된다 — 둘 다 거짓이다.
+    case "$nrc" in
+        0) ALERT=sent ;;
+        3) ALERT=dry_run ;;
+        *) ALERT=send_failed ;;
+    esac
 fi
 
 exit 0
