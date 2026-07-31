@@ -376,12 +376,22 @@ grep -q 'usage:' "$OUTF" && ok "  → 사용법을 출력한다" || bad "usage �
 #   코어는 별 레포라 클론이 없거나 낡을 수 있다. 그때 `. …/cli-guard.sh` 가 실패하고
 #   스크립트가 계속 돌면 **가드를 붙였다고 믿는 채로 안 붙은 상태**가 된다 —
 #   붙이기 전보다 나쁘다(붙였다는 믿음이 생겼으니까). 부재는 조용하므로 여기서 시끄럽게 만든다.
-STATE="$WORK/nocore$RANDOM"; mkdir -p "$STATE"; SENT_LOG="$STATE/sent.tsv"; : > "$SENT_LOG"
+# 🔴 **부재를 진짜로 모의하려면 후보를 전부 막아야 한다.** 부트는 코어를 다섯 곳에서 찾는다:
+#   `$CORE_REPO` → 자기위치/../{live,core} → `$HOME`/{live,core}.
+#   `CORE_REPO` 하나만 막으면 **형제 경로에서 실물을 찾아** 부재가 아니게 된다.
+#   🔑 2026-07-31 배선 이관 때 이 절이 4건 빨개져서 드러났다 — 그 전 초록은 *막았다*가
+#     아니라 **후보가 하나뿐이라 막힌 것처럼 보였다**였다(사본 배선 시절).
+#   ⇒ 스크립트와 부트를 **부모에 코어가 없는 트리로 복사**하고 `HOME` 도 가짜를 준다.
+STATE="$WORK/nocore$RANDOM"; mkdir -p "$STATE/repo/scripts/lib" "$STATE/fakehome"
+cp "$CHECK" "$STATE/repo/scripts/"
+cp "$(dirname "$CHECK")/lib/cli-guard-boot.sh" "$STATE/repo/scripts/lib/"
+_NC_CHECK="$STATE/repo/scripts/$(basename "$CHECK")"
+SENT_LOG="$STATE/sent.tsv"; : > "$SENT_LOG"
 _nc_log="$STATE/usage.log"
-_nc_out="$(env PATH="$WORK/bin:$PATH" SENT_LOG="$SENT_LOG" \
+_nc_out="$(env PATH="$WORK/bin:$PATH" SENT_LOG="$SENT_LOG" HOME="$STATE/fakehome" \
     CHECK_USAGE_CREDENTIALS="$CREDS" CHECK_USAGE_LOG="$_nc_log" \
     DISCORD_SEND="$WORK/bin/discord-send" FAKE_CODE=200 FAKE_BODY="$ALERT_BODY" \
-    CORE_REPO="$WORK/no-such-core" bash "$CHECK" 2>&1)"
+    CORE_REPO="$WORK/no-such-core" bash "$_NC_CHECK" 2>&1)"
 _nc_rc=$?
 [ "$_nc_rc" = 2 ] && ok "🔴 cli-guard 가 없으면 rc=2 로 죽는다 (조용히 무가드 실행 금지)" \
   || bad "가드 부재" "rc=2" "rc=$_nc_rc — 가드 없이 돌았다. '붙였다'는 믿음만 남는다"
@@ -400,6 +410,22 @@ case "$_nc_out" in
     *"코어 클론"*) ok "  → 어떻게 고치는지 말한다(git pull 안내)" ;;
     *) bad "가드 부재 안내" "'코어 클론' 복구 안내" "${_nc_out:-<조용함>}" ;;
 esac
+
+# 🧪 [양성 대조군] **같은 격리 트리**에서 코어를 실물로 주면 정상 동작해야 한다.
+#   없으면 위 rc=2 가 *가드가 없어서*인지 *복사한 트리가 깨져서*인지 못 가른다 — 둘 다 rc=2 다.
+#   격리는 **축을 하나만** 움직여야 축을 잰 것이 된다.
+_ck_log="$STATE/ctrl.log"; _ck_sent="$STATE/ctrl.tsv"; : > "$_ck_sent"
+env PATH="$WORK/bin:$PATH" SENT_LOG="$_ck_sent" HOME="$STATE/fakehome" \
+    CHECK_USAGE_CREDENTIALS="$CREDS" CHECK_USAGE_LOG="$_ck_log" \
+    DISCORD_SEND="$WORK/bin/discord-send" FAKE_CODE=200 FAKE_BODY="$ALERT_BODY" \
+    CORE_REPO="$CORE_FIXTURE" bash "$_NC_CHECK" --dry-run >/dev/null 2>&1
+_ck_rc=$?
+if [ "$_ck_rc" = 0 ] && ! grep -q 'no_cli_guard' "$_ck_log" 2>/dev/null; then
+  ok "🧪 [양성 대조군] 같은 트리에서 코어를 주면 정상 동작한다(격리 자체는 안 깨졌다)"
+else
+  bad "🧪 [양성 대조군] 격리 트리" "rc=0 · no_cli_guard 아님" \
+      "rc=$_ck_rc · $(cat "$_ck_log" 2>/dev/null || echo '<로그 없음>') — 위 rc=2 를 가드 부재로 못 읽는다"
+fi
 
 echo
 # 🔸 판정 불가를 요약줄에 **항상** 싣는다(0이어도). 조건부로 붙이면 0과 '이 칸이 없음'이
