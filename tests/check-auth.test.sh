@@ -329,6 +329,69 @@ PYEOF
 [ -n "$pv" ] && ok "  → 원시 명령이 들어오면 잡는다(음성 대조군)" || bad "  이 시험은 어떤 변이로도 안 갈린다"
 rm -f "$probe"
 
+echo "── ⑯ 🔴 인자 계약 (코어 cli-guard) — 09:50 사고의 형태를 막는다 ──"
+# 🔴 이 감지기는 **5분마다** 돈다. 그래서 여기서 조용히 틀리면 하루 288번 조용히 틀린다.
+# 🔑 계약 ③: *"플래그가 있나"* 가 아니라 **"스텁이 몇 번 불렸나"** 로 잠근다.
+# 🔸 이 절 전용 발송 스텁 — **호출 1회 = 1줄.** 공용 스텁은 본문을 그대로 적는데 경보 본문이
+#   여러 줄이라, 줄로 세면 1건이 N건으로 보인다(배치 2에서 실제로 4건으로 보였다).
+cat > "$WORK/bin/send-1" <<'STUB'
+#!/bin/bash
+printf 'SEND\t%s\n' "$1" >> "$G_SENT"
+STUB
+chmod +x "$WORK/bin/send-1"
+g_sends() { grep -c '^SEND' "$G_SENT" 2>/dev/null | head -1; }
+gr() {   # gr <스크립트 인자…>   (GUARD_ENV 를 세우면 CLI_DRY_RUN 을 환경으로 물려준다)
+  G_STATE="$WORK/guard$RANDOM"; mkdir -p "$G_STATE"
+  G_SENT="$G_STATE/sent.tsv"; : > "$G_SENT"
+  G_LOG="$G_STATE/check-auth.log"
+  # 🔴 stderr 를 **따로 받는다.** 합치면 코어의 `DRY-RUN: 보내지 않았다 → …` 안내에 본문이
+  #   통째로 들어가서, 내 stdout 단언이 *코어가 낸 문구로* 통과하거나(배치2 M5) 집계가
+  #   오염된다(배치3 morning-briefing 은 그래서 결정적으로 1 fail 이었다).
+  g_out="$(env G_SENT="$G_SENT" SENT_LOG="$G_SENT" \
+      CHECK_AUTH_CREDENTIALS="$(creds 36000)" \
+      CHECK_AUTH_STATE_DIR="$G_STATE" CHECK_AUTH_LOG="$G_LOG" \
+      CLAUDE_BIN="$WORK/bin/claude" DISCORD_SEND="$WORK/bin/send-1" \
+      FAKE_CLAUDE_OUT="$LOGGED_OUT" \
+      ${GUARD_ENV:+CLI_DRY_RUN="$GUARD_ENV"} \
+      bash "$CHECK" "$@" 2>"$G_STATE/err")"
+  G_RC=$?
+  return 0
+}
+
+# 🧪 [대조군] **먼저 이것부터.** 아래 "발송 0건"들이 가드 덕인지, 이 픽스처가 애초에
+#   아무것도 안 보내는 건지 못 가른다 — 대조군이 초록이 아니면 나머지 빨간불은 증거가 아니다.
+# 🔸 만료 임박 자격증명을 줘서 경보가 실제로 나가게 한다.
+GUARD_ENV="" gr
+CTRL_SENDS="$(g_sends)"
+[ "$CTRL_SENDS" -ge 1 ] && ok "🧪 [대조군] 인자 없이 부르면 실제로 발송이 일어난다 (${CTRL_SENDS}건)" \
+  || bad "대조군" "1건 이상" "0건 — 이 픽스처는 원래 안 보낸다. 아래 0건은 증거가 아니다"
+
+GUARD_ENV="" gr --report
+[ "$G_RC" -eq 2 ] && ok "모르는 인자 --report 를 rc=2 로 거절한다 (1 아님 — 못 쟀다)" \
+  || bad "모르는 인자 rc" "2" "$G_RC"
+[ "$(g_sends)" -eq 0 ] && ok "  🔑 거절되면 발송 0건 (09:50 사고 재현 차단)" \
+  || bad "거절인데 발송" "0건" "$(g_sends)건"
+# 🔑 **거절도 흔적을 남긴다.** cron 은 stderr 를 버린다 — 안 남기면 crontab 오타 하나로
+#   5분마다 돌던 이 감지기가 *아무 표시 없이* 멈춘다. 그게 이 스크립트가 막으려는 바로 그것이다.
+grep -q 'verdict=bad_args' "$G_LOG" 2>/dev/null && ok "  🔑 거절이 로그에 남는다 (verdict=bad_args)" \
+  || bad "거절 로그" "verdict=bad_args" "$(cat "$G_LOG" 2>/dev/null || echo '<로그 없음>')"
+
+GUARD_ENV="" gr --dry-run
+[ "$(g_sends)" -eq 0 ] && ok "--dry-run 이면 발송 0건" || bad "dry-run 발송" "0건" "$(g_sends)건"
+
+# 🔴 환경 상속은 **거절**한다(코어 계약 ④). 무시하면 dry-run 을 기대한 쪽이 발송당하고,
+#   따르면 발송을 기대한 쪽이 조용해진다 — 어느 쪽으로 접어도 조용히 틀린다.
+GUARD_ENV=1 gr
+[ "$G_RC" -eq 2 ] && ok "🔴 CLI_DRY_RUN 을 환경에서 물려받으면 rc=2 로 거절한다" \
+  || bad "환경 상속" "rc=2" "rc=$G_RC — 플래그 없이 dry-run 이 켜졌거나 조용히 무시됐다"
+[ "$(g_sends)" -eq 0 ] && ok "  → 거절이므로 발송 0건" || bad "상속 거절 발송" "0건" "$(g_sends)건"
+grep -q 'verdict=bad_env' "$G_LOG" 2>/dev/null && ok "  🔑 bad_args 와 갈라 센다 (고칠 곳이 환경이라서)" \
+  || bad "bad_env 표지" "verdict=bad_env" "$(cat "$G_LOG" 2>/dev/null || echo '<로그 없음>')"
+
+GUARD_ENV="" gr --help
+[ "$(g_sends)" -eq 0 ] && ok "--help 는 발송 0건" || bad "help 발송" "0건" "$(g_sends)건"
+printf '%s' "$g_out" | grep -q 'usage:' && ok "  → 사용법을 stdout 으로 낸다" || bad "usage 출력" "usage: 줄" "$g_out"
+
 echo
 # 🔑 형식을 러너 정규식(`통과 ?[0-9]+`)에 맞춘다 — 안 맞으면 `⚠️건수 미상` 이 되고,
 #    그러면 **0개를 쟀어도 초록**이라 시험이 사라진 것을 아무도 모른다(2026-07-30 실측).

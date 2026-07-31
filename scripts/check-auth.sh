@@ -97,9 +97,30 @@ mark_alert() { date +%s > "$1" 2>/dev/null || true; }
 #    인증이 진짜 끊긴 상황에서 이건 **유일한 복구 수단(사람 호출)이 조용히 사라지는 것**이다.
 #    (룬드가 자기 check-auth 에서 먼저 밟고 고친 자리 — 같은 형태로 맞춘다)
 # 🔑 성공/실패를 rc 로 돌려주고, **stderr 는 버리지 않는다** — 실패 사유가 유일한 단서다.
+# ── 인자 계약 (코어 cli-guard) ───────────────────────────────────────────────
+# 🔴 2026-07-31 09:50 사고: 진단하려고 감시기를 **없는 플래그**(`--report`)로 불렀다.
+#   인자 파싱이 없어 조용히 무시된 뒤 평소 검사(=발송 포함)가 돌았고 Discord 로 두 방이 나갔다.
+#   `rc=0` · stdout 0바이트라 *"아무 일도 안 났다"* 로 읽혔다. 룬드도 같은 날 같은 형태를 밟았다.
+#   🔑 고칠 것은 습관이 아니라 **형태**다 — 양봇 다 *조심하려다* 밟았다.
+# 🔑 거절도 로그 1줄로 남긴다. cron 은 stderr 를 버리므로, 안 남기면 crontab 오타 하나로
+#   **5분마다 도는 이 감시기가 아무 표시 없이 멈춘다** — 그게 이 스크립트가 막으려는 바로 그것이다.
+cli_guard_usage() {
+    echo "usage: $(basename "$0") [--dry-run] [-h|--help]"
+    echo "  --dry-run   판정까지 하되 Discord 발송은 하지 않는다 (진단용)"
+}
+cli_guard_reject_log() {
+    printf '%s verdict=%s rc=2\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$1" >> "$LOG" 2>/dev/null || true
+}
+CLI_GUARD_ON_REJECT=cli_guard_reject_log
+# shellcheck source=scripts/lib/cli-guard-boot.sh
+. "$SCRIPT_DIR/lib/cli-guard-boot.sh"
+cli_guard_boot "$@"
+
 notify() {
     local err
-    err="$("$DISCORD_SEND" "$ALERT_CHANNEL" "$1" 2>&1 >/dev/null)"   # stderr 만 잡는다
+    # 🔴 **억제는 `cli_guard_send` 한 곳.** dry-run 갈래를 따로 두고 거기서 return 하면 억제
+    #   기제가 두 벌이 되고, 뒤엣것은 갈래에 가려 **아무 시험도 안 밟는다**(`#103` 변이 M2 실측).
+    err="$(cli_guard_send "$DISCORD_SEND" "$ALERT_CHANNEL" "$1" 2>&1 >/dev/null)"   # stderr 만 잡는다
     local rc=$?
     [[ $rc -eq 0 ]] && return 0
     NOTIFY_RC="$rc"
