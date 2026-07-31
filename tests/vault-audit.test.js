@@ -5,6 +5,23 @@ const path = require('path');
 
 const SCRIPT = path.join(__dirname, '..', 'scripts', 'vault-audit.sh');
 
+// 🔴 이 스크립트는 `date --version` 이 GNU 가 아니면 **시작하자마자 exit 1** 한다
+//   (scripts/vault-audit.sh:18 — 의도된 가드다). 그 갈래를 모르고 그냥 돌리면
+//   **BSD 기계에서 이 파일 전부가 빨간불**이 된다. 룬드 맥에서 main 이 17 fail 이었고,
+//   전부 vault-audit 계열이었다.
+//   🔑 **원래 빨간 판 위에 빨간 걸 더하면 아무도 못 본다.** 그리고 17이 기준선이면
+//     상대 봇이 이 레포의 **관측자로 기능하지 못한다** — PR 하나의 문제가 아니다.
+//   ⇒ 능력을 재서 판정 불가(skip)로 접는다. 통과로도 실패로도 접지 않는다.
+//     bun 은 skip 개수를 세어 보고하므로 "이 축은 저 기계에서 안 쟀다"가 남는다.
+const HAS_GNU_DATE = (() => {
+  try {
+    return execFileSync('date', ['--version'], { encoding: 'utf8' }).includes('GNU');
+  } catch {
+    return false;
+  }
+})();
+
+
 let vaultDir;
 
 function wikiCat(cat) {
@@ -36,7 +53,7 @@ afterEach(() => {
   fs.rmSync(vaultDir, { recursive: true, force: true });
 });
 
-describe('vault-audit.sh', () => {
+describe.skipIf(!HAS_GNU_DATE)('vault-audit.sh', () => {
   test('깨진 wikilink([[없는노트]])를 검출한다', () => {
     writeNote('tech', '노트A.md', '# 노트A\n\n[[실존노트]] 참고');
     writeNote('tech', '실존노트.md', '# 실존노트\n내용');
@@ -108,7 +125,7 @@ describe('vault-audit.sh', () => {
  * 🔸 그리고 이건 시험이 아니라 **사람이 읽는 리포트**다. 시험은 거짓 초록이면 나중에 터지지만
  *   리포트는 읽고 안심하면 끝이라 터질 자리가 없다.
  */
-describe('vault-audit.sh — 못 잰 것을 0 으로 접지 않는다', () => {
+describe.skipIf(!HAS_GNU_DATE)('vault-audit.sh — 못 잰 것을 0 으로 접지 않는다', () => {
   // BSD 흉내: `date -d` 없음 · `grep -P` 없음. 다른 인자는 진짜 도구로 넘긴다.
   function stubBin(which) {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'bsdstub-'));
@@ -120,6 +137,13 @@ describe('vault-audit.sh — 못 잰 것을 0 으로 접지 않는다', () => {
     if (which.bsdDate) {
       fs.writeFileSync(path.join(d, 'date'),
         '#!/bin/bash\ncase "$1" in --version) echo "date (BSD)"; exit 1;; -d) exit 1;; esac\nexec /usr/bin/date "$@"\n',
+        { mode: 0o755 });
+    }
+    // `grep -o` 자체가 오류로 죽는 기계(rc=2). `-P` 스텁으로는 이 갈래를 **못 밟는다** —
+    //   추출을 `grep -o` 로 바꾼 순간 `-P` 스텁은 그냥 통과시키기 때문이다.
+    if (which.grepO) {
+      fs.writeFileSync(path.join(d, 'grep'),
+        '#!/bin/bash\nfor a in "$@"; do case "$a" in -*o*) echo "grep: boom" >&2; exit 2;; esac; done\nexec /usr/bin/grep "$@"\n',
         { mode: 0o755 });
     }
     if (which.grep) {
@@ -183,6 +207,17 @@ describe('vault-audit.sh — 못 잰 것을 0 으로 접지 않는다', () => {
     writeNote('tech', 'a.md', '---\nupdated: 2026-07-30\n---\n# A\n\n[[유령노트]] 링크');
     runWith({ grep: true });
     expect(report()).toMatch(/유령노트/);
+  });
+
+  // 🔴 `grep -o` 의 rc 를 가르는 갈래 — 매칭 0건(rc=1)과 오류(rc=2)를 같이 접으면
+  //   **오류가 "링크 없음"이 된다.** 이 시험이 없으면 그 분기는 아무도 안 밟는다
+  //   (`-P` 스텁은 `grep -o` 를 통과시킨다 — 내가 방금 또 같은 자리에 빠질 뻔했다).
+  test('wikilink 추출이 오류로 죽으면(rc=2) "링크 없음"으로 접지 않는다', () => {
+    writeNote('tech', 'a.md', '---\nupdated: 2026-07-30\n---\n# A\n\n[[유령노트]] 링크');
+    runWith({ grepO: true });
+    const r = report();
+    expect(r).toMatch(/판정 불가/);
+    expect(r).toMatch(/rc=2/);
   });
 
   test('grep -P 가 없어도 updated 를 읽는다 (프론트매터 추출은 이식 가능해야 한다)', () => {

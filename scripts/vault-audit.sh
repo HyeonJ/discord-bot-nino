@@ -46,13 +46,27 @@ done
 broken_list=()
 dup_list=()
 stale_list=()
+# 🔑 못 잰 것을 담는다. 여기 위에서 선언한다 — 아래 세 절이 전부 이걸 쓴다.
+undet_list=()
 
 # 1. broken wikilink
 for f in "${NOTES[@]}"; do
     rel=$(echo "$f" | sed "s|$VAULT_DIR/||")
     # [[X]] 또는 [[X|alias]] 에서 X 추출
+    # 🔴 `grep` 의 rc 를 **가른다**: 0=매칭 있음 · 1=매칭 없음(정상) · 2+=오류(못 쟀다).
+    #   `|| true` 는 셋을 한 덩어리로 접어 **오류를 "링크 없음"으로 만든다** — 이 파일이
+    #   세운 원칙(못 잰 것을 없는 것으로 접지 않는다)을 이 줄만 안 따르고 있었다(룬드 M:5ltb).
+    #   ⚠️ `set -o pipefail` 이라 파이프로 이으면 중간 실패까지 같이 흡수된다.
+    #     그래서 파이프를 풀고 rc 를 먼저 받는다. 벗겨내기는 파라미터 확장으로 한다.
+    grc=0
+    raw="$(grep -o '\[\[[^]]*\]\]' "$f" 2>/dev/null)" || grc=$?
+    if [ "$grc" -gt 1 ]; then
+        undet_list+=("$rel (wikilink 추출 실패 — grep rc=$grc)")
+        continue
+    fi
     while IFS= read -r link; do
         [[ -z "$link" ]] && continue
+        link="${link#\[\[}"; link="${link%\]\]}"
         target="${link%%|*}"          # alias 앞부분
         target="${target%%#*}"         # 헤딩 앵커 제거
         target="$(echo "$target" | sed 's/^ *//; s/ *$//')"
@@ -60,12 +74,7 @@ for f in "${NOTES[@]}"; do
         if [[ -z "${SLUG_EXISTS[$target]:-}" ]]; then
             broken_list+=("$rel → [[$target]]")
         fi
-    # 🔴 `grep -oP` 를 쓰지 않는다 (2026-07-31 실측). -P 가 없는 grep 이면 rc=2 로 죽고
-    #   `|| true` 가 그걸 **빈 입력**으로 접어 *"깨진 링크 0"* 이 된다 — 실제로 1건인 픽스처에서
-    #   0 이 나왔고 rc 도 0 이었다. 룬드 위키 사고와 **증상이 똑같다**(원인만 다르다).
-    #   ⚠️ GNU date 가드(18행)가 이 축을 안 지켜준다 — date 는 GNU 인데 grep 만 갈리는 기계가
-    #     실재한다(같은 날 실측된 `ugrep` 그림자). 가드가 있어도 축이 하나면 옆이 뚫린다.
-    done < <(grep -o '\[\[[^]]*\]\]' "$f" 2>/dev/null | sed 's/^\[\[//; s/\]\]$//' || true)
+    done <<< "$raw"
 done
 
 # 2. duplicate slug
@@ -82,7 +91,6 @@ done < <(for f in "${NOTES[@]}"; do basename "$f" .md; done | sort | uniq -d)
 #   진짜 답이 1건인 픽스처에서 `stale 후보 0 · rc=0` 이 나왔다. 사람이 읽는 리포트라
 #   시험과 달리 나중에 터질 자리가 없다 — 읽고 안심하면 끝이다.
 #   ⇒ 날짜가 있는데 못 읽은 것은 `undet_list` 로 세어 리포트에 **따로** 싣는다.
-undet_list=()
 # 기준선을 못 만들면 stale 은 **숫자를 내밀면 안 된다.** `0` 은 "없다"로 읽히는데 실제로는
 #   아무것도 안 본 것이다. 아래 리포트에서 `?` 로 낸다.
 stale_undetermined=0
