@@ -19,9 +19,34 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$SCRIPT_DIR/.." && pwd)"
 CHECK="$REPO/scripts/check-usage-alert.sh"
 
-pass=0; fail=0
+pass=0; fail=0; skip=0
 ok()  { echo "  ✅ $1"; pass=$((pass + 1)); }
 bad() { echo "  ❌ $1"; [ -n "${2:-}" ] && echo "     want: $2"; [ -n "${3:-}" ] && echo "     got:  $3"; fail=$((fail + 1)); }
+skipt() { echo "  ⛔ $1"; echo "     사유: $2"; skip=$((skip + 1)); }
+
+# ── 코어 위치 해석 ───────────────────────────────────────────────────────────
+# 🔴 2026-07-31 룬드 맥에서 **28 fail** (`#102` 리뷰). 시험이 `CORE_REPO` 를 안 세워
+#   스크립트의 **운영 기본값**(`~/yaksu-bot-core-live`)이 그대로 쓰였는데, 그건 니노 전용
+#   경로다. 룬드 코어는 `~/yaksu-bot-core` 라 전부 `no_cli_guard` 로 죽었다.
+#   🔑 운영 기본값은 맞다 — **틀린 것은 시험이 그 값을 안 세운 것**이다.
+#   🔑 원인이 *내가 가진 것*이라 내 기계에선 원리적으로 안 보인다(nvm 때와 같은 자리).
+#     상대 기계가 유일한 관찰자였고, 이 해석기가 그 관찰을 내 쪽으로 옮겨온다.
+#
+# 🔸 스텁 `cli-guard.sh` 를 깔지 않고 **실물 정본**을 쓴다(룬드 제안과 갈린 지점).
+#   스텁은 사본이라 코어 계약이 바뀌어도 내 시험은 계속 초록이다 — 오늘 이미 밟은
+#   *"사본이 N벌이면 갈린다"* 가 그대로 재현된다. 부재 갈래는 어차피 빈 디렉터리로 만든다.
+CORE_FIXTURE=""
+for _c in "${CORE_REPO:-}" "$HOME/yaksu-bot-core-live" "$HOME/yaksu-bot-core"; do
+    [ -n "$_c" ] && [ -r "$_c/scripts/cli-guard.sh" ] && { CORE_FIXTURE="$_c"; break; }
+done
+# 🔴 **한 곳에서 export 한다** — 호출부마다 붙이지 않는다.
+#   처음엔 `run()`·`runargs()` 두 곳에만 넣었는데, 이 파일엔 스크립트를 부르는 자리가
+#   **다섯 곳**이라 나머지 셋이 안 덮였고 룬드 맥 흉내에서 1 fail 로 남았다.
+#   🔑 한 시간 전에 `nino-watchdog.sh` 4곳을 두고 *"덮인 3곳이 안 덮인 1곳을 가린다"* 고
+#     써놓고, 같은 것을 내 시험 파일에서 그대로 했다. **길목을 하나로 만드는 것이 처방이고,
+#     호출부를 세어 붙이는 것은 다음 호출부가 생기면 다시 샌다.**
+#   ⇒ 이후 `env …` 로 부르는 자리는 전부 물려받는다. 부재 갈래만 **일부러** 덮어쓴다.
+export CORE_REPO="$CORE_FIXTURE"
 
 [ -f "$CHECK" ] || { echo "❌ 없음: $CHECK"; exit 1; }
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
@@ -89,6 +114,17 @@ run() {   # run <설명없음> — 환경변수는 앞에 붙여 넘긴다
   RC=$?
   return 0
 }
+
+# 🔴 정본을 못 찾으면 **이 파일 전체가 판정 불가**다 — 스크립트가 무조건 rc=2 로 죽으므로
+#   나머지 단언은 전부 *틀린 이유로* 빨개진다. 🔑 원래 빨간 판 위에 빨간 걸 더하면 아무도 못 본다.
+#   ⇒ 조용히 통과시키지도, 거짓 빨강을 내지도 않고 **판정 불가로 세어 보고**한다.
+if [ -z "$CORE_FIXTURE" ]; then
+    echo "⛔ 판정 불가 — cli-guard 정본을 못 찾았다."
+    echo "   찾아본 곳: \$CORE_REPO · ~/yaksu-bot-core-live · ~/yaksu-bot-core"
+    echo "   코어를 클론하거나 CORE_REPO=<경로> 로 지정하고 다시 돌릴 것."
+    echo "  통과 0 · 실패 0 · 판정 불가 1(파일 전체)"
+    exit 0
+fi
 
 echo "── ① 🔴 429 를 **볼 수 있다** — 이 시험의 본체 ──"
 # 옛 코드: 429 본문이 json.loads 를 통과 → 버킷 없음 → 조용히 exit 0. 흔적 0.
@@ -366,5 +402,7 @@ case "$_nc_out" in
 esac
 
 echo
-echo "  통과 $pass · 실패 $fail"
+# 🔸 판정 불가를 요약줄에 **항상** 싣는다(0이어도). 조건부로 붙이면 0과 '이 칸이 없음'이
+#   같은 모양이 되고, 상대 봇이 요약줄만 보고 세는데 그 둘은 다른 사실이다.
+echo "  통과 $pass · 실패 $fail · 판정 불가 $skip   (코어 정본: $CORE_FIXTURE)"
 [ "$fail" -eq 0 ]
