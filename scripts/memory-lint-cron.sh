@@ -69,9 +69,11 @@ printf '%s rc=%s 항목=%s\n' "$STAMP" "$RC" "$COUNT" > "$HEARTBEAT"
 notify() {  # $1=본문
   # 🔸 dry-run 이면 **보낼 뻔한 본문을 stdout 으로** 보여준다. 코어 안내는 stderr 라 파이프로
   #   못 받는데, dry-run 은 *보려고* 부르는 것이라 본문이 필요하다.
-  if [ "$CLI_DRY_RUN" = "1" ]; then printf '%s\n' "$1"; return 0; fi
-  # 🔑 위 갈래가 먼저 잡아 dry-run 일 때 여기 도달하지 않는다. 그래도 감싸는 이유는 저 갈래가
-  #   지워지거나 발송 자리가 하나 더 생겨도 **계약이 남게** 하려는 것 — 억제의 정본은 여기다.
+  # 🔴 **억제와 가시성을 갈라 둔다.** 처음엔 이 갈래가 `return 0` 까지 해서 억제도 같이 했는데,
+  #   그러면 억제 기제가 **두 벌**이 되고 변이시험이 잡았다 — `cli_guard_send` 를 직접 발송으로
+  #   바꿔도 **0 fail**(갈래가 가려서 계약 쪽은 아무 시험도 안 밟는다).
+  #   🔑 사본이 둘이면 하나가 죽어도 안 보인다. ⇒ 갈래는 본문만 내고 안 보내는 일은 계약이 한다.
+  [ "$CLI_DRY_RUN" = "1" ] && printf '%s\n' "$1"
   cli_guard_send "$DISCORD_SEND" "$NOTIFY_TARGET" "$1"
 }
 
