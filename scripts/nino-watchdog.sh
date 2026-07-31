@@ -74,11 +74,50 @@ if [ -f "$BOT_DIR/.env" ]; then
     esac
 fi
 
+
+# ── 재시작 알림의 억제 ────────────────────────────────────────────────────────
+# 🔴 2026-07-31 실측: 전송 6곳 중 **셋(재시작 알림)에 억제가 없었다.** 2분 주기라
+#   재시작이 계속 실패하면 **시간당 30건이 천장 없이** 나간다. 같은 새벽에 79초 41건을
+#   겪고서 *"막을 게 아무것도 없다"* 를 룬드와 같이 짚은 자리다.
+# 🔑 그런데 **조용히 만들면 안 된다** — 재시작이 반복 실패하는 건 진짜 장애다.
+#   ⇒ 억제가 아니라 **접기**다: 첫 건은 즉시, 이후 창 안의 반복은 세었다가
+#     다음 알림에 **몇 번이었는지 실어** 보낸다. 30줄이 1줄이 되고 정보는 늘어난다.
+# 🔸 원인별로 **다른 파일**을 쓴다(다른 축과 같은 관례) — 세션 사망이 얼어붙음을 침묵시키면 안 된다.
+RESTART_BACKOFF=${NINO_RESTART_BACKOFF:-3600}
+
+# restart_notify <원인표지> <사람이 읽을 문구>
+#   창 안이면 조용히 세기만 하고 rc=1. 보낼 때는 누적 횟수를 문구에 붙인다.
+restart_notify() {
+    local cause="$1" msg="$2"
+    local state="$BOT_DIR/logs/watchdog-restart-${cause}-next"
+    local count="$BOT_DIR/logs/watchdog-restart-${cause}-count"
+    local now next n
+    now=$(date +%s)
+    next=$(cat "$state" 2>/dev/null || echo 0)
+    case "$next" in ''|*[!0-9]*) next=0 ;; esac
+    n=$(cat "$count" 2>/dev/null || echo 0)
+    case "$n" in ''|*[!0-9]*) n=0 ;; esac
+    n=$((n + 1))
+    if [ "$now" -lt "$next" ]; then
+        printf '%s' "$n" > "$count" 2>/dev/null || true
+        log "${cause}-SUPPRESSED: 창 안 ${n}번째 — 다음 알림에 합쳐 보낸다"
+        return 1
+    fi
+    # 🔸 2회 이상일 때만 횟수를 붙인다 — 1회에 "1번째"는 소음이다
+    [ "$n" -ge 2 ] && msg="$msg
+
+🔸 최근 $((RESTART_BACKOFF / 60))분 동안 **${n}번째** 재시작이야. 반복되면 자동 복구로는 안 되는 상태일 수 있어."
+    $DISCORD_SEND "$ALERT_CHANNEL" "$msg" 2>/dev/null || true
+    printf '%s' "$((now + RESTART_BACKOFF))" > "$state" 2>/dev/null || true
+    printf '0' > "$count" 2>/dev/null || true
+    return 0
+}
+
 # Check 1: tmux 세션 살아있는지
 if ! tmux has-session -t "$SESSION" 2>/dev/null; then
     log "DEAD-SESSION: tmux session '$SESSION' not found. Restarting..."
     "$SCRIPT_DIR/start-nino.sh" >> "$LOG" 2>&1
-    $DISCORD_SEND "$ALERT_CHANNEL" "니노가 죽어서 자동 재시작했어! (tmux 세션 없음)" 2>/dev/null || true
+    restart_notify DEAD-SESSION "니노가 죽어서 자동 재시작했어! (tmux 세션 없음)" || true
     exit 0
 fi
 
@@ -87,7 +126,7 @@ PANE_PID=$(tmux list-panes -t "$SESSION" -F '#{pane_pid}' 2>/dev/null | head -1)
 if [ -z "$PANE_PID" ] || ! kill -0 "$PANE_PID" 2>/dev/null; then
     log "DEAD-PROC: pane process gone (PID: $PANE_PID). Respawning..."
     "$SCRIPT_DIR/restart-nino.sh" >> "$LOG" 2>&1
-    $DISCORD_SEND "$ALERT_CHANNEL" "니노 프로세스가 죽어서 자동 재시작했어! (pane 프로세스 없음)" 2>/dev/null || true
+    restart_notify DEAD-PROC "니노 프로세스가 죽어서 자동 재시작했어! (pane 프로세스 없음)" || true
     exit 0
 fi
 
@@ -98,7 +137,7 @@ if [ -n "$CLAUDE_PID" ]; then
     if [ "$STATE" = "D" ]; then
         log "FROZEN: Claude PID $CLAUDE_PID in D state. Restarting..."
         "$SCRIPT_DIR/restart-nino.sh" >> "$LOG" 2>&1
-        $DISCORD_SEND "$ALERT_CHANNEL" "니노가 얼어서 자동 재시작했어! (프로세스 D state)" 2>/dev/null || true
+        restart_notify FROZEN "니노가 얼어서 자동 재시작했어! (프로세스 D state)" || true
         exit 0
     fi
 fi
