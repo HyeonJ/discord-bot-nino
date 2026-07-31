@@ -28,10 +28,32 @@ HEARTBEAT="${HEARTBEAT:-$BOT_DIR/logs/memory-lint.heartbeat}"
 LOG="${LOG:-$BOT_DIR/logs/memory-lint.log}"
 NOTIFY_TARGET="${NOTIFY_TARGET:-봇-놀이터}"
 DISCORD_SEND="${DISCORD_SEND:-$BOT_DIR/src/discord-send}"
-DRY_RUN="${DRY_RUN:-0}"
 
 [ -f "$BOT_DIR/.env" ] && { set -a; . "$BOT_DIR/.env"; set +a; }
 mkdir -p "$(dirname "$HEARTBEAT")"
+
+# ── 인자 계약 ────────────────────────────────────────────────────────────────
+# 🔴 옛 형태는 `DRY_RUN="${DRY_RUN:-0}"` 였다 — **환경에서 물려받는** dry-run 이고, 하필
+#   **바로 위 줄에서 `set -a; . .env`** 를 한다. `.env` 에 한 줄 들어가면 이 감시기는
+#   **발송 0건 · rc=0** 으로 조용히 멈추고 성공처럼 보인다. 게다가 인자 파싱이 없어서
+#   `DRY_RUN` 은 **환경으로만** 켤 수 있었다 — 끄는 길이 플래그로 존재하지도 않았다.
+#   🔑 어느 쪽으로 접어도 조용히 틀린다 — 거절만이 두 오독을 다 막는다(코어 계약 ④).
+cli_guard_usage() {
+    echo "usage: $(basename "$0") [--dry-run] [-h|--help]"
+    echo "  --dry-run   판정까지 하되 Discord 발송은 하지 않는다 (진단용)"
+}
+# 🔑 거절도 로그 1줄로 남긴다 — cron 은 stderr 를 버리므로 안 남기면 crontab 오타 하나에
+#   이 감시기가 아무 표시 없이 멈춘다.
+cli_guard_reject_log() {
+    printf '%s verdict=%s rc=2\n' "$(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M:%S')" "$1" >> "$LOG" 2>/dev/null || true
+}
+CLI_GUARD_ON_REJECT=cli_guard_reject_log
+# 🔴 배선은 **스크립트 자기 위치**에서 찾는다 — `$BOT_DIR` 는 *데이터*(logs·state)를 옮기는
+#   손잡이라 시험이 임시 디렉터리로 바꾼다. 거기서 코드를 찾게 했더니 시험 8건이 깨졌다.
+#   🔑 주입점 하나로 두 축(코드·데이터)을 같이 움직이면, 한 축을 흔들 때 다른 축이 따라온다.
+CLI_GUARD_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$CLI_GUARD_LIB_DIR/lib/cli-guard-boot.sh"
+cli_guard_boot "$@"
 
 # ⚠️ 파이프를 끼우지 않는다 — `cmd | tail` 뒤의 $? 는 tail 의 코드다(오늘 네 번 걸린 자리).
 OUT="$("$LINT" 2>&1)"; RC=$?
@@ -45,8 +67,14 @@ printf '%s rc=%s 항목=%s\n' "$STAMP" "$RC" "$COUNT" >> "$LOG"
 printf '%s rc=%s 항목=%s\n' "$STAMP" "$RC" "$COUNT" > "$HEARTBEAT"
 
 notify() {  # $1=본문
-  if [ "$DRY_RUN" = "1" ]; then printf '%s\n' "$1"; return 0; fi
-  "$DISCORD_SEND" "$NOTIFY_TARGET" "$1"
+  # 🔸 dry-run 이면 **보낼 뻔한 본문을 stdout 으로** 보여준다. 코어 안내는 stderr 라 파이프로
+  #   못 받는데, dry-run 은 *보려고* 부르는 것이라 본문이 필요하다.
+  # 🔴 **억제와 가시성을 갈라 둔다.** 처음엔 이 갈래가 `return 0` 까지 해서 억제도 같이 했는데,
+  #   그러면 억제 기제가 **두 벌**이 되고 변이시험이 잡았다 — `cli_guard_send` 를 직접 발송으로
+  #   바꿔도 **0 fail**(갈래가 가려서 계약 쪽은 아무 시험도 안 밟는다).
+  #   🔑 사본이 둘이면 하나가 죽어도 안 보인다. ⇒ 갈래는 본문만 내고 안 보내는 일은 계약이 한다.
+  [ "$CLI_DRY_RUN" = "1" ] && printf '%s\n' "$1"
+  cli_guard_send "$DISCORD_SEND" "$NOTIFY_TARGET" "$1"
 }
 
 # 🔑 판정 불가를 먼저 가른다 — 0건(rc=0)도 아니고 항목 있음(rc=1)도 아닌 상태.

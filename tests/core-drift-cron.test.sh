@@ -35,11 +35,11 @@ REAL_BEFORE="$(real_sig)"
 # 가짜 검사기 — 종료코드를 주입한다
 mkfake() { printf '#!/usr/bin/env bash\necho "%s"\nexit %s\n' "$2" "$1" > "$ROOT/check.sh"; chmod +x "$ROOT/check.sh"; }
 
-run() {  # run  → stdout(DRY_RUN 이라 전송 대신 출력), 종료코드는 $rc 로
-    out="$(BOT_DIR="$BOT" CHECK="$ROOT/check.sh" DRY_RUN=1 \
+run() {  # run  → stdout(--dry-run 이라 전송 대신 출력), 종료코드는 $rc 로
+    out="$(BOT_DIR="$BOT" CHECK="$ROOT/check.sh" \
         HEARTBEAT="$ROOT/hb" LOG="$ROOT/log" NOTIFY_STATE="$ROOT/notify-state" \
         RENOTIFY_AFTER="${RENOTIFY_AFTER:-43200}" \
-        DISCORD_SEND="$ROOT/should-not-exist" bash "$SCRIPT" 2>&1)"
+        DISCORD_SEND="$ROOT/should-not-exist" bash "$SCRIPT" --dry-run 2>&1)"
     rc=$?
 }
 no_state() { rm -f "$ROOT/notify-state"; }
@@ -87,12 +87,12 @@ echo "⑧ 🔴 **셸이 내는 코드(127·126)도 판정 불가로 접는다** 
 mkfake 2 "WARN: fetch 실패"; run; plain2="$out"
 for code in 127 126; do
     if [ "$code" -eq 127 ]; then
-        out="$(BOT_DIR="$BOT" CHECK="$ROOT/nonexistent-check.sh" DRY_RUN=1             HEARTBEAT="$ROOT/hb" LOG="$ROOT/log" NOTIFY_STATE="$ROOT/notify-state"             DISCORD_SEND="$ROOT/should-not-exist" bash "$SCRIPT" 2>&1)"; rc=$?
+        out="$(BOT_DIR="$BOT" CHECK="$ROOT/nonexistent-check.sh"             HEARTBEAT="$ROOT/hb" LOG="$ROOT/log" NOTIFY_STATE="$ROOT/notify-state"             DISCORD_SEND="$ROOT/should-not-exist" bash "$SCRIPT" --dry-run 2>&1)"; rc=$?
     else
         printf '#!/usr/bin/env bash
 exit 0
 ' > "$ROOT/noexec.sh"; chmod -x "$ROOT/noexec.sh"
-        out="$(BOT_DIR="$BOT" CHECK="$ROOT/noexec.sh" DRY_RUN=1             HEARTBEAT="$ROOT/hb" LOG="$ROOT/log" NOTIFY_STATE="$ROOT/notify-state"             DISCORD_SEND="$ROOT/should-not-exist" bash "$SCRIPT" 2>&1)"; rc=$?
+        out="$(BOT_DIR="$BOT" CHECK="$ROOT/noexec.sh"             HEARTBEAT="$ROOT/hb" LOG="$ROOT/log" NOTIFY_STATE="$ROOT/notify-state"             DISCORD_SEND="$ROOT/should-not-exist" bash "$SCRIPT" --dry-run 2>&1)"; rc=$?
     fi
     [ "$rc" -eq 2 ] && ok "rc=$code → 판정 불가(2)로 접힌다"         || bad "rc=$code 가 $rc 로 나갔다 — 정상·위반 어느 쪽으로도 접지 않는다" "$out"
     grep -q "판정 불가" <<<"$out" && ok "  → '판정 불가' 라고 말한다"         || bad "  rc=$code 인데 판정 불가라고 안 한다" "$out"
@@ -110,7 +110,7 @@ echo "⑨ 시그널로 죽은 것도 **시그널이라고** 말한다 (128+N)"
 # 🔴 128+N 은 *도구가 판정을 낸 것*이 아니라 **중간에 끊긴 것**이다. 127(도구 부재)과 조치가
 #    다르다 — 전자는 설치·PATH, 후자는 왜 죽었는지. 한 문장으로 뭉치면 매번 다시 조사한다.
 printf '#!/usr/bin/env bash\nkill -TERM $$\n' > "$ROOT/sig.sh"; chmod +x "$ROOT/sig.sh"
-out="$(BOT_DIR="$BOT" CHECK="$ROOT/sig.sh" DRY_RUN=1 HEARTBEAT="$ROOT/hb" LOG="$ROOT/log" NOTIFY_STATE="$ROOT/notify-state" DISCORD_SEND="$ROOT/should-not-exist" bash "$SCRIPT" 2>&1)"; rc=$?
+out="$(BOT_DIR="$BOT" CHECK="$ROOT/sig.sh" HEARTBEAT="$ROOT/hb" LOG="$ROOT/log" NOTIFY_STATE="$ROOT/notify-state" DISCORD_SEND="$ROOT/should-not-exist" bash "$SCRIPT" --dry-run 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] && ok "rc=143 → 판정 불가(2)" || bad "rc=$rc 로 나갔다" "$out"
 grep -q "시그널 15" <<<"$out" && ok "  → 시그널 번호를 계산해서 준다(143-128)" || bad "  시그널 번호가 없다" "$out"
 
@@ -168,7 +168,7 @@ run
 grep -qF "흔한 원인: 네트워크·인증" "$ROOT/log" && ok "판정 불가의 근거도 남는다" \
   || bad "판정 불가인데 근거가 버려졌다" "$(cat "$ROOT/log")"
 
-echo "⑦ DRY_RUN 은 전송하지 않는다"
+echo "⑦ --dry-run 은 전송하지 않는다"
 [ ! -e "$ROOT/should-not-exist" ] && ok "discord-send 미호출" || bad "전송이 일어났다"
 
 echo
@@ -249,6 +249,61 @@ else
   bad "시험이 실물 상태를 바꿨다 — 호출부에 NOTIFY_STATE seam 이 빠졌다" \
       "전: $REAL_BEFORE / 후: $(real_sig)"
 fi
+
+echo "🔴 인자 계약 (코어 cli-guard) — 09:50 사고의 형태를 막는다"
+# 🔴 옛 형태는 `DRY_RUN="${DRY_RUN:-0}"` 였다 — **환경에서만** 켤 수 있는 dry-run 이고,
+#   바로 다음 줄에서 `set -a; . .env` 를 하므로 `.env` 한 줄이면 이 감시기가
+#   **발송 0건 · rc=0** 으로 조용히 멈추고 성공처럼 보인다. 인자 파싱도 없어 모르는 플래그를
+#   조용히 먹었다. 🔑 어느 쪽으로 접어도 조용히 틀린다 — 거절만이 두 오독을 다 막는다.
+#
+# 🔴 이 절은 **진짜 발송 스텁**을 쓴다. 위쪽 시험들은 `DISCORD_SEND` 를 없는 경로로 막아둬서
+#   *"안 보냈다"* 와 *"보내려다 실패했다"* 가 같은 모양이다 — 대조군이 성립하지 않는다.
+#   호출 1회 = 1줄로 적는다(본문을 적으면 여러 줄짜리 알림 1건이 N건으로 보인다).
+cat > "$ROOT/send-1" <<'FAKE'
+#!/usr/bin/env bash
+printf 'SEND\t%s\n' "$1" >> "$G_SENT"
+FAKE
+chmod +x "$ROOT/send-1"
+G_SENT="$ROOT/g-sent.txt"
+g_sends() { grep -c '^SEND' "$G_SENT" 2>/dev/null | head -1; }
+gr() {  # gr <스크립트 인자…>   (GUARD_ENV 를 세우면 CLI_DRY_RUN 을 환경으로 물려준다)
+    : > "$G_SENT"; : > "$ROOT/glog"
+    g_out="$(G_SENT="$G_SENT" env BOT_DIR="$BOT" CHECK="$ROOT/check.sh" \
+        HEARTBEAT="$ROOT/ghb" LOG="$ROOT/glog" NOTIFY_STATE="$ROOT/gstate$RANDOM" \
+        ${GUARD_ENV:+CLI_DRY_RUN="$GUARD_ENV"} \
+        DISCORD_SEND="$ROOT/send-1" bash "$SCRIPT" "$@" 2>"$ROOT/gerr")"
+    g_rc=$?
+}
+mkfake 1 "DRIFT: repo_behind=9커밋 · process_behind=0파일 (계약시험)"
+
+# 🧪 [대조군] **먼저 이것부터.** 아래 "발송 0건"들이 가드 덕인지 이 입력이 애초에
+#   아무것도 안 보내는 건지 못 가른다 — 대조군이 초록이 아니면 나머지 빨간불은 증거가 아니다.
+GUARD_ENV="" gr
+[[ "$(g_sends)" -eq 1 ]] && ok "🧪 [대조군] 인자 없이 부르면 실제로 1건 나간다" \
+  || bad "대조군 — 이 입력은 원래 안 보낸다. 아래 0건은 증거가 아니다" "$(g_sends)건 / $g_out"
+
+GUARD_ENV="" gr --report
+[[ "$g_rc" -eq 2 ]] && ok "모르는 인자 --report 를 rc=2 로 거절한다 (1 아님 — 못 쟀다)" || bad "모르는 인자 rc" "want 2 / got $g_rc"
+[[ "$(g_sends)" -eq 0 ]] && ok "  🔑 거절되면 발송 0건 (사고 재현 차단)" || bad "거절인데 발송" "$(g_sends)건"
+# 🔑 **거절도 흔적을 남긴다.** cron 은 stderr 를 버리므로, 안 남기면 crontab 오타 하나로
+#   이 감시기가 *아무 표시 없이* 멈춘다 — 감시기가 조용히 죽는 그 형태 그대로다.
+grep -q 'verdict=bad_args' "$ROOT/glog" && ok "  🔑 거절이 로그에 남는다 (verdict=bad_args)" \
+  || bad "거절 로그" "$(cat "$ROOT/glog" 2>/dev/null || echo '<빈 로그>')"
+
+GUARD_ENV="" gr --dry-run
+[[ "$(g_sends)" -eq 0 ]] && ok "--dry-run 이면 발송 0건" || bad "dry-run 발송" "$(g_sends)건"
+printf '%s' "$g_out" | grep -q '계약시험' && ok "  → 보낼 뻔한 본문을 stdout 으로 보여준다" \
+  || bad "dry-run 가시성 — 조용하면 고장과 구별이 안 된다" "$g_out"
+
+GUARD_ENV=1 gr
+[[ "$g_rc" -eq 2 ]] && ok "🔴 CLI_DRY_RUN 을 환경에서 물려받으면 rc=2 로 거절한다" || bad "환경 상속" "want rc=2 / got $g_rc"
+[[ "$(g_sends)" -eq 0 ]] && ok "  → 거절이므로 발송 0건" || bad "상속 거절 발송" "$(g_sends)건"
+grep -q 'verdict=bad_env' "$ROOT/glog" && ok "  🔑 bad_args 와 갈라 센다 (고칠 곳이 환경이라서)" \
+  || bad "bad_env 표지" "$(cat "$ROOT/glog" 2>/dev/null || echo '<빈 로그>')"
+
+GUARD_ENV="" gr --help
+[[ "$(g_sends)" -eq 0 ]] && ok "--help 는 발송 0건" || bad "help 발송" "$(g_sends)건"
+printf '%s' "$g_out" | grep -q 'usage:' && ok "  → 사용법을 출력한다" || bad "usage 출력" "$g_out"
 
 echo
 echo "  통과 $pass · 실패 $fail"

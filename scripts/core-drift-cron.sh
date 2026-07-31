@@ -28,10 +28,35 @@ HEARTBEAT="${HEARTBEAT:-$BOT_DIR/logs/core-drift.heartbeat}"
 LOG="${LOG:-$BOT_DIR/logs/core-drift.log}"
 NOTIFY_TARGET="${NOTIFY_TARGET:-봇-놀이터}"
 DISCORD_SEND="${DISCORD_SEND:-$BOT_DIR/src/discord-send}"
-DRY_RUN="${DRY_RUN:-0}"
 
 [ -f "$BOT_DIR/.env" ] && { set -a; . "$BOT_DIR/.env"; set +a; }
 mkdir -p "$(dirname "$HEARTBEAT")"
+
+# ── 인자 계약 ────────────────────────────────────────────────────────────────
+# 🔴 옛 형태는 `DRY_RUN="${DRY_RUN:-0}"` 였다 — **환경에서 물려받는** dry-run 이고,
+#   하필 **바로 다음 줄에서 `set -a; . .env`** 를 한다. 누가 `.env` 에 한 줄 넣으면
+#   이 감시기는 **발송 0건 · rc=0** 으로 조용히 멈추고 성공처럼 보인다.
+#   (오늘 `.env`·crontab 둘 다 `DRY_RUN` 을 안 준다고 실측했다 — 사고가 아니라 **형태**를 없앤다.)
+#   🔑 무시하면 dry-run 을 기대한 쪽이 발송당하고, 따르면 발송을 기대한 쪽이 조용해진다.
+#     **어느 쪽으로 접어도 조용히 틀린다** — 거절만이 두 오독을 다 막는다(코어 계약 ④).
+#   ⇒ 켜는 길은 **플래그 하나**뿐이다: `--dry-run`.
+cli_guard_usage() {
+    echo "usage: $(basename "$0") [--dry-run] [-h|--help]"
+    echo "  --dry-run   판정까지 하되 Discord 발송은 하지 않는다 (진단용)"
+}
+# 🔑 거절도 로그 1줄로 남긴다. cron 은 stderr 를 버리므로, 안 남기면 crontab 오타 하나로
+#   이 감시기가 **아무 표시 없이** 멈춘다 — 감시기가 조용히 죽는 그 형태 그대로다.
+cli_guard_reject_log() {
+    printf '%s verdict=%s rc=2\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$1" >> "$LOG" 2>/dev/null || true
+}
+CLI_GUARD_ON_REJECT=cli_guard_reject_log
+# 🔴 배선은 **스크립트 자기 위치**에서 찾는다 — `$BOT_DIR` 로 찾으면 안 된다.
+#   `BOT_DIR` 는 *데이터*(logs·state)를 옮기는 손잡이라 시험이 임시 디렉터리로 바꾼다.
+#   거기서 *코드*를 찾게 했더니 시험 8건이 `No such file` 로 깨졌다.
+#   🔑 **주입점을 하나로 쓰면 두 축이 같이 움직인다** — 코드와 데이터는 다른 축이다.
+CLI_GUARD_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$CLI_GUARD_LIB_DIR/lib/cli-guard-boot.sh"
+cli_guard_boot "$@"
 
 OUT="$("$CHECK" 2>&1)"; RC=$?
 STAMP="$(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M:%S')"
@@ -137,10 +162,16 @@ if [ "$FORCE" -eq 0 ]; then
 fi
 printf '%s %s\n' "$SIG" "$NOW" > "$NOTIFY_STATE"
 
-if [ "$DRY_RUN" = "1" ]; then
+# 🔴 **억제와 가시성을 갈라 둔다** — 억제는 `cli_guard_send` 한 곳, 여기는 *보여주기*만.
+#   처음엔 이 갈래가 `exit` 까지 해서 억제도 같이 했다. 그러면 억제 기제가 **두 벌**이 되고,
+#   변이시험이 그걸 잡았다: `cli_guard_send` 를 직접 발송으로 바꿔도 **0 fail** 이었다
+#   — 갈래가 가려서 계약 쪽은 아무 시험도 안 밟았다. 🔑 사본이 둘이면 하나가 죽어도 안 보인다.
+#   ⚠️ 게다가 나는 그 자리에 *"(변이로 확인: 갈래를 지워도 발송 0)"* 이라고 **안 재본 것을
+#     적어뒀다.** 주석은 검증이 아니다 — 오늘 이 형태를 세 번째 밟았다.
+# 🔸 stdout 이 필요한 이유: 코어 안내는 stderr 라 파이프로 못 받는데, dry-run 은 *보려고*
+#   부르는 것이라 본문이 필요하다. ⇒ 갈래는 본문만 내고, 안 보내는 일은 계약이 한다.
+if [ "$CLI_DRY_RUN" = "1" ]; then
     printf '%s\n' "$MSG"
-    exit "$OUT_RC"
 fi
-
-"$DISCORD_SEND" "$NOTIFY_TARGET" "$MSG"
+cli_guard_send "$DISCORD_SEND" "$NOTIFY_TARGET" "$MSG"
 exit "$OUT_RC"
