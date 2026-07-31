@@ -341,17 +341,28 @@ grep -q 'usage:' "$OUTF" && ok "  → 사용법을 출력한다" || bad "usage �
 #   스크립트가 계속 돌면 **가드를 붙였다고 믿는 채로 안 붙은 상태**가 된다 —
 #   붙이기 전보다 나쁘다(붙였다는 믿음이 생겼으니까). 부재는 조용하므로 여기서 시끄럽게 만든다.
 STATE="$WORK/nocore$RANDOM"; mkdir -p "$STATE"; SENT_LOG="$STATE/sent.tsv"; : > "$SENT_LOG"
+_nc_log="$STATE/usage.log"
 _nc_out="$(env PATH="$WORK/bin:$PATH" SENT_LOG="$SENT_LOG" \
-    CHECK_USAGE_CREDENTIALS="$CREDS" CHECK_USAGE_LOG="$STATE/usage.log" \
+    CHECK_USAGE_CREDENTIALS="$CREDS" CHECK_USAGE_LOG="$_nc_log" \
     DISCORD_SEND="$WORK/bin/discord-send" FAKE_CODE=200 FAKE_BODY="$ALERT_BODY" \
     CORE_REPO="$WORK/no-such-core" bash "$CHECK" 2>&1)"
 _nc_rc=$?
 [ "$_nc_rc" = 2 ] && ok "🔴 cli-guard 가 없으면 rc=2 로 죽는다 (조용히 무가드 실행 금지)" \
   || bad "가드 부재" "rc=2" "rc=$_nc_rc — 가드 없이 돌았다. '붙였다'는 믿음만 남는다"
 [ "$(nlines "$SENT_LOG")" = 0 ] && ok "  → 가드 부재 시 발송 0건" || bad "가드 부재 발송" "0건" "$(nlines "$SENT_LOG")건"
+# 🔴 **rc 로는 못 가른다** (2026-07-31 변이 M2 생존으로 발견).
+#   부재 검사를 지워도 rc=2 가 나온다: `set -e` 가 없어 `.` 실패가 안 죽이고, 그 뒤
+#   `cli_guard_parse` 가 정의되지 않아 rc=127 → `if !` 가 참 → `bad_args; exit 2`.
+#   발송 0건도, bash 자신의 에러 문구에 든 `cli-guard.sh` 도 그대로 통과했다.
+#   🔑 **세 단언이 전부 틀린 이유로 초록이었다.** 두 상태를 가르는 값은 rc 가 아니라 **표지**다.
+#   🔸 실해: 진짜 원인은 *코어 클론이 없다* 인데 로그엔 `bad_args` 로 남는다 —
+#     읽는 사람은 crontab 을 뒤진다. **틀린 표지는 없는 표지보다 비싸다.**
+grep -q 'verdict=no_cli_guard' "$_nc_log" 2>/dev/null \
+  && ok "  🔑 로그 표지가 no_cli_guard 다 (bad_args 로 뭉개지 않는다)" \
+  || bad "가드 부재 표지" "verdict=no_cli_guard" "$(cat "$_nc_log" 2>/dev/null || echo '<로그 없음>')"
 case "$_nc_out" in
-    *cli-guard*) ok "  → 무엇이 없는지 말한다" ;;
-    *) bad "가드 부재 안내" "cli-guard 경로 언급" "${_nc_out:-<조용함>}" ;;
+    *"코어 클론"*) ok "  → 어떻게 고치는지 말한다(git pull 안내)" ;;
+    *) bad "가드 부재 안내" "'코어 클론' 복구 안내" "${_nc_out:-<조용함>}" ;;
 esac
 
 echo
