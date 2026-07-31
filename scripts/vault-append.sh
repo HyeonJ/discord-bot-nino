@@ -197,7 +197,27 @@ fi
 
 ingest_prompt=$(cat "$prompt_file")
 
-output=$(source ~/.nvm/nvm.sh && cd /tmp && "$CLAUDE_BIN" -p "$ingest_prompt" --model claude-sonnet-4-6 --dangerously-skip-permissions 2>/dev/null) || {
+# 🔴 nvm 은 **node 를 PATH 에 올리는 수단**이지 목적이 아니다 (2026-07-31, 룬드 맥 실측).
+#   전엔 `source ~/.nvm/nvm.sh && …` 였는데, nvm 이 없는 기계(node 는 homebrew, `~/.nvm` 부재)
+#   에서 **줄 전체가 rc≠0 로 죽어** 이 스크립트가 통째로 실패했다:
+#     vault-append.sh: line 200: /Users/klaude/.nvm/nvm.sh: No such file or directory
+#   🔑 원인이 **내가 가진 것**(nvm)이라 내 기계에선 원리적으로 안 보인다. 상대가 유일한 관찰자였다.
+#   ⇒ 이미 node 를 쓸 수 있으면 아무것도 안 한다. 없을 때만 nvm 을 찾는다.
+#   ⚠️ 둘 다 없으면 **조용히 넘어가지 않는다** — 여기서 안 죽으면 CLAUDE_BIN 이 엉뚱하게
+#     실패하고 그게 "LLM 출력이 비었다"로 읽힌다(원인이 두 단계 멀어진다).
+load_node_env() {
+    command -v node >/dev/null 2>&1 && return 0
+    local nvm_sh="${NVM_DIR:-$HOME/.nvm}/nvm.sh"
+    [ -s "$nvm_sh" ] && { . "$nvm_sh"; return 0; }
+    return 1
+}
+if ! load_node_env; then
+    log "ERROR: node 를 못 찾았다 (PATH 에도 없고 ${NVM_DIR:-$HOME/.nvm}/nvm.sh 도 없다)"
+    rm -f "$prompt_file"
+    exit 1
+fi
+
+output=$(cd /tmp && "$CLAUDE_BIN" -p "$ingest_prompt" --model claude-sonnet-4-6 --dangerously-skip-permissions 2>/dev/null) || {
     log "ERROR: Claude failed for '$TOPIC'"
     rm -f "$prompt_file"
     exit 1
