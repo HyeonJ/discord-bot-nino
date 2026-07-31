@@ -90,8 +90,18 @@ echo "DRIFT: repo_behind=${BEHIND}커밋 · process_behind=${PBEHIND}파일 ($(g
 git -C "$CORE_REPO" log --oneline HEAD..@{u} | sed 's/^/  /'
 
 # 런타임 코드가 섞였는지 — lint/docs 만이면 급하지 않다
-RUNTIME="$(git -C "$CORE_REPO" diff --name-only HEAD..@{u} | grep -cE '^(relay|discord-send)/')"
+# 🔴 여기는 **포함 목록**이었고 라이브에서 거짓 초록을 냈다(2026-07-31): 코어가 `tmux-send.sh` 를
+#    바꾼 뒤처짐에서 "런타임 파일 변경: 0건" 이 나갔다. 판정은 lib 한 곳으로 옮기고 **제외 목록**으로
+#    뒤집었다 — 모르는 경로는 런타임으로 센다. 근거·두 번째 결함은 lib 헤더 참고.
+# shellcheck source=lib/core-runtime-files.sh
+. "$(dirname "$0")/lib/core-runtime-files.sh"
+RUNTIME="$(git -C "$CORE_REPO" diff --name-only HEAD..@{u} | count_runtime_paths)"
 echo "  런타임 파일 변경: ${RUNTIME}건"
+if [ "$RUNTIME" -gt 0 ]; then
+    git -C "$CORE_REPO" diff --name-only HEAD..@{u} | while IFS= read -r f; do
+        core_is_runtime_path "$f" && echo "    · $f"
+    done
+fi
 
 # ── 받았을 때의 영향: 입력 트리의 판정 코드를 내 설정에 대고 dry-run ──
 WORKTREE="$(mktemp -d)"
