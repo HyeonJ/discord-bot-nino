@@ -61,7 +61,9 @@ LAST_ALERT_FILE="$STATE_DIR/check-auth-last-alert"
 LAST_EXPIRY_FILE="$STATE_DIR/check-auth-last-expiry-alert"
 
 VERDICT=unknown      # ok · logged_out · unknown
-ALERT=none           # none · sent · skip  (+expiry / +expiry_skip 접미)
+ALERT=none           # none · sent · send_failed · skip  (+expiry / +expiry_failed / +expiry_skip 접미)
+NOTIFY_RC=""         # 발송 실패 시 discord-send 의 rc
+NOTIFY_ERR=""        # 발송 실패 시 stderr 첫 줄 (emit_log 가 별도 줄로 남긴다)
 EXPIRY=none          # ok · stale · skip · unknown
 REMAIN=na            # 만료까지 남은 초 (음수면 이미 지났다)
 NOTE=""
@@ -72,6 +74,10 @@ emit_log() {
     printf '%s verdict=%s alert=%s expiry=%s remaining=%s rc=%s%s\n' \
         "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$VERDICT" "$ALERT" "$EXPIRY" "$REMAIN" "$rc" \
         "${NOTE:+ note=$NOTE}" >> "$LOG" 2>/dev/null || true
+    # 🔑 발송 실패 사유는 **버리지 않는다** — 한 줄 형식을 안 깨게 들여쓴 줄로 붙인다.
+    #    (헤드라인 집계 `grep -cE '^[0-9]{4}-'` 를 그대로 두는 core-drift-cron 과 같은 방식)
+    [[ -n "$NOTIFY_ERR" ]] && printf '    · discord-send: %s\n' "$NOTIFY_ERR" >> "$LOG" 2>/dev/null
+    return 0
 }
 trap emit_log EXIT
 
@@ -85,7 +91,22 @@ should_alert() {   # $1=상태파일  $2=간격  → 백오프가 지났으면 0
     [[ $(( $(date +%s) - last )) -ge $iv ]]
 }
 mark_alert() { date +%s > "$1" 2>/dev/null || true; }
-notify()     { "$DISCORD_SEND" "$ALERT_CHANNEL" "$1" >/dev/null 2>&1 || true; }
+
+# 🔴 예전엔 `… >/dev/null 2>&1 || true` 였고, 호출부는 **무조건** `ALERT=sent` + 백오프를 찍었다.
+#    ⇒ discord-send 가 죽어도 로그엔 *보냈다*고 남고, 게다가 1시간 침묵했다.
+#    인증이 진짜 끊긴 상황에서 이건 **유일한 복구 수단(사람 호출)이 조용히 사라지는 것**이다.
+#    (룬드가 자기 check-auth 에서 먼저 밟고 고친 자리 — 같은 형태로 맞춘다)
+# 🔑 성공/실패를 rc 로 돌려주고, **stderr 는 버리지 않는다** — 실패 사유가 유일한 단서다.
+notify() {
+    local err
+    err="$("$DISCORD_SEND" "$ALERT_CHANNEL" "$1" 2>&1 >/dev/null)"   # stderr 만 잡는다
+    local rc=$?
+    [[ $rc -eq 0 ]] && return 0
+    NOTIFY_RC="$rc"
+    # 로그 한 줄 형식을 안 깨게 첫 줄 · 120자로 자른다(원문은 아래 emit_log 가 별도 줄로 남긴다)
+    NOTIFY_ERR="$(printf '%s' "$err" | head -1 | cut -c1-120)"
+    return 1
+}
 
 # ── ① 로그인 상태 ────────────────────────────────────────────────────────────
 # ⚠️ `claude auth status` 는 **저장소만 본다** — env 토큰(CLAUDE_CODE_OAUTH_TOKEN)으로
@@ -110,9 +131,15 @@ esac
 
 if [[ "$VERDICT" == "logged_out" ]]; then
     if should_alert "$LAST_ALERT_FILE" "$ALERT_INTERVAL"; then
-        notify "$MENTION Claude Code 인증이 만료됐어! tmux attach -t nino 후 /login 해줘"
-        mark_alert "$LAST_ALERT_FILE"
-        ALERT=sent
+        if notify "$MENTION Claude Code 인증이 만료됐어! tmux attach -t nino 후 /login 해줘"; then
+            mark_alert "$LAST_ALERT_FILE"
+            ALERT=sent
+        else
+            # 🔑 **백오프를 안 찍는다** — 찍으면 다음 기회를 스스로 지운다. 일시 장애였다면
+            #    1시간이 통째로 사라지고, 그 사이 사람은 아무 신호도 못 받는다.
+            ALERT=send_failed
+            NOTE="${NOTE:+$NOTE,}discord-send-failed(rc=${NOTIFY_RC:-na})"
+        fi
     else
         ALERT=skip
     fi
@@ -139,9 +166,15 @@ PYEOF
             if [[ $REMAIN -lt $(( -EXPIRY_GRACE )) ]]; then
                 EXPIRY=stale
                 if should_alert "$LAST_EXPIRY_FILE" "$ALERT_INTERVAL"; then
-                    notify "$MENTION 니노 토큰이 $(( -REMAIN / 60 ))분 전에 만료됐는데 갱신이 안 되고 있어! tmux attach -t nino 후 /login 해줘"
-                    mark_alert "$LAST_EXPIRY_FILE"
-                    ALERT="${ALERT}+expiry"
+                    # ⚠️ 호출부가 **둘**이다(로그아웃·여기). 한 자리만 고치면 다른 자리가 남고,
+                    #    같은 계약이 여러 자리에 있으면 **한 자리만 덮고도 초록**이 된다(시험 ⑭).
+                    if notify "$MENTION 니노 토큰이 $(( -REMAIN / 60 ))분 전에 만료됐는데 갱신이 안 되고 있어! tmux attach -t nino 후 /login 해줘"; then
+                        mark_alert "$LAST_EXPIRY_FILE"
+                        ALERT="${ALERT}+expiry"
+                    else
+                        ALERT="${ALERT}+expiry_failed"
+                        NOTE="${NOTE:+$NOTE,}discord-send-failed(rc=${NOTIFY_RC:-na})"
+                    fi
                 else
                     ALERT="${ALERT}+expiry_skip"
                 fi

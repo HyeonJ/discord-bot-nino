@@ -27,10 +27,6 @@ wd_beat() { printf '%s rc=%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$1" > "$WD_HEA
 trap 'wd_beat "$?"' EXIT
 wd_beat running
 
-DISCORD_SEND="$BOT_DIR/src/discord-send"
-# jq 미설치 + set -e 조합으로 워치독이 여기서 죽어 자동 재시작이 동작하지 않았다(2026-07-25 발견).
-ALERT_CHANNEL="현인-업무"
-
 # 🔴 `source … || true` 로 쓰면 **bash 3.2 에서 `|| true` 가 source 실패를 못 잡고 죽는다.**
 #    (룬드 맥 실측 2026-07-29 · 니노 bash 5.2 대조 확인 — 5.x 는 안 죽는다 = 버전 차이)
 #    죽으면 **실패 신호가 셋 다 없다**: stderr 없음 · 종료코드만 1 · log() 정의 전이라 로그도 없음.
@@ -38,13 +34,90 @@ ALERT_CHANNEL="현인-업무"
 #    조건문은 `set -e` 면제라 이 형태가 정본. (이 줄이 파일 마지막이면 rc 가 1이 되니 주의)
 [ -f "$BOT_DIR/.env" ] && source "$BOT_DIR/.env"
 
+# 🔴 **알림 자리의 첫 줄은 주입점이어야 한다** (2026-07-31 룬드 실사고에서 옮겨온 규칙).
+#    그의 check-usage-alert 는 전송 경로가 하드코딩이라 **시험이 형 채널로 84건을 실제로 쐈다**
+#    (06:28:08~06:32:12). 나중에 빼면 이미 한 번 쏜 뒤고, **알림은 되돌릴 수 없다.**
+# 🔸 여기는 지금도 안 샌다 — 시험이 가짜 `$BOT_DIR` 트리를 깔아 스텁을 물린다. 다만 그건
+#    *BOT_DIR 을 돌릴 수 있다는 간접 안전*이라, 누가 시험을 실제 BOT_DIR 로 돌리는 순간 샌다.
+#    ⇒ 안전을 **경로 조작에 기대지 말고 명시적 주입점**으로 옮긴다.
+# ⚠️ 채널도 같이 뺀다 — 경로만 빼면 스텁을 안 물린 시험이 **실채널 인자**로 나간다(룬드도 둘 다 뺐다).
+# 🔴🔴 **기본값을 주변 환경에서 끌어오지 않는다.** 2026-07-31 06:46, 내가 여기에
+#    `${DISCORD_SEND_BIN:-…}` 한 겹을 끼웠다가 **현인-업무로 41건을 실제로 쐈다(79초)**.
+#    `DISCORD_SEND_BIN` 은 `.env` 에 있고 **내 tmux 셸의 주변 환경에 이미 떠 있어서**,
+#    시험이 가짜 `$BOT_DIR` 를 깔아도 그 한 겹이 **실물 경로로 되돌려놨다.**
+# 🔑 교훈: 주입점은 *시험이 값을 넣는 자리*지 *환경이 값을 넣는 자리*가 아니다.
+#    폴백 사슬을 늘리면 늘린 칸마다 **시험이 모르는 입력구**가 하나씩 생긴다.
+#    ⇒ 사슬은 두 칸까지. 명시 주입(시험) → 이 파일의 리터럴 기본값(운영). 그 사이는 비운다.
+# 🔴 `.env` **뒤**에 둔다 — 앞에 두면 `.env` 가 같은 이름을 정의하는 순간 주입이 조용히 덮인다.
+DISCORD_SEND="${DISCORD_SEND:-$BOT_DIR/src/discord-send}"
+# jq 미설치 + set -e 조합으로 워치독이 여기서 죽어 자동 재시작이 동작하지 않았다(2026-07-25 발견).
+ALERT_CHANNEL="${ALERT_CHANNEL:-현인-업무}"
+
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG"; }
+
+# 🔸 이름 충돌 경고 — **읽지는 않는다**(룬드 `#93` 리뷰 제안).
+#    시험이 "`.env` 가 이 두 이름을 안 쓴다"를 계약으로 잡지만, **사람이 `.env` 를 손으로 고치고
+#    시험을 안 돌리면** 그 계약은 아무 말도 안 한다. 그 창을 런타임에서 메운다.
+#    🔑 값을 *쓰지* 않는 게 핵심이다 — 쓰면 폴백 사슬이 한 칸 늘고, 그게 06:46 사고였다.
+# 🔴 **`log()` 정의 아래**에 둔다. 처음엔 대입 바로 옆(52행)에 뒀는데, `log` 은 65행에서야
+#    정의되므로 `set -e` 아래에서 rc=127 로 **워치독이 통째로 죽는다** — 이 파일 34행 주석이
+#    증언하는 2026-07-25 `jq` 사고와 **같은 형태**다. 죽으면 감시가 조용히 사라진다.
+# ⚠️ `grep` rc 를 갈라 본다. `if grep …; then` 만 쓰면 grep 이 죽었을 때(rc=2) 조건이 거짓이 되어
+#    **가드가 실패하면서 열린다** — 내가 코어 `#106` 에서 지적한 그 형태다.
+if [ -f "$BOT_DIR/.env" ]; then
+    _clash_rc=0
+    grep -qE '^[[:space:]]*(export[[:space:]]+)?(DISCORD_SEND|ALERT_CHANNEL)=' "$BOT_DIR/.env" || _clash_rc=$?
+    case "$_clash_rc" in
+        0) log "ENV-NAME-CLASH: .env 가 DISCORD_SEND/ALERT_CHANNEL 을 정의한다 — 주입점을 조용히 덮는다(값은 안 읽었다)" ;;
+        1) : ;;   # 충돌 없음 = 정상
+        *) log "ENV-NAME-CLASH-UNKNOWN: .env 를 못 읽어 이름 충돌을 **판정 못 했다**(grep rc=$_clash_rc)" ;;
+    esac
+fi
+
+
+# ── 재시작 알림의 억제 ────────────────────────────────────────────────────────
+# 🔴 2026-07-31 실측: 전송 6곳 중 **셋(재시작 알림)에 억제가 없었다.** 2분 주기라
+#   재시작이 계속 실패하면 **시간당 30건이 천장 없이** 나간다. 같은 새벽에 79초 41건을
+#   겪고서 *"막을 게 아무것도 없다"* 를 룬드와 같이 짚은 자리다.
+# 🔑 그런데 **조용히 만들면 안 된다** — 재시작이 반복 실패하는 건 진짜 장애다.
+#   ⇒ 억제가 아니라 **접기**다: 첫 건은 즉시, 이후 창 안의 반복은 세었다가
+#     다음 알림에 **몇 번이었는지 실어** 보낸다. 30줄이 1줄이 되고 정보는 늘어난다.
+# 🔸 원인별로 **다른 파일**을 쓴다(다른 축과 같은 관례) — 세션 사망이 얼어붙음을 침묵시키면 안 된다.
+RESTART_BACKOFF=${NINO_RESTART_BACKOFF:-3600}
+
+# restart_notify <원인표지> <사람이 읽을 문구>
+#   창 안이면 조용히 세기만 하고 rc=1. 보낼 때는 누적 횟수를 문구에 붙인다.
+restart_notify() {
+    local cause="$1" msg="$2"
+    local state="$BOT_DIR/logs/watchdog-restart-${cause}-next"
+    local count="$BOT_DIR/logs/watchdog-restart-${cause}-count"
+    local now next n
+    now=$(date +%s)
+    next=$(cat "$state" 2>/dev/null || echo 0)
+    case "$next" in ''|*[!0-9]*) next=0 ;; esac
+    n=$(cat "$count" 2>/dev/null || echo 0)
+    case "$n" in ''|*[!0-9]*) n=0 ;; esac
+    n=$((n + 1))
+    if [ "$now" -lt "$next" ]; then
+        printf '%s' "$n" > "$count" 2>/dev/null || true
+        log "${cause}-SUPPRESSED: 창 안 ${n}번째 — 다음 알림에 합쳐 보낸다"
+        return 1
+    fi
+    # 🔸 2회 이상일 때만 횟수를 붙인다 — 1회에 "1번째"는 소음이다
+    [ "$n" -ge 2 ] && msg="$msg
+
+🔸 최근 $((RESTART_BACKOFF / 60))분 동안 **${n}번째** 재시작이야. 반복되면 자동 복구로는 안 되는 상태일 수 있어."
+    $DISCORD_SEND "$ALERT_CHANNEL" "$msg" 2>/dev/null || true
+    printf '%s' "$((now + RESTART_BACKOFF))" > "$state" 2>/dev/null || true
+    printf '0' > "$count" 2>/dev/null || true
+    return 0
+}
 
 # Check 1: tmux 세션 살아있는지
 if ! tmux has-session -t "$SESSION" 2>/dev/null; then
     log "DEAD-SESSION: tmux session '$SESSION' not found. Restarting..."
     "$SCRIPT_DIR/start-nino.sh" >> "$LOG" 2>&1
-    $DISCORD_SEND "$ALERT_CHANNEL" "니노가 죽어서 자동 재시작했어! (tmux 세션 없음)" 2>/dev/null || true
+    restart_notify DEAD-SESSION "니노가 죽어서 자동 재시작했어! (tmux 세션 없음)" || true
     exit 0
 fi
 
@@ -53,7 +126,7 @@ PANE_PID=$(tmux list-panes -t "$SESSION" -F '#{pane_pid}' 2>/dev/null | head -1)
 if [ -z "$PANE_PID" ] || ! kill -0 "$PANE_PID" 2>/dev/null; then
     log "DEAD-PROC: pane process gone (PID: $PANE_PID). Respawning..."
     "$SCRIPT_DIR/restart-nino.sh" >> "$LOG" 2>&1
-    $DISCORD_SEND "$ALERT_CHANNEL" "니노 프로세스가 죽어서 자동 재시작했어! (pane 프로세스 없음)" 2>/dev/null || true
+    restart_notify DEAD-PROC "니노 프로세스가 죽어서 자동 재시작했어! (pane 프로세스 없음)" || true
     exit 0
 fi
 
@@ -64,7 +137,7 @@ if [ -n "$CLAUDE_PID" ]; then
     if [ "$STATE" = "D" ]; then
         log "FROZEN: Claude PID $CLAUDE_PID in D state. Restarting..."
         "$SCRIPT_DIR/restart-nino.sh" >> "$LOG" 2>&1
-        $DISCORD_SEND "$ALERT_CHANNEL" "니노가 얼어서 자동 재시작했어! (프로세스 D state)" 2>/dev/null || true
+        restart_notify FROZEN "니노가 얼어서 자동 재시작했어! (프로세스 D state)" || true
         exit 0
     fi
 fi
@@ -453,7 +526,10 @@ detector_recovered() {
 
 DET_NOW=$(date +%s)
 if [ -f "$DETECTOR_HB" ]; then
-    DET_M=$(stat -c %Y "$DETECTOR_HB" 2>/dev/null || echo "")
+    # ⚠️ `stat -c` 는 GNU 전용, BSD 는 `-f %m`. 폴백이 없으면 룬드 맥에서 이 축이
+    #   **조용히 죽는다**(mtime 이 늘 빈 값 → 영원히 판정 불가 → 감지기 감시가 없는 것과 같다).
+    #   시험으로 실측했다(BSD 흉내 PATH): 폴백 전 2 fail → 후 0 fail.
+    DET_M=$(stat -c %Y "$DETECTOR_HB" 2>/dev/null || stat -f %m "$DETECTOR_HB" 2>/dev/null || echo "")
     case "$DET_M" in
         ''|*[!0-9]*)
             # 🔴 판정 불가를 "정상"으로도 "고장"으로도 접지 않는다 — 로그에만 남긴다.

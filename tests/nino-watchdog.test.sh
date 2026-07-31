@@ -28,6 +28,14 @@ skipt(){ echo "  ⛔ $1 (단언 ${3:-1}개분)"; echo "     사유: $2"
 # 총계 줄에 붙일 꼬리. 0 이면 아무것도 안 붙인다(없는 걸 시끄럽게 만들지 않는다).
 skip_note(){ [ "$skip" -gt 0 ] && printf ' (단언 %s개분)' "$skip_assert"; return 0; }
 
+# 🔴 시각 조작은 **정본 하나**를 지난다 — `tests/lib/timeshift.sh`.
+#   그 파일 머리말이 이 규칙을 이미 적어놨는데(*"사본 금지 · 시각 조작은 전부 여기를 지난다"*)
+#   이 시험은 정작 **source 를 안 하고** `touch -d '@N'`·`stat -c %Y` 를 직접 썼다.
+#   ⇒ 룬드 맥에서 `touch: out of range or illegal time specification` 으로 죽고,
+#     그 죽음이 **무관한 단언 4개를 빨갛게** 만들었다(2026-07-31 `#93` 리뷰 실측).
+#   🔑 정본을 세워두고 안 쓰면 정본이 아니다.
+. "$SCRIPT_DIR/lib/timeshift.sh"
+
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK/logs" "$WORK/scripts" "$WORK/src" "$WORK/bin"
 
@@ -586,21 +594,11 @@ echo "🔴 이식성 — 상대 봇(macOS·bash 3.2·BSD)이 이 시험을 셀 �
 #   실사용이 그대로여도 카운트가 흔들린다 — 오늘 코어에서 잡은 *계측 상수* 형태이자,
 #   *검사기가 자기를 센다* 의 네 번째 사례다.
 #   ⇒ 개수가 아니라 **구조**를 본다: iso_off 밖에 있으면 몇 개든 빨간불.
-gnu=$(python3 - "$0" <<'PYEOF'
-import re, sys
-src = open(sys.argv[1]).read()
-src = re.sub(r"<<'PYEOF'.*?^PYEOF", "", src, flags=re.S | re.M)   # 검사기를 대상에서 뺀다
-m = re.search(r'^iso_off\(\)\s*\{.*?^\}', src, re.S | re.M)
-if not m:
-    print("iso_off 헬퍼가 없다"); raise SystemExit
-outside = src.replace(m.group(0), "")
-outside = "\n".join(l for l in outside.splitlines() if not l.lstrip().startswith("#"))
-n = len(re.findall(r'date\s+-u\s+-d', outside))
-print(f"iso_off 밖에서 {n}곳" if n else "")
-PYEOF
-)
-[[ -z "$gnu" ]] && ok "GNU 전용 date -d 는 iso_off 안에만 있다" \
-  || bad "GNU date -d" "iso_off 안에만" "$gnu"
+# 🔴 **이 파일의 가드는 걷어냈다** — `tests/portability.test.sh` 로 옮겼다(2026-07-31).
+#   여기 두면 **가드가 파일마다 사본**이 되고, 그러면 새 시험 파일은 *가드를 안 쓰는 것으로*
+#   통과한다. 안 쓰는 것은 조용하다 — 이 파일이 `timeshift.sh` 정본을 안 쓴 게 정확히 그것이었다.
+#   🔑 사본을 지우는 것까지가 "정본으로 옮겼다" 다. 남겨두면 두 벌이 갈린다.
+#   🔸 아래는 남긴다 — **시험이 실행하는 스크립트**는 공용 가드의 범위(tests/) 밖이다.
 
 echo ""
 echo "🔴 러너 계약 — 예상 못 한 stderr 는 실패다 (룬드 제안 2026-07-29):"
@@ -690,7 +688,12 @@ echo "🔴 실물 계약 — 스텁이 받은 argv 를 **진짜 discord-send** �
 #     네트워크 없이 해석까지만 태운다. 인자를 시험이 다시 적지 않으므로 드리프트가 없다.
 REAL_SEND="$REPO/src/discord-send"
 # 채널명을 시험에 다시 적지 않는다 — 스크립트에서 뽑는다(적으면 드리프트가 난다)
+# 🔴 주입점이 생기면서 그 줄이 `ALERT_CHANNEL="${ALERT_CHANNEL:-현인-업무}"` 가 됐다.
+#   **추출기는 자기가 낡은 걸 스스로 알리지 않는다** — 안 고치면 리터럴 `${ALERT_CHANNEL:-…}` 를
+#   뽑아 channel-map 조회가 빈 값이 되고, 그건 "채널이 안 잡힌다"는 **엉뚱한 실패**로 보인다.
+#   ⇒ 감싼 형태에서 기본값만 벗겨낸다. 두 형태 다 받는다.
 ALERT_CH="$(sed -n 's/^ALERT_CHANNEL="\([^"]*\)".*/\1/p' "$WD" | head -1)"
+ALERT_CH="${ALERT_CH#\$\{ALERT_CHANNEL:-}"; ALERT_CH="${ALERT_CH%\}}"
 
 # 🔴 **이 계약은 니노 기계에서만 잴 수 있다 — 그건 결함이 아니라 설계다.**
 #   src/discord-send 는 BOT_DIR·CORE_CLI·BUN 을 **절대경로로 고정**한다:
@@ -744,6 +747,160 @@ fi
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# 🔴 주입 축 — **시험이 실물을 건드릴 수 있는가**
+#
+#   2026-07-31 06:28~06:32, 룬드의 `check-usage-alert` 시험이 형 채널로 **84건을 실제로 쐈다.**
+#   원인은 하나였다: 전송 경로가 하드코딩이라 **시험이 다른 데로 돌릴 방법이 없었다.**
+#   여기는 지금 안 샌다 — 시험이 가짜 `$BOT_DIR` 트리를 깔기 때문이다. 하지만 그건
+#   *경로 조작에 기댄 간접 안전*이고, 다음 시험이 그 전제를 안 지키면 그대로 샌다.
+#
+# 🔑 두 축이 재는 게 다르다 (룬드 정리):
+#     동적 — 스텁을 **탔을 때** 무엇이 갔나
+#     정적 — 스텁을 **안 탈 수 있는가**
+#   샌 전송은 정의상 스텁을 안 지나갔으니 **스텁 로그에는 영원히 안 나온다.**
+#   그래서 동적 축만으로는 "안 샌다"를 절대 못 잰다 — 정적 축이 그걸 잰다.
+# ═══════════════════════════════════════════════════════════════════════════
+echo ""
+echo "🔴 주입 축 — 시험이 실채널로 샐 수 있는가:"
+
+INJ_SEND="$WORK/bin/injected-send"
+printf '#!/bin/bash\nprintf "%%s|%%s\\n" "$1" "$2" >> "$WORK_MARK/injected.txt"\nexit 0\n' > "$INJ_SEND"
+chmod +x "$INJ_SEND"
+
+run_wd_inject() {   # $1=DISCORD_SEND $2=ALERT_CHANNEL ; 나머지는 run_wd 와 같은 환경
+  : > "$WORK/sent.txt"; : > "$WORK/injected.txt"; : > "$WORK/restarted.txt"
+  WORK_MARK="$WORK" PATH="$WORK/bin:$PATH" NINO_SILENCE_LIMIT="${LIMIT:-3600}" \
+    NINO_HISTORY_CLI="$WORK/bin/yaksu-history" \
+    NINO_SESSION_LOG_DIR="$WORK/sessions" \
+    DISCORD_SEND="$1" ALERT_CHANNEL="$2" \
+    bash "$WORK/scripts/nino-watchdog.sh" >/dev/null 2>"$WORK/stderr.txt"
+}
+
+# 🧪 [양성 대조군] 먼저 — **주입 안 했을 때 기본 경로가 실제로 받는가.**
+#   이걸 안 재면 아래 "기본 경로가 안 받았다"가 *주입이 먹혀서*인지 *애초에 알림이 안 떴는지*
+#   구별이 안 된다. 두 상태가 같은 모습이면 그 시험은 아무것도 안 잰 것이다.
+reset; set_hb 120; make_history Tim
+CTRL="$(run_wd)"
+[ -n "$CTRL" ] \
+  && ok "🧪 [양성 대조군] 주입이 없으면 기본 경로가 받는다" \
+  || bad "🧪 [양성 대조군] 기본 경로 수신" "sent.txt 에 한 건 이상" "<없음> — 알림 자체가 안 떴다면 아래 축은 무의미하다"
+
+# ① 동적 — 주입하면 **모든** 호출이 그리로 간다
+reset; set_hb 120; make_history Tim
+run_wd_inject "$INJ_SEND" "주입-채널"
+INJ_OUT="$(cat "$WORK/injected.txt" 2>/dev/null)"
+DEF_OUT="$(cat "$WORK/sent.txt" 2>/dev/null)"
+[ -n "$INJ_OUT" ] \
+  && ok "주입한 전송 경로로 간다" \
+  || bad "주입한 경로 수신" "injected.txt 에 한 건 이상" "<없음> — DISCORD_SEND 주입이 안 먹는다"
+[ -z "$DEF_OUT" ] \
+  && ok "기본 경로(=운영 경로)는 한 건도 안 받는다" \
+  || bad "기본 경로 무수신" "<없음>" "$DEF_OUT — 주입해도 일부가 실물로 샌다"
+case "$INJ_OUT" in
+  주입-채널*) ok "채널도 주입한 값으로 간다" ;;
+  *) bad "주입 채널" "주입-채널|…" "${INJ_OUT:-<없음>} — 채널이 하드코딩이면 실채널로 쏜다" ;;
+esac
+
+# ② 이름의 소유 — **`.env` 는 이 두 이름을 정의하면 안 된다**
+#   🔴 이 시험을 처음엔 "주입이 `.env` 를 이긴다"로 썼다가 빨갛게 나왔고, **빨간 게 맞았다.**
+#     `.env` 의 평범한 `DISCORD_SEND=…` 는 해석을 앞에 두든 뒤에 두든 **항상 이긴다**(나중 대입이 이긴다).
+#     이기게 하려면 주입값을 미리 대피시키는 폴백 사슬이 필요한데 — 06:46 사고가 정확히
+#     **사슬을 한 칸 늘렸다가** 난 것이다(`${DISCORD_SEND_BIN:-…}` 가 실물 경로를 되돌려놨다).
+#   🔑 ⇒ 사슬로 이기려 하지 말고 **충돌 자체를 금지**한다. 이 두 이름은 주입점이 소유한다.
+#     못 이기는 싸움을 없애는 쪽이, 이기는 장치를 덧대는 쪽보다 잴 것이 적다.
+# 🔴 worktree 에는 `.env` 가 없다(untracked 라 본체에만 있다). 여기서 멈추면 이 계약은
+#   **내가 일하는 모든 자리에서 판정 불가**가 된다 — 즉 사실상 안 재는 계약이다.
+#   ⇒ 운영이 실제로 읽는 파일을 본다. 워치독은 `$BOT_DIR/.env` 를 읽고, 운영 BOT_DIR 은 본체다.
+REAL_ENV="${WD_ENV:-}"
+if [ -z "$REAL_ENV" ]; then
+  for _c in "$REPO/.env" "$HOME/discord-bot-nino/.env"; do
+    [ -r "$_c" ] && { REAL_ENV="$_c"; break; }
+  done
+fi
+if [ -z "$REAL_ENV" ] || [ ! -r "$REAL_ENV" ]; then
+  skipt "이름 소유: .env 가 DISCORD_SEND/ALERT_CHANNEL 을 안 쓴다" \
+    "$REAL_ENV 를 못 읽는다 — 니노 기계에서만 잴 수 있다"
+else
+  ENV_CLASH="$(sed 's/#.*//' "$REAL_ENV" | grep -E '^[[:space:]]*(export[[:space:]]+)?(DISCORD_SEND|ALERT_CHANNEL)=')"
+  if [ -z "$ENV_CLASH" ]; then
+    ok "이름 소유: .env 가 DISCORD_SEND/ALERT_CHANNEL 을 정의하지 않는다"
+  else
+    bad "이름 소유" "<없음>" "$ENV_CLASH — .env 대입이 주입을 조용히 덮는다(순서로는 못 이긴다)"
+  fi
+  # 🧪 [양성 대조군] 이 검사기가 실제로 잡는가 — `_BIN` 접미사에 낚이지 않는지까지.
+  #   `.env` 에 있는 `DISCORD_SEND_BIN` 을 위반으로 세면 이 시험은 영원히 빨갛고, 그것도 못 재는 것이다.
+  CLASH_PROBE="$WORK/env-probe"
+  printf 'DISCORD_SEND_BIN=/x/y\nexport ALERT_CHANNEL=현인-업무\n#DISCORD_SEND=/주석\n' > "$CLASH_PROBE"
+  PROBE_OUT="$(sed 's/#.*//' "$CLASH_PROBE" | grep -E '^[[:space:]]*(export[[:space:]]+)?(DISCORD_SEND|ALERT_CHANNEL)=')"
+  case "$PROBE_OUT" in
+    *ALERT_CHANNEL*) case "$PROBE_OUT" in
+        *DISCORD_SEND_BIN*) bad "🧪 [양성 대조군] 이름 충돌 검사기" "_BIN 은 위반이 아니다" "$PROBE_OUT" ;;
+        *) ok "🧪 [양성 대조군] 이름 충돌 검사기가 export/주석/_BIN 을 정확히 가른다" ;;
+      esac ;;
+    *) bad "🧪 [양성 대조군] 이름 충돌 검사기" "심어둔 ALERT_CHANNEL 검출" "${PROBE_OUT:-<없음>} — 검사가 공허하다" ;;
+  esac
+  rm -f "$CLASH_PROBE"
+fi
+
+# ②-b 런타임 경고 — **시험이 안 돌 때의 창을 메운다**(룬드 `#93` 제안)
+#   위 계약은 *시험이 돌 때만* 말한다. 사람이 `.env` 를 손으로 고치고 시험을 안 돌리면 조용하다.
+#   ⇒ 워치독이 매 tick 자기 `.env` 를 보고 **경고만** 남긴다. 🔑 값은 안 읽는다 — 읽으면 사슬이 는다.
+reset; set_hb 1; set_activity 1; make_history Tim
+printf 'DISCORD_SEND=%s\n' "$WORK/bin/env-send" > "$WORK/.env"
+run_wd >/dev/null
+grep -q 'ENV-NAME-CLASH' "$WORK/logs/watchdog.log" 2>/dev/null \
+  && ok "런타임: .env 이름 충돌을 경고한다" \
+  || bad "런타임 이름 충돌 경고" "ENV-NAME-CLASH" "없음 — 시험을 안 돌리는 사람에겐 아무 말도 안 한다"
+# 🔴 **경고만 하고 값은 안 쓴다** — 경고와 동시에 그 값으로 보내면 사슬을 늘린 것과 같다.
+: > "$WORK/envsend.txt"
+reset; set_hb 120; make_history Tim; run_wd >/dev/null
+[ ! -s "$WORK/envsend.txt" ] \
+  && ok "런타임: 경고만 하고 .env 값을 전송에 쓰지 않는다" \
+  || bad "값 미사용" "envsend.txt 비어있음" "$(cat "$WORK/envsend.txt") — 경고하면서 그 값으로 보냈다"
+rm -f "$WORK/.env"
+# 🧪 [양성 대조군] 충돌이 없으면 조용한가 — 매 tick 찍으면 로그가 무의미해진다
+reset; set_hb 1; set_activity 1; make_history Tim; run_wd >/dev/null
+grep -q 'ENV-NAME-CLASH' "$WORK/logs/watchdog.log" 2>/dev/null \
+  && bad "🧪 [양성 대조군] 충돌 없을 때" "조용함" "ENV-NAME-CLASH — 항상 찍으면 경고가 아니다" \
+  || ok "🧪 [양성 대조군] 충돌이 없으면 조용하다"
+
+# ③ 정적 — **스텁을 안 탈 수 있는 자리가 남아 있는가**
+#   위 동적 축은 "스텁을 탄 것"만 본다. 샌 전송은 스텁을 안 지나가므로 거기엔 절대 안 남는다.
+#   ⇒ 소스에서 직접 센다: 주입점 한 줄 말고 `src/discord-send` 를 직접 부르는 자리가 있으면 위반.
+hardcoded_send_lines() {   # $1 = 파일 ; stdout = 위반 줄 ; rc 0=쟀다 2=못 쟀다
+  local f="$1" stripped
+  # 주석을 먼저 지운다 — 주석 속 경로는 호출이 아니다
+  stripped="$(sed 's/#.*//' "$f")" || return 2
+  printf '%s\n' "$stripped" | grep 'src/discord-send' | grep -v 'DISCORD_SEND:-'
+  return 0
+}
+VIOL="$(hardcoded_send_lines "$WD")"; VRC=$?
+if [ "$VRC" -ne 0 ]; then
+  # 🔴 검사 도구가 죽은 것을 **통과로 접지 않는다.** 오늘 룬드 `#106` 이 바로 그 형태였다
+  #   (가드가 실패하면 열려서 항상 초록).
+  skipt "정적: 하드코딩된 전송 자리 없음" "검사기가 파일을 못 읽었다(rc=$VRC) — 못 쟀다"
+elif [ -z "$VIOL" ]; then
+  ok "정적: 주입점 밖에서 src/discord-send 를 직접 부르는 자리가 없다"
+else
+  bad "정적: 하드코딩된 전송 자리" "<없음>" "$VIOL"
+fi
+
+# 🧪 [양성 대조군] 정적 검사기 자체가 일을 하는가 — 하드코딩을 심은 사본을 잡아야 한다.
+#   안 재면 정규식이 아무것도 안 맞아도 초록이다(= 빈 검사가 통과로 보인다).
+MUT="$WORK/mutant-wd.sh"
+cp "$WD" "$MUT" && printf '\n"$BOT_DIR/src/discord-send" "현인-업무" "샌다"\n' >> "$MUT"
+MVIOL="$(hardcoded_send_lines "$MUT")"; MRC=$?
+if [ "$MRC" -ne 0 ]; then
+  skipt "🧪 [양성 대조군] 정적 검사기" "변이 사본을 못 만들었다 — 검사기가 일하는지 못 쟀다"
+elif [ -n "$MVIOL" ]; then
+  ok "🧪 [양성 대조군] 정적 검사기가 심어둔 하드코딩을 잡는다"
+else
+  bad "🧪 [양성 대조군] 정적 검사기" "위반 검출" "<없음> — 검사기가 아무것도 안 잰다(위 초록은 공허하다)"
+fi
+rm -f "$MUT"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # 🔴 Check 6: 감지기 축 — **감지기가 죽었는지는 누가 보나**
 #
 #   2026-07-30 실측: `check-auth.sh` 가 cron 5분으로 등록돼 있는데 로그가 한 줄도 없어
@@ -769,7 +926,7 @@ DNEXT="$WORK/logs/watchdog-detector-next"
 
 # 감지기 축만 남기고 다른 축은 조용한 상태로 만든다(알림이 섞이면 무엇이 울렸는지 안 갈린다)
 det_reset() { reset; rm -f "$DABS" "$DNEXT"; set_hb 1; set_activity 1; make_history Tim; }
-det_hb()    { touch -d "@$(( $(date +%s) - ${1:-0} * 60 ))" "$DHB"; }   # $1 = 분 전
+det_hb()    { touch_ago "$(( ${1:-0} * 60 ))" "$DHB"; }   # $1 = 분 전 (GNU/BSD 공용 정본을 지난다)
 det_no_hb() { rm -f "$DHB"; }
 det_absent_since() { echo "$(( $(date +%s) - ${1:-0} * 60 ))" > "$DABS"; }  # $1 = 분 전
 
@@ -886,8 +1043,8 @@ wd_lines=$(grep -c . "$WDHB" 2>/dev/null || echo 0)
   || bad "하트비트 한 줄 계약" "1줄" "${wd_lines}줄 — 옛 상태가 섞여 판정이 모호해진다"
 
 det_reset; det_hb 5; rm -f "$WDHB"
-run_wd >/dev/null; touch -d '@100' "$WDHB"; wd_old=$(stat -c %Y "$WDHB")
-run_wd >/dev/null; wd_new=$(stat -c %Y "$WDHB")
+run_wd >/dev/null; touch_ago "$(( 365 * DAY ))" "$WDHB"; wd_old="$(mtime_of "$WDHB")"
+run_wd >/dev/null; wd_new="$(mtime_of "$WDHB")"
 [ "$wd_new" -gt "$wd_old" ] && ok "두 번째 tick 이 하트비트를 갱신한다" \
   || bad "하트비트 갱신" "mtime 증가" "$wd_old → $wd_new (안 갱신되면 stale 판정이 영원히 참)"
 
@@ -937,6 +1094,69 @@ run_wd >/dev/null
 grep -q 'DETECTOR-RECOVERED' "$WORK/logs/watchdog.log" 2>/dev/null \
   && bad "부재 이력 없을 때" "조용함" "RECOVERED — 로그가 2분마다 시끄러워진다" \
   || ok "회귀: 부재 이력이 없으면 조용하다 (매 tick 찍지 않는다)"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 🔴 재시작 알림의 **접기** — 억제가 없던 세 자리
+#
+#   2026-07-31 실측: 전송 6곳 중 셋(재시작)에 억제가 전혀 없었다. 2분 주기라 재시작이
+#   계속 실패하면 **시간당 30건이 천장 없이** 나간다. 같은 새벽에 79초 41건을 겪은 뒤다.
+#
+# 🔑 억제와 **접기**는 다르다. 재시작 반복 실패는 진짜 장애라 조용해지면 안 된다.
+#   ⇒ 첫 건은 즉시 · 창 안의 반복은 세었다가 **다음 알림에 횟수를 실어** 보낸다.
+#     30줄이 1줄이 되면서 정보는 오히려 는다.
+# ═══════════════════════════════════════════════════════════════════════════
+echo ""
+echo "🔴 재시작 알림 접기 — 조용해지되 사라지지 않는다:"
+
+RS_STATE="$WORK/logs/watchdog-restart-DEAD-SESSION-next"
+RS_COUNT="$WORK/logs/watchdog-restart-DEAD-SESSION-count"
+rs_reset() { reset; rm -f "$WORK"/logs/watchdog-restart-*; set_hb 1; set_activity 1; make_history Tim; }
+
+rs_reset; make_tmux 1
+out1="$(run_wd)"
+[ -n "$out1" ] && ok "첫 재시작은 즉시 알린다" || bad "첫 알림" "문구 있음" "<없음>"
+case "$out1" in *번째*) bad "첫 알림 문구" "횟수 없음" "$out1 — 1회에 '1번째'는 소음이다" ;;
+                   *) ok "  → 1회에는 횟수를 안 붙인다" ;; esac
+
+out2="$(run_wd)"; out3="$(run_wd)"
+[ -z "$out2$out3" ] && ok "🔑 창 안의 반복은 조용하다 (2분마다 30건/시간을 막는다)" \
+  || bad "반복 억제" "조용함" "$out2 / $out3"
+
+# 🔴 **조용해진 것이지 사라진 것이 아니다** — 세고 있어야 한다.
+n="$(cat "$RS_COUNT" 2>/dev/null || echo '<없음>')"
+[ "$n" = "2" ] && ok "  → 조용한 동안 횟수를 센다(현재 2)" \
+  || bad "누적 횟수" "2" "$n — 접은 게 아니라 버린 것이다"
+grep -q 'DEAD-SESSION-SUPPRESSED' "$WORK/logs/watchdog.log" 2>/dev/null \
+  && ok "  → 접었다는 사실이 로그에 남는다" || bad "접힘 로그" "SUPPRESSED" "없음"
+
+# 창이 지나면 **횟수를 실어** 다시 알린다
+printf '0' > "$RS_STATE"
+out4="$(run_wd)"
+case "$out4" in
+  *"3번째"*) ok "🔑 창이 지나면 누적 횟수를 실어 알린다(3번째)" ;;
+  "")        bad "창 만료 후 알림" "3번째 포함" "<없음> — 영원히 조용해졌다" ;;
+  *)         bad "창 만료 후 횟수" "3번째 포함" "$out4" ;;
+esac
+n="$(cat "$RS_COUNT" 2>/dev/null || echo '')"
+[ "$n" = "0" ] && ok "  → 보낸 뒤 횟수를 0으로 되돌린다" || bad "횟수 초기화" "0" "$n"
+
+# 🔴 원인마다 **다른 파일** — 세션 사망이 얼어붙음을 침묵시키면 안 된다
+rs_reset; make_tmux 1; run_wd >/dev/null          # DEAD-SESSION 창을 연다
+[ -f "$RS_STATE" ] && ok "원인별 상태 파일이 생긴다(DEAD-SESSION)" || bad "상태 파일" "존재" "없음"
+[ ! -f "$WORK/logs/watchdog-restart-DEAD-PROC-next" ] \
+  && ok "  → 다른 원인(DEAD-PROC)의 창은 안 열린다 = 서로 침묵시키지 않는다" \
+  || bad "원인 격리" "DEAD-PROC 창 없음" "열려 있다"
+make_tmux 0
+
+# 🧪 [양성 대조군] 접기를 끄면 매 tick 울리는가 — 없으면 위 '조용함'이
+#   *"알림 분기 자체가 안 탄다"* 와 구별되지 않는다.
+rs_reset; make_tmux 1
+NINO_RESTART_BACKOFF=0 run_wd >/dev/null
+c1="$(NINO_RESTART_BACKOFF=0 run_wd)"; c2="$(NINO_RESTART_BACKOFF=0 run_wd)"
+[ -n "$c1" ] && [ -n "$c2" ] \
+  && ok "🧪 [양성 대조군] 창을 0으로 두면 매 tick 울린다 (분기는 살아 있다)" \
+  || bad "🧪 [양성 대조군]" "매번 알림" "c1=[$c1] c2=[$c2] — 조용함이 접기 덕인지 알 수 없다"
+make_tmux 0
 
 echo ""
 echo "결과: $pass pass, $fail fail, $skip 판정 불가$(skip_note)"

@@ -23,6 +23,22 @@ pass=0; fail=0
 ok()  { echo "  ✅ $1"; pass=$((pass + 1)); }
 bad() { echo "  ❌ $1"; [ -n "${2:-}" ] && echo "     want: $2"; [ -n "${3:-}" ] && echo "     got:  $3"; fail=$((fail + 1)); }
 
+# ── 이식성 헬퍼 (bash 3.2 / BSD userland — 룬드 맥에서 6건 실패, 2026-07-31) ──────
+# 🔴 세 개 다 **내가 이미 적어둔 함정**이다([[ref_bash_portability_32]] 33·213~219행).
+#    적어둔 것이 손을 안 막았다 ⇒ 규칙 대신 **형태**로 내린다: 아래 헬퍼만 쓰고 원시 명령을 안 쓴다.
+#    ⑮가 그 규약을 정적으로 잠근다(원시 명령이 다시 들어오면 빨개진다).
+
+# 🔴 `wc -l` 은 BSD 에서 앞에 공백을 붙인다('       1') ⇒ **값이 같아도 문자열 비교가 깨진다.**
+#    "1건" 을 기대했는데 "       1건" 이 와서 실패로 보인다 — 틀린 게 아니라 **못 잰 것**이다.
+nlines() { wc -l < "$1" | tr -d '[:space:]'; }
+
+# 🔴 `touch -d '@epoch'` 는 GNU 전용. BSD 는 `out of range or illegal time specification` 으로 죽는다.
+#    ⇒ python 으로 옮긴다. `os.utime` 은 양쪽 동일하다(2026-07-29 에 같은 이유로 옮긴 적 있다).
+set_mtime() { python3 -c 'import os,sys; t=float(sys.argv[2]); os.utime(sys.argv[1],(t,t))' "$1" "$2"; }
+
+# 🔴 `stat -c %Y` 는 GNU, BSD 는 `stat -f %m`. 분기하지 않고 python 하나로 간다.
+mtime() { python3 -c 'import os,sys; print(int(os.path.getmtime(sys.argv[1])))' "$1"; }
+
 [ -f "$CHECK" ] || { echo "❌ 없음: $CHECK"; exit 1; }
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK/bin" "$WORK/state"
@@ -36,8 +52,14 @@ STUB
 chmod +x "$WORK/bin/claude"
 
 # ── 가짜 discord-send: 전송을 파일로 기록만 한다 ─────────────────────────────
+# 🔑 `FAKE_SEND_RC` 로 **발송 실패**를 주입한다. 실패하면 SENT_LOG 에 안 적는다 —
+#    "보냈다고 기록됐는데 실제론 안 갔다" 를 시험이 재현할 수 있어야 하기 때문이다.
 cat > "$WORK/bin/discord-send" <<'STUB'
 #!/bin/bash
+if [ "${FAKE_SEND_RC:-0}" != 0 ]; then
+  echo "discord-send: 전송 실패(주입)" >&2
+  exit "$FAKE_SEND_RC"
+fi
 printf '%s\t%s\n' "$1" "$2" >> "$SENT_LOG"
 STUB
 chmod +x "$WORK/bin/discord-send"
@@ -51,9 +73,9 @@ creds() {
   printf '{"claudeAiOauth":{"accessToken":"x","refreshToken":"y","expiresAt":%d,"subscriptionType":"max"}}' \
     "$exp_ms" > "$f"
   if [ "$anchor" = yes ]; then
-    touch -d "@$(( exp_ms / 1000 - 28800 ))" "$f"     # 만료 - 8시간 = 발급 시각
+    set_mtime "$f" "$(( exp_ms / 1000 - 28800 ))"    # 만료 - 8시간 = 발급 시각
   else
-    touch -d '@1750000000' "$f"                        # 아주 옛날 = 갱신이 멈춘 상태
+    set_mtime "$f" 1750000000                          # 아주 옛날 = 갱신이 멈춘 상태
   fi
   echo "$f"
 }
@@ -81,12 +103,12 @@ echo "── ① 정상: 로그가 남고 알림은 안 간다 ──"
 C="$(creds 36000)"                                   # 10시간 남음 = 경고 창 밖
 run "$C" FAKE_CLAUDE_OUT="$LOGGED_IN"
 [ -s "$LOGF" ] && ok "정상 실행도 로그 1줄을 남긴다" || bad "정상 실행도 로그를 남긴다" "로그 있음" "빈 파일"
-[ ! -s "$SENT_LOG" ] && ok "정상이면 알림 없음" || bad "정상이면 알림 없음" "0건" "$(wc -l < "$SENT_LOG")건"
+[ ! -s "$SENT_LOG" ] && ok "정상이면 알림 없음" || bad "정상이면 알림 없음" "0건" "$(nlines "$SENT_LOG")건"
 
 echo "── ② 로그아웃: 알림 1건 + 로그에 흔적 ──"
 C="$(creds 36000)"
 run "$C" FAKE_CLAUDE_OUT="$LOGGED_OUT"
-[ "$(wc -l < "$SENT_LOG")" = 1 ] && ok "로그아웃이면 알림 1건" || bad "로그아웃 알림" "1건" "$(wc -l < "$SENT_LOG")건"
+[ "$(nlines "$SENT_LOG")" = 1 ] && ok "로그아웃이면 알림 1건" || bad "로그아웃 알림" "1건" "$(nlines "$SENT_LOG")건"
 grep -q 'alert=sent' "$LOGF" && ok "로그에 alert=sent 가 남는다" || bad "alert=sent" "있음" "$(cat "$LOGF")"
 
 echo "── ③ 재알림 억제: 두 번째는 안 보내되 **로그는 남는다** ──"
@@ -97,8 +119,8 @@ for _ in 1 2; do
       CHECK_AUTH_LOG="$LOGF" CLAUDE_BIN="$WORK/bin/claude" DISCORD_SEND="$WORK/bin/discord-send" \
       FAKE_CLAUDE_OUT="$LOGGED_OUT" bash "$CHECK" >/dev/null 2>&1
 done
-[ "$(wc -l < "$SENT_LOG")" = 1 ] && ok "1시간 안 두 번째는 안 보낸다" || bad "재알림 억제" "1건" "$(wc -l < "$SENT_LOG")건"
-[ "$(wc -l < "$LOGF")" -ge 2 ] && ok "억제돼도 실행 로그는 2줄" || bad "억제 시에도 로그" "2줄 이상" "$(wc -l < "$LOGF")줄"
+[ "$(nlines "$SENT_LOG")" = 1 ] && ok "1시간 안 두 번째는 안 보낸다" || bad "재알림 억제" "1건" "$(nlines "$SENT_LOG")건"
+[ "$(nlines "$LOGF")" -ge 2 ] && ok "억제돼도 실행 로그는 2줄" || bad "억제 시에도 로그" "2줄 이상" "$(nlines "$LOGF")줄"
 grep -q 'alert=skip' "$LOGF" && ok "억제는 alert=skip 으로 구분된다" || bad "alert=skip" "있음" "$(cat "$LOGF")"
 
 echo "── ④ 하트비트: 매 실행 갱신된다 (워치독이 이걸 본다) ──"
@@ -107,11 +129,11 @@ run "$C" FAKE_CLAUDE_OUT="$LOGGED_IN"
 HB="$STATE/check-auth-heartbeat"
 [ -f "$HB" ] && ok "하트비트 파일이 생긴다" || bad "하트비트 파일" "존재" "없음"
 if [ -f "$HB" ]; then
-  touch -d '@1750000000' "$HB"; OLD=$(stat -c %Y "$HB")
+  set_mtime "$HB" 1750000000; OLD="$(mtime "$HB")"
   env SENT_LOG="$SENT_LOG" CHECK_AUTH_CREDENTIALS="$C" CHECK_AUTH_STATE_DIR="$STATE" \
       CHECK_AUTH_LOG="$LOGF" CLAUDE_BIN="$WORK/bin/claude" DISCORD_SEND="$WORK/bin/discord-send" \
       FAKE_CLAUDE_OUT="$LOGGED_IN" bash "$CHECK" >/dev/null 2>&1
-  [ "$(stat -c %Y "$HB")" -gt "$OLD" ] && ok "재실행 시 하트비트가 앞으로 간다" || bad "하트비트 갱신" "갱신됨" "그대로"
+  [ "$(mtime "$HB")" -gt "$OLD" ] && ok "재실행 시 하트비트가 앞으로 간다" || bad "하트비트 갱신" "갱신됨" "그대로"
 fi
 
 echo "── ⑤ 🔴 죽어도 로그가 남는다 (2026-07-25 사고 회귀) ──"
@@ -130,8 +152,8 @@ grep -qE 'verdict=(unknown|error)' "$LOGF" && ok "판정 불가를 unknown/error
 #   실제 값: `claude` 가 깨진 상태에서 토큰이 만료돼 있으면 그게 가장 위험한 조합이다.
 C="$(creds -3600)"
 run "$C" CLAUDE_BIN="$WORK/bin/does-not-exist"
-[ "$(wc -l < "$SENT_LOG")" = 1 ] && ok "status 불가여도 만료 판정은 계속된다" \
-  || bad "status 독립 만료판정" "1건" "$(wc -l < "$SENT_LOG")건"
+[ "$(nlines "$SENT_LOG")" = 1 ] && ok "status 불가여도 만료 판정은 계속된다" \
+  || bad "status 독립 만료판정" "1건" "$(nlines "$SENT_LOG")건"
 grep -q 'expiry=stale' "$LOGF" && ok "그 판정이 로그에 expiry=stale 로 남는다" \
   || bad "expiry=stale 기록" "있음" "$(cat "$LOGF")"
 
@@ -154,8 +176,8 @@ run "$C" FAKE_CLAUDE_OUT="$LOGGED_IN"
   || bad "옛 60분 경고 제거" "0건" "$(cat "$SENT_LOG")"
 C="$(creds -3600)"                                   # 1시간 전에 만료됐고 갱신 안 됨
 run "$C" FAKE_CLAUDE_OUT="$LOGGED_IN"
-[ "$(wc -l < "$SENT_LOG")" = 1 ] && ok "만료됐는데 갱신 안 됨 → 알린다 (룬드 8h27m 갈래)" \
-  || bad "만료 후 미갱신 알림" "1건" "$(wc -l < "$SENT_LOG")건"
+[ "$(nlines "$SENT_LOG")" = 1 ] && ok "만료됐는데 갱신 안 됨 → 알린다 (룬드 8h27m 갈래)" \
+  || bad "만료 후 미갱신 알림" "1건" "$(nlines "$SENT_LOG")건"
 C="$(creds -300)"                                    # 막 만료 = 갱신 중일 수 있다
 run "$C" FAKE_CLAUDE_OUT="$LOGGED_IN"
 [ ! -s "$SENT_LOG" ] && ok "막 만료(grace 안)는 안 보낸다 — 갱신 중 오탐 금지" \
@@ -221,6 +243,91 @@ if [ -f "$SETUP" ]; then
 else
   echo "  ⏭️  판정 불가 — setup.sh 가 없다"
 fi
+
+echo "── ⑫ 🔴 발송 실패를 삼키지 않는다 — **부르는 경로가 조용히 실패하는 자리** ──"
+# 🔴 옛 코드:  notify(){ "$DISCORD_SEND" … >/dev/null 2>&1 || true; }
+#             notify "…"; mark_alert …; ALERT=sent      ← **무조건** sent
+#   ⇒ discord-send 가 죽어도 로그엔 `alert=sent` 가 남고, 게다가 백오프까지 찍혀
+#     **1시간 침묵**한다. 인증이 진짜 끊긴 상황에서 이건 유일한 복구 수단이 사라지는 것이다.
+# 🔑 이 시험의 본체는 "실패를 감지하나"가 아니라 **"실패했는데 성공으로 기록하나"** 다.
+#    (룬드가 자기 check-auth 에서 먼저 밟고 고친 자리 — `send_failed` 로 가른다)
+C="$(creds 36000)"
+run "$C" FAKE_CLAUDE_OUT="$LOGGED_OUT" FAKE_SEND_RC=1
+[ ! -s "$SENT_LOG" ] && ok "발송이 실제로 실패했다(대조군: 전송 기록 0건)" \
+  || bad "실패 주입" "전송 0건" "$(nlines "$SENT_LOG")건"
+grep -q 'alert=sent' "$LOGF" && bad "실패인데 alert=sent 로 기록" "sent 아님" "$(cat "$LOGF")" \
+  || ok "실패를 sent 로 기록하지 않는다"
+grep -q 'alert=send_failed' "$LOGF" && ok "alert=send_failed 로 갈린다" \
+  || bad "alert=send_failed" "있음" "$(cat "$LOGF")"
+
+echo "── ⑬ 🔑 발송 실패면 **백오프를 안 찍는다** — 다음 기회를 스스로 지우지 않는다 ──"
+# 🔴 여기가 ⑫보다 아프다. 실패를 로그에 정직히 적어도 **백오프를 찍으면 1시간 동안 재시도가 없다.**
+#    첫 시도가 일시 장애(네트워크·relay 재시작)였으면 그 1시간이 통째로 사라진다.
+STATE="$WORK/state/failretry"; mkdir -p "$STATE"
+SENT_LOG="$STATE/sent.tsv"; : > "$SENT_LOG"; LOGF="$STATE/log"
+C="$(creds 36000)"
+# 1회차: 실패 주입 · 2회차: 정상 — 백오프를 안 찍었다면 2회차가 **즉시** 나가야 한다
+env SENT_LOG="$SENT_LOG" CHECK_AUTH_CREDENTIALS="$C" CHECK_AUTH_STATE_DIR="$STATE" \
+    CHECK_AUTH_LOG="$LOGF" CLAUDE_BIN="$WORK/bin/claude" DISCORD_SEND="$WORK/bin/discord-send" \
+    FAKE_CLAUDE_OUT="$LOGGED_OUT" FAKE_SEND_RC=1 bash "$CHECK" >/dev/null 2>&1
+env SENT_LOG="$SENT_LOG" CHECK_AUTH_CREDENTIALS="$C" CHECK_AUTH_STATE_DIR="$STATE" \
+    CHECK_AUTH_LOG="$LOGF" CLAUDE_BIN="$WORK/bin/claude" DISCORD_SEND="$WORK/bin/discord-send" \
+    FAKE_CLAUDE_OUT="$LOGGED_OUT" bash "$CHECK" >/dev/null 2>&1
+[ "$(nlines "$SENT_LOG")" = 1 ] && ok "실패 뒤 다음 실행이 **즉시** 재시도해서 도달한다" \
+  || bad "실패 후 재시도" "1건 도달" "$(nlines "$SENT_LOG")건 — 백오프를 찍어 침묵했다"
+
+# ⚠️ 백오프 파일 유무는 **실패 실행만 격리해서** 본다. 위 2회차는 성공이라 파일을 만드니,
+#    거기서 재면 어느 쪽이든 설명이 붙어 **항진명제**가 된다(처음에 그렇게 썼다가 고침).
+STATE2="$WORK/state/failonly"; mkdir -p "$STATE2"
+env SENT_LOG="$STATE2/sent.tsv" CHECK_AUTH_CREDENTIALS="$C" CHECK_AUTH_STATE_DIR="$STATE2" \
+    CHECK_AUTH_LOG="$STATE2/log" CLAUDE_BIN="$WORK/bin/claude" DISCORD_SEND="$WORK/bin/discord-send" \
+    FAKE_CLAUDE_OUT="$LOGGED_OUT" FAKE_SEND_RC=1 bash "$CHECK" >/dev/null 2>&1
+[ ! -f "$STATE2/check-auth-last-alert" ] && ok "실패했을 땐 백오프 파일을 안 만든다" \
+  || bad "실패 시 백오프" "파일 없음" "파일 생성됨 — 다음 기회를 스스로 지운다"
+
+echo "── ⑭ 만료 갈래도 같은 계약이다 — 한 자리만 고치면 다른 자리가 남는다 ──"
+# 🔴 `notify` 호출부는 **둘**이다(로그아웃·만료 후 미갱신). 오늘 밤 계속 본 형태 —
+#    같은 계약이 여러 자리에서 실현되면 한 자리만 덮고도 초록이 된다.
+C="$(creds -7200)"                                   # 2시간 전 만료 + 갱신 안 됨
+run "$C" FAKE_CLAUDE_OUT="$LOGGED_IN" FAKE_SEND_RC=1
+grep -q 'expiry_failed' "$LOGF" && ok "만료 알림 실패도 expiry_failed 로 갈린다" \
+  || bad "expiry_failed" "있음" "$(cat "$LOGF")"
+grep -qE 'alert=[a-z_]*\+expiry(\b|[^_])' "$LOGF" \
+  && bad "만료 발송 실패인데 +expiry(성공)로 기록" "+expiry 아님" "$(cat "$LOGF")" \
+  || ok "실패를 +expiry(성공)로 기록하지 않는다"
+
+echo "── ⑮ 🔴 이식성 규약을 **형태로** 잠근다 — 원시 명령이 다시 들어오면 빨개진다 ──"
+# 🔴 왜 시험으로 잠그나: `touch -d`·`wc -l`·`stat -c` 셋 다 **내가 이미 메모리에 적어둔 함정**인데
+#    이 파일에 그대로 썼다(룬드 맥에서 6건 실패, 2026-07-31). **적어둔 것이 손을 안 막았다.**
+#    ⇒ 오늘 밤 내내 확인한 것: 규칙보다 형태가 강하다. 다음에 누가 `wc -l` 을 다시 쓰면 여기서 걸린다.
+# ⚠️ 헬퍼 정의 줄과 주석은 제외한다 — 안 그러면 설명조차 못 적는다(자기 자신을 잡는 시험이 된다).
+viol="$(python3 - "$0" <<'PYEOF'
+import re, sys
+# 🔑 리터럴을 조립한다 — 면제 구역을 두면 그 구역이 뚫린다(자기 printer 를 정의하는 형태).
+#    이러면 이 가드도 **자기 자신을 포함해** 파일 전체를 검사한다.
+RAW = {'touch' + ' -d': 'set_mtime', 'stat' + ' -c': 'mtime', 'wc' + ' -l': 'nlines'}
+ALLOW = ('nlines()', 'set_mtime()', 'mtime()')          # 헬퍼 정의 줄만 원시 명령을 쓴다
+bad = []
+for i, ln in enumerate(open(sys.argv[1]), 1):
+    t = ln.strip()
+    if t.startswith('#') or any(a in ln for a in ALLOW):
+        continue
+    for raw, fix in RAW.items():
+        if raw in ln:
+            bad.append("%d행: `%s` 대신 `%s` 를 쓸 것" % (i, raw, fix))
+print('\n'.join(bad))
+PYEOF
+)"
+[ -z "$viol" ] && ok "원시 GNU 명령을 직접 안 쓴다 (헬퍼 경유)" || bad "이식성 규약 위반" "0건" "$viol"
+# 음성 검사 — 이 시험이 실제로 물 수 있나(항상 초록인 시험이 아닌지)
+probe="$(mktemp)"; printf 'x="$(wc %s < "$f")"\n' '-l' > "$probe"
+pv="$(python3 - "$probe" <<'PYEOF'
+import sys
+print('HIT' if 'wc' + ' -l' in open(sys.argv[1]).read() else '')
+PYEOF
+)"
+[ -n "$pv" ] && ok "  → 원시 명령이 들어오면 잡는다(음성 대조군)" || bad "  이 시험은 어떤 변이로도 안 갈린다"
+rm -f "$probe"
 
 echo
 # 🔑 형식을 러너 정규식(`통과 ?[0-9]+`)에 맞춘다 — 안 맞으면 `⚠️건수 미상` 이 되고,

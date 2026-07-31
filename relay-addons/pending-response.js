@@ -18,6 +18,9 @@
 const DEFAULT_RESPONSE_TIMEOUT_SEC = 180;
 const REMINDER_INTERVAL_MS = 30 * 60 * 1000;
 const TIMEOUT_CHECK_MS = 10 * 1000;
+// 다른 봇이 이 안에 발화한 채널이면 평문은 그 봇 대화로 본다.
+// 미응답 타임아웃(기본 180초)보다 넉넉히 커야 뜻이 있다 — 대화가 몇 분 간격으로 이어지기 때문.
+const BOT_ACTIVE_WINDOW_MS = 10 * 60 * 1000;
 
 const BOT_ID = process.env.DISCORD_APP_ID || '';
 
@@ -50,11 +53,61 @@ function channelIdOf(msg) {
   return msg.channelId != null ? msg.channelId : (msg.channel && msg.channel.id);
 }
 
-/** 이 메시지를 pending에 등록해야 하나 — 순수 판정 (사람 & 남 멘션 아님) */
-function shouldRegister({ isBot, isSelf, mentionsOther }) {
+/**
+ * 이 메시지를 pending에 등록해야 하나 — 순수 판정.
+ *
+ * 예전엔 (사람 & 남 멘션 아님)만 봤다. 그래서 **멘션이 하나도 없는 평문**은 전부 "나한테 온 말"이
+ * 됐고, Tim이 룬드에게 평문으로 말하면 내 미응답 경고가 남의 대화에 떴다(Darren 지시 2026-07-30).
+ * 해제 경로(다른 봇이 답하면 clear)로는 못 막는다 — 등록~해제 **사이**에 타임아웃이 먼저 온다.
+ * ⇒ 상대 봇이 답할 대화로 보이면 등록 자체를 안 한다.
+ *
+ * 판정 순서에 의미가 있다: 앞단 게이트(봇/자기) → 강한 긍정(나 멘션) → 억제 신호들.
+ * mentionsMe가 mentionsOther보다 앞인 이유: "@니노 @Darren 확인해줘"는 나한테 온 말이다.
+ * 억제 신호가 전부 없으면(= 판정 불가) 등록한다 — 놓치는 쪽보다 뜨는 쪽이 복구가 싸다.
+ */
+function shouldRegister({ isBot, isSelf, mentionsOther, mentionsMe, repliesToOtherBot, otherBotActive }) {
   if (isBot || isSelf) return false;   // 봇/자기 메시지는 등록 안 함
+  if (mentionsMe) return true;         // 나를 부른 건 아래 억제 신호를 전부 이긴다
   if (mentionsOther) return false;     // 남(@Tim/@Darren 등) 멘션 = 나한테 하는 말 아닐 확률↑
+  if (repliesToOtherBot) return false; // 다른 봇 메시지에 답장 = 그 봇과의 대화
+  if (otherBotActive) return false;    // 그 채널에서 다른 봇이 최근 발화 = 그 봇이 답할 대화
   return true;
+}
+
+/** msg가 나(니노)를 멘션하는지 */
+function mentionsMeUser(msg, botId) {
+  const users = msg && msg.mentions && msg.mentions.users;
+  if (!users) return false;
+  const ids = typeof users.map === 'function'
+    ? [...(typeof users.values === 'function' ? users.values() : users)].map(u => u.id)
+    : [];
+  return ids.some(id => id === botId);
+}
+
+/**
+ * 답장 대상이 **나 아닌 봇**인지.
+ * discord.js는 답장이고 원 작성자가 멘션될 때 mentions.repliedUser를 채운다 —
+ * 답장 핑이 꺼져 있으면 비어 있다. 없으면 false(판정 불가)로 두고 otherBotActive가 받는다.
+ */
+function repliesToOtherBot(msg, botId) {
+  const r = msg && msg.mentions && msg.mentions.repliedUser;
+  if (!r) return false;
+  return !!r.bot && r.id !== botId;
+}
+
+/** channelId → 다른 봇이 마지막으로 발화한 시각(ms) */
+const botSpeakers = new Map();
+
+function noteBotSpeaker(store, channelId, now) {
+  if (channelId == null) return;
+  store.set(channelId, now);
+}
+
+/** 그 채널에서 다른 봇이 windowMs 안에 발화했나 (경계 포함 = 활성) */
+function isOtherBotActive(store, channelId, now, windowMs) {
+  const last = store.get(channelId);
+  if (last === undefined) return false;
+  return now - last <= windowMs;
 }
 
 /** msg가 나 아닌 다른 유저를 멘션하는지 (discord.js Collection 또는 배열 모두 허용) */
@@ -112,13 +165,23 @@ module.exports = {
   onMessage(result, msg) {
     const isBot = !!(msg.author && msg.author.bot);
     const botId = BOT_ID;
+    const channelId = channelIdOf(msg);
     if (isBot) {
-      // 다른 봇이 응답 → 해당 채널 pending 해제
-      clearChannel(pending, channelIdOf(msg));
+      // 다른 봇이 응답 → 해당 채널 pending 해제 + 발화 시각 기록(이후 평문 억제용)
+      clearChannel(pending, channelId);
+      noteBotSpeaker(botSpeakers, channelId, Date.now());
       return;
     }
-    if (shouldRegister({ isBot, isSelf: false, mentionsOther: mentionsOtherUser(msg, botId) })) {
-      registerPending(pending, msg.id, channelIdOf(msg), previewOf(result, msg));
+    const register = shouldRegister({
+      isBot,
+      isSelf: false,
+      mentionsMe: mentionsMeUser(msg, botId),
+      mentionsOther: mentionsOtherUser(msg, botId),
+      repliesToOtherBot: repliesToOtherBot(msg, botId),
+      otherBotActive: isOtherBotActive(botSpeakers, channelId, Date.now(), BOT_ACTIVE_WINDOW_MS),
+    });
+    if (register) {
+      registerPending(pending, msg.id, channelId, previewOf(result, msg));
     }
   },
 
@@ -168,9 +231,14 @@ module.exports = {
 
   // 테스트용 export
   _pending: pending,
+  _botSpeakers: botSpeakers,
   channelIdOf,
   shouldRegister,
   mentionsOtherUser,
+  mentionsMeUser,
+  repliesToOtherBot,
+  noteBotSpeaker,
+  isOtherBotActive,
   registerPending,
   clearChannel,
   collectTimedOut,
