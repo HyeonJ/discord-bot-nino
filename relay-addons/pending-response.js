@@ -22,7 +22,16 @@ const TIMEOUT_CHECK_MS = 10 * 1000;
 // 미응답 타임아웃(기본 180초)보다 넉넉히 커야 뜻이 있다 — 대화가 몇 분 간격으로 이어지기 때문.
 const BOT_ACTIVE_WINDOW_MS = 10 * 60 * 1000;
 
-const BOT_ID = process.env.DISCORD_APP_ID || '';
+// 🔴 **호출 시점에 읽는다** — 모듈 최상단 상수로 두면 `require` 순간에 얼어붙는다(2026-07-31).
+//   시험 파일 두 개가 이 모듈을 require 하는데, env 를 심기 전에 로드되는 쪽이 있으면
+//   `BOT_ID=''` 로 굳어 자기 메시지 판별이 통째로 죽는다. 룬드 맥에서 전체 실행 1 fail /
+//   단독 39 pass 로 나타났고, 내 기계에선 로드 순서가 달라 **보이지 않았다.**
+//   🔑 시험 파일 1행에 *"require 보다 먼저 심는다"* 라고 **적혀 있었다** — 알고 적어뒀지만
+//     고친 게 아니라 순서로 피한 것이고, 그 회피는 이 파일이 먼저 로드될 때만 성립한다.
+//   ⇒ 고칠 것은 로드 순서가 아니라 **얼리는 형태**다. 읽는 값은 읽을 때 읽는다.
+function botId() {
+  return process.env.DISCORD_APP_ID || '';
+}
 
 /**
  * PENDING_RESPONSE_SEC 해석 — 초 단위 **양의 정수**만 채택.
@@ -160,11 +169,12 @@ let reminderTimer = null;
 
 module.exports = {
   name: 'pending-response',
+  botId,   // 시험이 로드 순서 의존을 잠그는 데 쓴다 (얼지 않았음을 확인)
 
   // 사람 메시지 등록 + 다른 봇 메시지로 해제 (core onMessage는 self 미호출)
   onMessage(result, msg) {
     const isBot = !!(msg.author && msg.author.bot);
-    const botId = BOT_ID;
+    const myId = botId();
     const channelId = channelIdOf(msg);
     if (isBot) {
       // 다른 봇이 응답 → 해당 채널 pending 해제 + 발화 시각 기록(이후 평문 억제용)
@@ -175,9 +185,9 @@ module.exports = {
     const register = shouldRegister({
       isBot,
       isSelf: false,
-      mentionsMe: mentionsMeUser(msg, botId),
-      mentionsOther: mentionsOtherUser(msg, botId),
-      repliesToOtherBot: repliesToOtherBot(msg, botId),
+      mentionsMe: mentionsMeUser(msg, myId),
+      mentionsOther: mentionsOtherUser(msg, myId),
+      repliesToOtherBot: repliesToOtherBot(msg, myId),
       otherBotActive: isOtherBotActive(botSpeakers, channelId, Date.now(), BOT_ACTIVE_WINDOW_MS),
     });
     if (register) {
@@ -192,7 +202,7 @@ module.exports = {
     // 자기(니노) 메시지가 채널에 뜨면 = 응답함 → pending 해제 (onMessage는 self 미호출이라 여기서)
     if (client && typeof client.on === 'function') {
       client.on('messageCreate', (msg) => {
-        if (msg.author && msg.author.id === BOT_ID) {
+        if (msg.author && msg.author.id === botId()) {
           clearChannel(pending, channelIdOf(msg));
         }
       });
