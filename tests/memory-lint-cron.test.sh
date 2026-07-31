@@ -120,6 +120,62 @@ out="$(run 1)"; rc=$?
 out="$(run 0)"
 grep -q "E 실패테스트" "$ROOT/sent.txt" && ok "다음 회차에 실제로 다시 알렸다" || bad "재알림 안 됨" "$(cat "$ROOT/sent.txt")"
 
+echo "⑨ 🔴 인자 계약 (코어 cli-guard) — 09:50 사고의 형태를 막는다"
+# 🔴 이 절 전용 스텁: **호출 1회 = 1줄.** 공용 `fake-send` 는 본문을 그대로 적는데 알림 본문이
+#   여러 줄이라, `sent_count`(줄 세기)로 재면 **1건 보낸 것이 4건으로 보인다**(실제로 그랬다).
+#   🔑 계약 ③이 요구하는 건 *줄 수*가 아니라 **호출 횟수**다 — 세는 대상이 어긋나면
+#     대조군이 먼저 거짓말하고, 그 위의 "0건"들은 전부 증거 자격을 잃는다.
+cat > "$ROOT/fake-send-1" <<'FAKE'
+#!/usr/bin/env bash
+printf 'SEND\t%s\n' "$1" >> "$FAKE_SENT"
+FAKE
+chmod +x "$ROOT/fake-send-1"
+g_sends() { grep -c '^SEND' "$ROOT/sent.txt" 2>/dev/null | head -1; }
+# 🔴 옛 형태는 `DRY_RUN="${DRY_RUN:-0}"` 였다 — **환경에서만** 켤 수 있는 dry-run 이고,
+#   바로 위에서 `set -a; . .env` 를 하므로 `.env` 한 줄에 이 감시기가 **발송 0건 · rc=0** 으로
+#   조용히 멈춘다. 그리고 인자 파싱이 없어 모르는 플래그를 조용히 먹었다.
+# 🔑 계약 ③: *"플래그가 있나"* 가 아니라 **"스텁이 몇 번 불렸나"** 로 잠근다.
+gr() {  # gr <스크립트 인자…>   (GUARD_ENV 를 세우면 CLI_DRY_RUN 을 환경으로 물려준다)
+  : > "$ROOT/sent.txt"; : > "$ROOT/glog"
+  g_out="$(FAKE_ITEMS="$ROOT/items.txt" FAKE_RC="$ROOT/rc.txt" FAKE_SENT="$ROOT/sent.txt" \
+    env BOT_DIR="$ROOT" LINT="$ROOT/fake-lint.sh" DISCORD_SEND="$ROOT/fake-send-1" \
+    STATE="$ROOT/gstate$RANDOM" HEARTBEAT="$ROOT/logs/hb" LOG="$ROOT/glog" \
+    ${GUARD_ENV:+CLI_DRY_RUN="$GUARD_ENV"} bash "$SCRIPT" "$@" 2>&1)"
+  g_rc=$?
+}
+items "GUARD 계약시험 항목"; rc_is 1
+
+# 🧪 [대조군] **먼저 이것부터.** 아래 "발송 0건" 들이 가드 덕인지, 이 입력이 애초에
+#   아무것도 안 보내는 건지 못 가른다 — 대조군이 초록이 아니면 나머지 빨간불은 증거가 아니다.
+GUARD_ENV="" gr
+[ "$(g_sends)" -eq 1 ] && ok "🧪 [대조군] 인자 없이 부르면 실제로 1건 나간다" \
+  || bad "대조군 — 이 입력은 원래 안 보낸다. 아래 0건은 증거가 아니다" "$(g_sends)건"
+
+GUARD_ENV="" gr --report
+[ "$g_rc" -eq 2 ] && ok "모르는 인자 --report 를 rc=2 로 거절한다 (1 아님 — 못 쟀다)" || bad "모르는 인자 rc" "want 2 / got $g_rc"
+[ "$(g_sends)" -eq 0 ] && ok "  🔑 거절되면 발송 0건 (사고 재현 차단)" || bad "거절인데 발송" "$(g_sends)건"
+# 🔑 **거절도 흔적을 남겨야 한다.** cron 은 stderr 를 버린다 — 안 남기면 crontab 오타 하나로
+#   이 감시기가 *아무 표시 없이* 멈추고, 그건 감시기가 조용히 죽는 그 형태 그대로다.
+grep -q 'verdict=bad_args' "$ROOT/glog" && ok "  🔑 거절이 로그에 남는다 (verdict=bad_args)" \
+  || bad "거절 로그" "$(cat "$ROOT/glog" 2>/dev/null || echo '<빈 로그>')"
+
+GUARD_ENV="" gr --dry-run
+[ "$(g_sends)" -eq 0 ] && ok "--dry-run 이면 발송 0건" || bad "dry-run 발송" "$(g_sends)건"
+printf '%s' "$g_out" | grep -q 'GUARD 계약시험 항목' && ok "  → 보낼 뻔한 본문을 stdout 으로 보여준다" \
+  || bad "dry-run 가시성 — 조용하면 고장과 구별이 안 된다" "$g_out"
+
+# 🔴 환경 상속은 **거절**한다. 무시하면 dry-run 을 기대한 쪽이 발송당하고, 따르면 발송을
+#   기대한 쪽이 조용해진다 — 어느 쪽으로 접어도 조용히 틀린다(코어 계약 ④).
+GUARD_ENV=1 gr
+[ "$g_rc" -eq 2 ] && ok "🔴 CLI_DRY_RUN 을 환경에서 물려받으면 rc=2 로 거절한다" || bad "환경 상속" "want rc=2 / got $g_rc"
+[ "$(g_sends)" -eq 0 ] && ok "  → 거절이므로 발송 0건" || bad "상속 거절 발송" "$(g_sends)건"
+grep -q 'verdict=bad_env' "$ROOT/glog" && ok "  🔑 bad_args 와 갈라 센다 (고칠 곳이 환경이라서)" \
+  || bad "bad_env 표지" "$(cat "$ROOT/glog" 2>/dev/null || echo '<빈 로그>')"
+
+GUARD_ENV="" gr --help
+[ "$(g_sends)" -eq 0 ] && ok "--help 는 발송 0건" || bad "help 발송" "$(g_sends)건"
+printf '%s' "$g_out" | grep -q 'usage:' && ok "  → 사용법을 출력한다" || bad "usage 출력" "$g_out"
+
 echo
 echo "  통과 $pass · 실패 $fail"
 [ "$fail" -eq 0 ]
