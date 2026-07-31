@@ -36,6 +36,15 @@ DRIFT_HEARTBEAT="${DRIFT_HEARTBEAT:-$BOT_DIR/logs/core-drift.heartbeat}"
 # 1회 실패로는 안 울린다(단일 blip 오탐 방지 · health-checker 디바운스와 같은 이유).
 # ⚠️ 이 값은 cron 주기와 짝이다. 주기를 바꾸면 여기도 같이 봐야 한다.
 HEARTBEAT_STALE_HOURS="${HEARTBEAT_STALE_HOURS:-2}"   # 이 시간을 **넘으면** 낡은 것으로 본다
+# 리뷰가 하나도 안 달린 PR — 우리 둘 다 이걸 재는 게 없어서 `#29` 가 이틀 묻혔다(2026-07-31).
+# ⚠️ 양쪽 레포를 본다: 내 레포 = 룬드 리뷰 대기 · assistant = **내** 리뷰 대기.
+#    한쪽만 보면 "내가 밀린 것"이 안 보인다 — 실제로 묻힌 건 그쪽이었다.
+PR_REPOS="${PR_REPOS:-HyeonJ/discord-bot-nino dazebug/assistant}"
+PR_LIST_CMD="${PR_LIST_CMD:-}"            # 비면 gh 를 쓴다(시험은 스텁 경로를 준다)
+# 오늘 연 PR 까지 매일 세면 목록이 상시로 차서 **배경이 된다** — 그게 오늘 밤 잡은
+# "상시 빨간불" 과 같은 실패다. 하루 넘긴 것만 센다.
+PR_STALE_DAYS="${PR_STALE_DAYS:-1}"
+PR_TOP="${PR_TOP:-3}"                     # 몇 개까지 줄로 읽어줄지
 
 TODAY="$(TZ=Asia/Seoul date +%Y-%m-%d)"
 DAY_NAMES=("" "월요일" "화요일" "수요일" "목요일" "금요일" "토요일" "일요일")
@@ -190,6 +199,77 @@ drift_heartbeat_section() {
   fi
 }
 
+# ── 리뷰가 안 달린 PR ────────────────────────────────────────────────────────
+# 🔑 **리뷰 없는 PR 은 아무 신호도 안 낸다.** 알림은 열 때 한 번 오고 끝이라, 그때 못 보면
+#    그 뒤로는 영원히 조용하다. 룬드 `#29` 는 그렇게 이틀 묻혔고, 그가 브랜치를 정리하다
+#    **우연히** 찾았다. 같은 시각에 내 레포에도 리뷰 0건이 6개 있었는데 나는 몰랐다.
+#    ⇒ 오늘 밤 내내 잡은 *못 쟀는데 정상으로 보인다* 의 프로세스 판이다. 여기서 소리를 낸다.
+# ISO 날짜(2026-07-30) → epoch. GNU 는 `-d`, BSD 는 `-j -f`. 인자 의미가 아예 다르다.
+# ⚠️ 정수 검사를 꼭 한다 — 못 쟀는데 빈 값을 넘기면 산술이 0 을 만들어 **"오늘 열림"**이
+#    되고, 가장 오래 묵은 PR 이 임계에 걸려 조용히 빠진다(file_mtime 과 같은 자리).
+# ⚠️ BSD 쪽은 시:분이 없으면 **현재 시각**을 채운다 — 하루 미만의 오차가 생기지만
+#    임계가 일 단위라 판정이 갈리지 않는다. 시 단위로 볼 일이 생기면 여기부터 고친다.
+iso_epoch() {
+  local d="${1%%T*}" e
+  e="$(date -d "$d" +%s 2>/dev/null)" || e=""
+  [[ "$e" =~ ^[0-9]+$ ]] || e="$(date -j -f %Y-%m-%d "$d" +%s 2>/dev/null)"
+  [[ "$e" =~ ^[0-9]+$ ]] || return 1
+  printf '%s' "$e"
+}
+
+# gh 조회를 한 자리에 모은다 — 시험은 PR_LIST_CMD 로 통째로 갈아끼운다.
+# ⚠️ `timeout` 은 GNU coreutils 라 macOS 엔 기본이 없다. 있으면 쓰고 없으면 그냥 돈다 —
+#    **없다고 조회를 포기하면** 맥에서 이 섹션이 통째로 사라진다(무음=없음 규약 위반).
+_gh_unreviewed() {
+  local t=()
+  command -v timeout >/dev/null 2>&1 && t=(timeout 20)
+  "${t[@]}" gh pr list --repo "$1" --limit 50 --json number,title,createdAt,reviews \
+    --jq '.[] | select(.reviews|length==0) | [.number, .createdAt, .title] | @tsv'
+}
+
+unreviewed_pr_section() {
+  local cmd="$PR_LIST_CMD"
+  if [[ -z "$cmd" ]]; then
+    # 🔑 gh 부재는 "PR 이 없다"가 아니라 **못 쟀다**다. 조용히 넘기면 둘이 같아진다.
+    command -v gh >/dev/null 2>&1 || { echo "⚠️ 리뷰 대기 PR 못 읽음 — gh 없음(판정 불가)"; return; }
+    cmd=_gh_unreviewed
+  fi
+
+  local now items=() repo out rc num created title e age label short
+  now="$(date +%s)"
+  for repo in $PR_REPOS; do
+    out="$("$cmd" "$repo" 2>/dev/null)"; rc=$?
+    if (( rc != 0 )); then
+      echo "⚠️ 리뷰 대기 PR 못 읽음 — $repo 조회 실패(rc=$rc)"
+      continue
+    fi
+    short="${repo##*/}"
+    while IFS=$'\t' read -r num created title; do
+      [[ -n "$num" ]] || continue
+      if e="$(iso_epoch "$created")"; then
+        age=$(( (now - e) / 86400 ))
+        (( age >= PR_STALE_DAYS )) || continue
+        label="${age}일째"
+      else
+        # 나이를 못 쟀다고 빼면 그 PR 이 사라진다 — 넣되 **못 쟀다고 적는다**.
+        label="열린 날 못 읽음"
+      fi
+      items[${#items[@]}]="$short#$num ($label) ${title:0:34}"   # bash 3.2 는 배열 += 없음
+    done <<< "$out"
+  done
+
+  (( ${#items[@]} > 0 )) || return   # 확인된 0건 → 줄을 뺀다(무음=없음)
+
+  echo "리뷰 안 달린 PR ${#items[@]}건"
+  local i
+  for (( i = 0; i < ${#items[@]} && i < PR_TOP; i++ )); do
+    printf '       %s\n' "${items[$i]}"
+  done
+  local rest=$(( ${#items[@]} - PR_TOP ))
+  (( rest > 0 )) && printf '       (외 %d건)\n' "$rest"
+  return 0
+}
+
 # ── 인사 ────────────────────────────────────────────────────────────────────
 # Darren 요청(2026-07-28 M:44r9). 매일 같은 문장이면 안 읽게 되므로 **요일·날씨로 갈린다**.
 # ⚠️ 인사는 정보가 아니다 — 날씨/할 일을 못 읽어도 인사는 나온다. 그래서 인사의 유무로
@@ -229,7 +309,9 @@ $WEATHER
 
 $(todo_section)
 
-$(drift_heartbeat_section)"
+$(drift_heartbeat_section)
+
+$(unreviewed_pr_section)"
 
 # 섹션이 빠지면서 생긴 3줄 이상의 빈 줄을 정리한다(내용이 없는 건 티 안 나야 한다)
 MSG="$(printf '%s\n' "$MSG" | cat -s)"
