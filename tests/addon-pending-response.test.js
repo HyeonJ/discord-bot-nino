@@ -244,3 +244,33 @@ describe('addon: pending-response', () => {
     });
   });
 });
+
+/**
+ * 🔴 시험 간 간섭 — 단독은 통과, 전체에서만 실패 (2026-07-31, 룬드 맥에서만 보였다)
+ *
+ * 이 파일 1행의 주석이 이미 알고 있었다: *"BOT_ID는 require 시점에 env로 고정된다 →
+ * require보다 먼저 심는다"*. 🔑 **알고 적어뒀는데 고친 게 아니라 순서로 피한 것**이고,
+ * 그 회피는 **이 파일이 먼저 로드될 때만** 성립한다. `pending-response.test.js` 도 같은
+ * 모듈을 require 하므로, 그쪽이 먼저 로드되면 `BOT_ID=''` 로 굳고 자기 메시지 판별이 죽는다.
+ *   → 룬드 맥: 전체 1 fail · 단독 39 pass. 내 기계: 전체 0 fail. **순서가 기계마다 다르다.**
+ *
+ * 🔑 이런 건 **단독으로 돌리면 사라져서** 각자 파일만 보는 습관에선 영원히 안 잡힌다.
+ * ⇒ 고칠 것은 시험의 로드 순서가 아니라 **env 를 얼리는 형태**다. 호출 시점에 읽는다.
+ */
+describe('BOT_ID — 로드 순서에 의존하지 않는다', () => {
+  test('🧪 모듈이 env 보다 먼저 로드돼도 현재 env 를 읽는다', () => {
+    const key = require.resolve('../relay-addons/pending-response');
+    const saved = process.env.DISCORD_APP_ID;
+    delete require.cache[key];
+    delete process.env.DISCORD_APP_ID;
+    const fresh = require('../relay-addons/pending-response'); // 룬드 맥 순서 재현
+    process.env.DISCORD_APP_ID = 'nino';
+    try {
+      expect(fresh.botId()).toBe('nino');
+    } finally {
+      process.env.DISCORD_APP_ID = saved;
+      delete require.cache[key];
+      require('../relay-addons/pending-response');
+    }
+  });
+});
