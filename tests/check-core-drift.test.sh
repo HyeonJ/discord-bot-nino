@@ -95,6 +95,16 @@ else
   #    처음에 그렇게 짜서 repo_behind=0 이 나왔고 시험이 STALE 갈래로 새어버렸다.
   git clone -q --branch main "$ROOT/remote.git" "$ROOT/pusher" 2>/dev/null
   echo "새 변경" > "$ROOT/pusher/newfile.txt"
+  # 🔴 `.sh` 를 같이 넣는다 — **실사고를 재현하는 픽스처가 아니었다**(룬드 리뷰 `#87`).
+  #    거짓 초록을 낸 실물은 `tmux-send.sh`(루트의 **셸 스크립트**)인데 픽스처는 `.txt` 뿐이라
+  #    *루트 파일이 세지나*만 덮고 *셸 스크립트가 세지나*는 안 덮었다.
+  # 🔑 그래서 "제외를 `*.sh` 로 넓히는" 변이(M2)를 e2e 가 못 물었다. 나는 그걸 *두 층이 서로를
+  #    대신 못 한다* 로 읽었는데 틀렸다 — **같은 축을 안 재고 있었을 뿐**이다. 실측:
+  #      원본  newfile.txt 런타임 · tmux-send.sh 런타임
+  #      M2    newfile.txt **런타임 그대로** · tmux-send.sh 제외
+  #    `.txt` 는 `*.sh` 에 안 걸리니 변이 전후가 같다. 픽스처는 직관적으로 세 보이는 값이 아니라
+  #    **변이를 실제로 죽이는 값**이어야 한다.
+  echo "#!/bin/sh" > "$ROOT/pusher/newfile.sh"
   git -C "$ROOT/pusher" -c user.email=t@e -c user.name=t add -A
   git -C "$ROOT/pusher" -c user.email=t@e -c user.name=t commit -qm "코어 신규 커밋"
   git -C "$ROOT/pusher" push -q origin main 2>/dev/null
@@ -108,6 +118,26 @@ else
   else
     bad "DRIFT 를 못 잡았다 (rc=$rc5) — 이 상태면 rc 단언은 의미가 없다" "$out5"
   fi
+fi
+
+echo "⑦ 🔴 **레포 루트의 새 파일이 런타임으로 세진다** — 옛 포함 목록이 거짓 초록을 낸 자리"
+# 라이브 재현(2026-07-31): 코어가 `tmux-send.sh`(루트)를 바꾼 뒤처짐에서 **"런타임 파일 변경: 0건"**.
+# 🔑 lib 단위시험(core-runtime-files.test.sh)이 분류를 보증해도 **배선이 끊기면 초록인 채로 틀린다** —
+#    검사기가 lib 을 실제로 부르는지는 여기서만 갈린다. ⑤가 만든 뒤처짐이 루트 파일(newfile.txt)이라
+#    그대로 쓴다: 옛 규칙이면 0건, 새 규칙이면 1건.
+if [ -z "${out5:-}" ]; then
+  echo "  ⏭️  건너뜀 — ⑤가 안 돌아 DRIFT 출력이 없다(런타임 카운트는 DRIFT 갈래에서만 나온다)"
+else
+  cnt="$(sed -n 's/.*런타임 파일 변경: \([0-9]\{1,\}\)건.*/\1/p' <<<"$out5" | head -1)"
+  [ -n "$cnt" ] && ok "런타임 건수를 수치로 낸다" || bad "런타임 건수 줄이 없다" "$out5"
+  [ "${cnt:-0}" -eq 2 ] && ok "루트의 .txt·.sh 둘 다 세진다 (${cnt}건)" \
+    || bad "루트 파일 2개가 바뀌었는데 ${cnt}건 — 옛 포함 목록의 거짓 초록이다" "$out5"
+  # 🔑 `.sh` 를 **따로** 단언한다 — 건수만 보면 `.txt` 하나로도 통과한다(옛 ⑦이 그랬다).
+  #    실사고 파일이 `tmux-send.sh` 였으니 여기서 갈려야 한다.
+  grep -q "· newfile.sh" <<<"$out5" && ok "루트의 **셸 스크립트**가 런타임으로 세진다 (실사고 축)" \
+    || bad "루트 .sh 가 안 세졌다 — tmux-send.sh 거짓 초록이 그대로 남는다" "$out5"
+  grep -q "· newfile.txt" <<<"$out5" && ok "어느 파일인지 이름까지 낸다" \
+    || bad "건수만 있고 파일명이 없다 — 사람이 근거를 못 본다" "$out5"
 fi
 
 echo "⑥ 🔑 **모든 판정 불가 갈래가 2로 나간다** — 갈래마다 시험을 붙일 수 없으니 성질로 잠근다"
