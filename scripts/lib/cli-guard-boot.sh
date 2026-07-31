@@ -23,8 +23,19 @@
 
 # 🔸 source 자체는 부작용이 없다(코어 계약 ⑦과 같은 규약). 실제 판정은 `cli_guard_boot` 에서.
 cli_guard_boot() {
-    local core found=""
-    for core in "${CORE_REPO:-}" "$HOME/yaksu-bot-core-live" "$HOME/yaksu-bot-core"; do
+    local core found="" here repo
+    # 🔴 **자기 위치에서 유도한 형제 경로를 먼저 본다** — `$HOME` 보다 앞에.
+    #   `$HOME` 은 환경 손잡이라 없거나 다를 수 있다. 실제로 `check-auth.test.sh` ⑩(cron 환경
+    #   흉내: `FAKEHOME` + `PATH=/usr/bin:/bin`)에서 코어를 못 찾아 `verdict=no_cli_guard rc=2`
+    #   가 났다 — 그 감지기는 **5분마다 도는데**, 그대로 나갔으면 조용히 계속 죽었다.
+    #   🔑 오늘 세 번째로 같은 축이다: **코드 경로를 환경 손잡이에 매달지 않는다**
+    #     (`$BOT_DIR` 로 lib 찾기 → 시험 8건, `$CORE_REPO` 미주입 → 룬드 맥 28건, 그리고 여기).
+    #   🔸 코어는 봇 레포의 **형제**다: `~/discord-bot-nino` · `~/yaksu-bot-core-live`.
+    #     이 파일이 `<repo>/scripts/lib/` 에 있으므로 세 단계 위가 그 부모다.
+    here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    repo="$(cd "$here/../.." && pwd)"
+    for core in "${CORE_REPO:-}" "$repo/../yaksu-bot-core-live" "$repo/../yaksu-bot-core" \
+                "$HOME/yaksu-bot-core-live" "$HOME/yaksu-bot-core"; do
         [ -n "$core" ] && [ -r "$core/scripts/cli-guard.sh" ] && { found="$core"; break; }
     done
 
