@@ -385,6 +385,73 @@ if iso_epoch "$(fmt_ago 0 '+%Y-%m-%d')" >/dev/null; then ok "iso_epoch: 정상 �
 if ! iso_epoch "not-a-date" >/dev/null 2>&1; then ok "iso_epoch: 못 재면 실패로 낸다(0 아님)"; else
   bad "못 쟀는데 값을 돌려줬다" "$(iso_epoch 'not-a-date')"; fi
 
+echo "⑫ 🔴 인자 계약 (코어 cli-guard) — 09:50 사고의 형태를 막는다"
+# 🔴 이 스크립트는 **이미 한 번 말없이 안 나갔다** (07-30 23:03 재시작에 세션 cron 이 같이
+#   사라져 금요일 07시 브리핑이 조용히 빠졌고 아무도 몰랐다 — CLAUDE.md 기록).
+#   무음이 기본값인 자리라, 무음으로 실패하는 갈래를 하나도 더 얹을 수 없다.
+# 🔴 옛 형태는 `DRY_RUN="${DRY_RUN:-0}"` — **환경으로만** 켤 수 있었고 끄는 길이 플래그로
+#   존재하지도 않았다. 환경에 그 값이 있는 것만으로 브리핑이 발송 0건 · rc=0 이 된다.
+#
+# 🔸 이 절 전용 발송 스텁 — **호출 1회 = 1줄.** 브리핑 본문은 여러 줄이라 본문을 적으면
+#   1건이 수십 건으로 보인다.
+cat > "$ROOT/send-1" <<'STUB'
+#!/usr/bin/env bash
+printf 'SEND\t%s\n' "$1" >> "$G_SENT"
+STUB
+chmod +x "$ROOT/send-1"
+g_sends() { grep -c '^SEND' "$G_SENT" 2>/dev/null | head -1; }
+gr() {   # gr <스크립트 인자…>   (GUARD_ENV 를 세우면 CLI_DRY_RUN 을 환경으로 물려준다)
+  G_SENT="$ROOT/g-sent.txt"; : > "$G_SENT"
+  G_LOG="$ROOT/g-briefing.log"; : > "$G_LOG"
+  # 🔴 stderr 를 **따로 받는다.** 합치면 코어의 DRY-RUN 안내에 본문이 통째로 들어가
+  #   본문 집계가 오염된다 — 이 파일에서 실제로 `grep -c 'b#'` 가 3 대신 4 를 셌다.
+  g_out="$(env G_SENT="$G_SENT" TODO_FILE="$ROOT/todo.md" WEATHER_JSON="$ROOT/weather.json" \
+      DRIFT_HEARTBEAT="$ROOT/hb-fresh" PR_LIST_CMD="$ROOT/pr-none" \
+      BRIEFING_LOG="$G_LOG" DISCORD_SEND="$ROOT/send-1" \
+      ${GUARD_ENV:+CLI_DRY_RUN="$GUARD_ENV"} \
+      bash "$SCRIPT" "$@" 2>"$ROOT/g-err")"
+  G_RC=$?
+  return 0
+}
+
+# 🧪 [대조군] **먼저 이것부터.** 아래 "발송 0건"들이 가드 덕인지 이 픽스처가 애초에
+#   아무것도 안 보내는 건지 못 가른다 — 대조군이 초록이 아니면 나머지 빨간불은 증거가 아니다.
+GUARD_ENV="" gr
+[[ "$(g_sends)" -eq 1 ]] && ok "🧪 [대조군] 인자 없이 부르면 실제로 1건 나간다" \
+  || bad "대조군 — 이 픽스처는 원래 안 보낸다. 아래 0건은 증거가 아니다" "$(g_sends)건 / $g_out"
+
+GUARD_ENV="" gr --report
+[[ "$G_RC" -eq 2 ]] && ok "모르는 인자 --report 를 rc=2 로 거절한다 (1 아님 — 못 쟀다)" || bad "모르는 인자 rc" "want 2 / got $G_RC"
+[[ "$(g_sends)" -eq 0 ]] && ok "  🔑 거절되면 발송 0건 (사고 재현 차단)" || bad "거절인데 발송" "$(g_sends)건"
+# 🔑 **거절도 파일로 남긴다.** 이 스크립트엔 로그가 없었다 — cron 이 stderr 를 버리므로
+#   안 남기면 crontab 오타 하나에 브리핑이 **또** 말없이 안 나간다.
+grep -q 'verdict=bad_args' "$G_LOG" && ok "  🔑 거절이 로그 파일에 남는다 (verdict=bad_args)" \
+  || bad "거절 로그" "$(cat "$G_LOG" 2>/dev/null || echo '<로그 없음>')"
+
+GUARD_ENV="" gr --dry-run
+[[ "$(g_sends)" -eq 0 ]] && ok "--dry-run 이면 발송 0건" || bad "dry-run 발송" "$(g_sends)건"
+grep -q '날씨' <<<"$g_out" && ok "  → 브리핑 본문을 stdout 으로 보여준다" \
+  || bad "dry-run 가시성 — 조용하면 고장과 구별이 안 된다" "$g_out"
+
+# 🔴 환경 상속은 **거절**한다(코어 계약 ④) — 어느 쪽으로 접어도 조용히 틀리는 자리.
+GUARD_ENV=1 gr
+[[ "$G_RC" -eq 2 ]] && ok "🔴 CLI_DRY_RUN 을 환경에서 물려받으면 rc=2 로 거절한다" || bad "환경 상속" "want rc=2 / got $G_RC"
+[[ "$(g_sends)" -eq 0 ]] && ok "  → 거절이므로 발송 0건" || bad "상속 거절 발송" "$(g_sends)건"
+grep -q 'verdict=bad_env' "$G_LOG" && ok "  🔑 bad_args 와 갈라 센다 (고칠 곳이 환경이라서)" \
+  || bad "bad_env 표지" "$(cat "$G_LOG" 2>/dev/null || echo '<로그 없음>')"
+
+GUARD_ENV="" gr --help
+[[ "$(g_sends)" -eq 0 ]] && ok "--help 는 발송 0건" || bad "help 발송" "$(g_sends)건"
+grep -q 'usage:' <<<"$g_out" && ok "  → 사용법을 stdout 으로 낸다" || bad "usage 출력" "$g_out"
+
+# 🔴 **source 해도 인자 파싱이 돌지 않는다** — 이 파일은 실제로 source 된다(⑪이 `file_mtime`
+#   하나를 부르려고 그렇게 한다). 파싱을 최상위에 뒀더니 그쪽 `"$@"` 가 모르는 인자로
+#   판정돼 **exit 2** 가 됐다. 🔑 코어 계약 ⑦(source 는 부작용이 없다)은 **소비자 쪽에서도**
+#   지켜야 한다 — 계약을 지키는 라이브러리를 부작용 있는 자리에 배선하면 계약이 사라진다.
+src_out="$(bash -c 'source "$1" 2>&1; echo "SOURCED_RC=$?"' _ "$SCRIPT" --아무거나 2>&1)"
+grep -q 'SOURCED_RC=0' <<<"$src_out" && ok "🔴 source 해도 인자 파싱이 안 돈다 (부작용 0)" \
+  || bad "source 시 부작용" "SOURCED_RC=0" "$src_out"
+
 echo
 echo "  통과 $pass · 실패 $fail"
 [[ "$fail" -eq 0 ]]
