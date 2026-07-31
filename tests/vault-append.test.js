@@ -121,4 +121,60 @@ describe('vault-append.sh 안전장치', () => {
     expect(body).toContain(String.raw`\d+`);
     expect(body).toContain(String.raw`C:\Users\test`);
   });
+
+  /**
+   * 🔴 nvm 이 없는 기계에서도 돌아야 한다 (2026-07-31, 룬드 맥에서 실측)
+   *
+   *   scripts/vault-append.sh: line 200: /Users/klaude/.nvm/nvm.sh: No such file or directory
+   *
+   * 그 줄은 `source ~/.nvm/nvm.sh && … "$CLAUDE_BIN" …` 였고, nvm 이 없으면 **줄 전체가**
+   * rc≠0 로 죽어 이 파일의 시험 4건이 통째로 빨간불이었다.
+   *
+   * 🔑 축을 잘못 고르면 **재현이 안 되는 게 아니라 "없다"로 보인다.** 나는 `grep -P` 스텁으로
+   *   흔들어 놓고 6 pass 를 *"결함 없음"* 으로 읽었다 — **없는 축을 흔들고 있었다.**
+   * 🔑 원인이 **내가 가진 것**(nvm)이라 내 기계에선 원리적으로 안 보인다.
+   *   상대 기계가 유일한 관찰자였고, 이 시험은 그 관찰을 **내 쪽으로 옮겨오는 장치**다.
+   *
+   * nvm 은 node 를 PATH 에 올리는 **수단**이지 목적이 아니다. 이미 쓸 수 있으면 건너뛴다.
+   */
+  test('🧪 nvm 이 없는 기계(~/.nvm 부재)에서도 노트를 만든다 — 룬드 맥 재현', () => {
+    // ⚠️ HOME 만 바꾸면 **막은 게 아니다.** `NVM_DIR` 이 process.env 로 새어 들어와
+    //   가짜 HOME 이어도 내 진짜 nvm 을 가리킨다 — 변이시험이 그걸 잡았다(0 fail).
+    //   룬드 맥엔 **둘 다 없다.** 축을 하나만 막고 다른 하나를 열어두면 시험이
+    //   맞는 이유가 아니라 **틀린 이유로 통과**한다.
+    const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'nonvm-home-'));
+    runAppend(['--topic', 'nvm없음', '--category', 'tech', '--content', '내용'], {
+      env: { HOME: fakeHome, NVM_DIR: path.join(fakeHome, 'no-such-nvm') },
+    });
+    const files = fs.readdirSync(path.join(wikiDir(), 'tech'));
+    expect(files.some((x) => x.endsWith('.md'))).toBe(true);
+    fs.rmSync(fakeHome, { recursive: true, force: true });
+  });
+
+  // 🔴 node 도 nvm 도 없으면 **조용히 넘어가지 않는다.**
+  //   이 갈래는 처음에 아무 시험도 안 밟고 있었다(변이 → 0 fail). 내 기계엔 node 가 있어서
+  //   `load_node_env` 가 늘 성공했기 때문이다. **없는 조건은 만들어야 밟힌다.**
+  //   여기서 안 죽으면 CLAUDE_BIN 이 엉뚱하게 실패하고 그게 "LLM 출력이 비었다"로 읽힌다
+  //   — 원인이 두 단계 멀어지고, 사람은 프롬프트를 의심하게 된다.
+  test('🧪 node 도 nvm 도 없으면 그 이유를 말하고 죽는다 (조용한 실패 금지)', () => {
+    const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'nonode-home-'));
+    // ⚠️ 처음엔 디렉터리 **이름**으로 걸렀다(`/nvm|node/`). `~/.local/bin` 에도 node 가 있어서
+    //   그 필터를 통과했고, 시험이 대조군에서도 실패했다 — **양쪽에서 실패하는 시험은
+    //   아무것도 안 가른다**(변이의 빨간불도 증거가 아니게 된다).
+    //   ⇒ 이름이 아니라 **실제로 node 가 있는지**로 거른다. 표지가 아니라 성질을 본다.
+    const leanPath = (process.env.PATH || '')
+      .split(':')
+      .filter((p) => p && !fs.existsSync(path.join(p, 'node')))
+      .join(':');
+    let threw = false;
+    try {
+      runAppend(['--topic', 'node없음', '--category', 'tech', '--content', '내용'], {
+        env: { HOME: fakeHome, NVM_DIR: path.join(fakeHome, 'no-such-nvm'), PATH: leanPath },
+      });
+    } catch {
+      threw = true;
+    }
+    expect(threw).toBe(true);
+    fs.rmSync(fakeHome, { recursive: true, force: true });
+  });
 });
