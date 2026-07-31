@@ -17,12 +17,16 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$SCRIPT_DIR/.." && pwd)"
 WD="$REPO/scripts/nino-watchdog.sh"
 
-pass=0; fail=0; skip=0
+pass=0; fail=0; skip=0; skip_assert=0
 ok()  { echo "  ✅ $1"; pass=$((pass + 1)); }
 bad() { echo "  ❌ $1"; echo "     want: $2"; echo "     got:  $3"; fail=$((fail + 1)); }
 # ⛔ 판정 불가 — **못 쟀다**를 통과로도 실패로도 접지 않는다(자매 파일 catchup-hint 와 같은 관례).
 #   통과로 접으면 안 잰 계약이 초록불이 되고, 실패로 접으면 남의 기계에서 못 재는 것이 결함이 된다.
-skipt(){ echo "  ⛔ $1"; echo "     사유: $2"; skip=$((skip + 1)); }
+#   🔴 3번째 인자 = **이 갈래가 덮는 단언 수**(생략하면 1). 개수만 세면 크기가 사라진다.
+skipt(){ echo "  ⛔ $1 (단언 ${3:-1}개분)"; echo "     사유: $2"
+         skip=$((skip + 1)); skip_assert=$((skip_assert + ${3:-1})); }
+# 총계 줄에 붙일 꼬리. 0 이면 아무것도 안 붙인다(없는 걸 시끄럽게 만들지 않는다).
+skip_note(){ [ "$skip" -gt 0 ] && printf ' (단언 %s개분)' "$skip_assert"; return 0; }
 
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK/logs" "$WORK/scripts" "$WORK/src" "$WORK/bin"
@@ -55,6 +59,21 @@ for _a in -600 -1 60 "+600"; do
     *) bad "iso_off $_a" "ISO 시각(...Z)" "${_v:-<빈 문자열>}" ;;
   esac
 done
+echo ""
+
+# 🔴 판정 불가 집계 자체 검사 — **개수는 크기를 말해주지 않는다.**
+#   `2 판정 불가` 는 *단언 2개를 못 쟀다*로 읽히지만 실제로는 **9개분**이었다(2026-07-31 실측).
+#   못 잰 양이 작아 보이면 사람이 그 창을 안 연다 — 축소된 숫자는 침묵과 같은 일을 한다.
+#   ⇒ 접힌 단언 수를 총계에 같이 싣는다. 세는 건 여기서, 읽는 건 맨 아래 결과 줄에서.
+echo "🔴 판정 불가 집계 — 개수가 아니라 **크기**를 보고해야 한다:"
+_sk="$(skip=0; skip_assert=0; skipt "가짜" "자체 검사" 5 >/dev/null; skipt "가짜2" "자체 검사" >/dev/null; echo "$skip/$skip_assert")"
+[ "$_sk" = "2/6" ] && ok "skipt 2건(5개분 + 인자 없으면 1) → $_sk" || bad "skipt 단언 집계" "2/6" "$_sk"
+# 🔑 0 일 때 안 붙는 것과 2 일 때 붙는 것을 **둘 다** 잰다.
+#   빈 문자열만 재면 함수가 통째로 죽어도 초록이다(오늘 코어 #109 에서 겪은 항진명제).
+_sn0="$(skip=0; skip_note)"
+[ -z "$_sn0" ] && ok "판정 불가 0 이면 꼬리를 안 붙인다" || bad "skip_note(0)" "<빈 문자열>" "$_sn0"
+_sn2="$(skip=2; skip_assert=6; skip_note)"
+[ "$_sn2" = " (단언 6개분)" ] && ok "판정 불가 2건 → '$_sn2'" || bad "skip_note(2)" " (단언 6개분)" "$_sn2"
 echo ""
 
 cp "$WD" "$WORK/scripts/"
@@ -388,7 +407,7 @@ if [[ -f "$HOOK" ]]; then
   ACTIVITY_BOT_DIR="/proc/nonexistent-$$" bash "$HOOK" >/dev/null 2>&1; rc=$?
   [[ $rc -eq 0 ]] && ok "쓸 수 없는 경로에서도 rc=0(세션을 막지 않는다)" || bad "실패 시 rc" "0" "$rc"
 else
-  skipt "활동 훅 계약" "hooks/session-activity.sh 가 없다"
+  skipt "활동 훅 계약" "hooks/session-activity.sh 가 없다" 5
 fi
 
 echo ""
@@ -636,7 +655,7 @@ PROBEEOF
 LV_PAT='log "([A-Z][A-Z-]*):'
 LV_CAND='log "[A-Z]'
 if [ ! -x "$LV" ]; then
-  skipt "로그 표지 겹침 — 판정 불가" "코어 label-verdict.sh 없음($LV). \`git -C ~/yaksu-bot-core pull\` 후 재실행"
+  skipt "로그 표지 겹침 — 판정 불가" "코어 label-verdict.sh 없음($LV). \`git -C ~/yaksu-bot-core pull\` 후 재실행" 1
 # 🔴 `--min-labels 1` 을 **명시한다** (2026-07-30, 룬드 `e29ace9` 지적 — 내 쪽에서도 재현).
 #    안 주면 코어 기본값(현재 3)에 묶인다. 프로브가 4종이라 지금은 통과하지만
 #    **코어가 기본값을 4 이상으로 올리는 순간** 프로브가 rc=2 로 떨어지고
@@ -646,14 +665,14 @@ if [ ! -x "$LV" ]; then
 elif ! "$LV" --file "$LV_PROBE" --min-labels 1 \
        --pattern "$LV_PAT" --candidate-pattern "$LV_CAND" 2>&1 \
      | grep -q '접두사 관계'; then
-  skipt "로그 표지 겹침 — 판정 불가" "코어에 ⓒ(접두사 경고) 기능이 없다 — 구버전으로 보인다($LV)"
+  skipt "로그 표지 겹침 — 판정 불가" "코어에 ⓒ(접두사 경고) 기능이 없다 — 구버전으로 보인다($LV)" 1
 else
   LV_OUT="$("$LV" --file "$WD" --pattern "$LV_PAT" --candidate-pattern "$LV_CAND" 2>&1)"; LV_RC=$?
   case "$LV_RC" in
     0) ok "로그 표지가 전부 고유하다 (코어 label-verdict 판정)" ;;
     1) bad "같은 표지가 서로 다른 원인에 쓰인다 — 로그로 원인을 못 가른다" \
            "겹치는 표지 없음" "$(printf '%s' "$LV_OUT" | tr '\n' ' ')" ;;
-    *) skipt "로그 표지 겹침 — 판정 불가" "코어 rc=$LV_RC: $(printf '%s' "$LV_OUT" | tr '\n' ' ')" ;;
+    *) skipt "로그 표지 겹침 — 판정 불가" "코어 rc=$LV_RC: $(printf '%s' "$LV_OUT" | tr '\n' ' ')" 1 ;;
   esac
   # ⓒ 과대포착은 rc 를 안 바꾼다 — 사람이 볼 재료로만 띄운다.
   printf '%s' "$LV_OUT" | grep -q '접두사 관계' && \
@@ -685,10 +704,10 @@ SEND_BOT_DIR="$(sed -n 's/^BOT_DIR="\([^"]*\)".*/\1/p' "$REAL_SEND" | head -1)"
 reset; set_hb 120; make_history Tim; run_wd >/dev/null    # 알림 1회 발동 → argv 확보
 
 if [ ! -x "$REAL_SEND" ]; then
-  skipt "실물 discord-send 계약" "$REAL_SEND 가 없거나 실행 불가"
+  skipt "실물 discord-send 계약" "$REAL_SEND 가 없거나 실행 불가" 3
 elif [ -z "$SEND_BOT_DIR" ] || [ ! -r "$SEND_BOT_DIR/.env" ]; then
   skipt "실물 discord-send 계약" \
-    "discord-send 가 고정한 정체에 못 닿는다(${SEND_BOT_DIR:-BOT_DIR 미검출}/.env). 니노 기계에서만 잴 수 있는 계약이다 — 고정은 의도다(401 근본교정 · \$HOME 폴백 금지)"
+    "discord-send 가 고정한 정체에 못 닿는다(${SEND_BOT_DIR:-BOT_DIR 미검출}/.env). 니노 기계에서만 잴 수 있는 계약이다 — 고정은 의도다(401 근본교정 · \$HOME 폴백 금지)" 3
 elif [ ! -s "$WORK/argv.bin" ]; then
   # 🔴 이건 판정 불가가 아니라 **실패**다 — 알림 분기가 argv 를 안 남겼다는 뜻이라
   #   기계와 무관하게 내 코드의 문제다.
@@ -900,7 +919,7 @@ if [ -f "$WORK/scripts/wd-dies.sh" ]; then
     *)            bad "죽었을 때 rc 기록" "rc=3" "${_g:=$(head -c 60 "$WDHB" 2>/dev/null)}${_g:-<빈 파일>}" ;;
   esac
 else
-  skipt "죽었을 때 rc 기록" "변이 사본을 못 만들었다 — 이 갈래는 못 쟀다"
+  skipt "죽었을 때 rc 기록" "변이 사본을 못 만들었다 — 이 갈래는 못 쟀다" 1
 fi
 
 # 🔴 ㉡ 조용히 시작한 상태는 조용히 끝나서 로그가 **안 닫힌다**.
@@ -920,7 +939,7 @@ grep -q 'DETECTOR-RECOVERED' "$WORK/logs/watchdog.log" 2>/dev/null \
   || ok "회귀: 부재 이력이 없으면 조용하다 (매 tick 찍지 않는다)"
 
 echo ""
-echo "결과: $pass pass, $fail fail, $skip 판정 불가"
+echo "결과: $pass pass, $fail fail, $skip 판정 불가$(skip_note)"
 # 판정 불가는 rc 를 바꾸지 않는다(자매 파일 catchup-hint 와 같은 관례) — 못 잰 것이지 깨진 게 아니다.
 # 대신 위에 사유가 찍히므로 "왜 안 쟀나"가 화면에 남는다.
 [[ $fail -eq 0 ]]
