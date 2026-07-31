@@ -575,61 +575,11 @@ echo "🔴 이식성 — 상대 봇(macOS·bash 3.2·BSD)이 이 시험을 셀 �
 #   실사용이 그대로여도 카운트가 흔들린다 — 오늘 코어에서 잡은 *계측 상수* 형태이자,
 #   *검사기가 자기를 센다* 의 네 번째 사례다.
 #   ⇒ 개수가 아니라 **구조**를 본다: iso_off 밖에 있으면 몇 개든 빨간불.
-# 🔴 **명령 목록이 아니라 성질로 잡는다** (2026-07-31 룬드 `#93` 리뷰).
-#   이 가드는 원래 `date -u -d` **하나만** 봤다. 그래서 428행 주석이
-#   *"`touch -d` 는 GNU 전용이라 룬드 맥에서 깨진다 → python os.utime 으로(이식성 가드가 잡아줬다)"*
-#   라고 증언하고 있는데도, 890·1007 행에 `touch -d '@N'` 과 `stat -c %Y` 가 새로 들어왔다.
-#   **한 번 잡혔고, 그 자리만 고쳤고, 가드는 안 넓혔다.**
-#   🔑 내가 코어 `#106` 에서 룬드에게 한 지적과 같은 축이다 — *가드가 자기 범위 밖의 같은 병을 못 본다.*
-#   ⇒ 성질: **"GNU 전용 시각 도구가 정본 헬퍼 밖에 있다"**. 명령이 늘어도 형태로 걸린다.
-gnu=$(python3 - "$0" <<'PYEOF'
-import re, sys
-src = open(sys.argv[1]).read()
-src = re.sub(r"<<'PYEOF'.*?^PYEOF", "", src, flags=re.S | re.M)   # 검사기를 대상에서 뺀다
-m = re.search(r'^iso_off\(\)\s*\{.*?^\}', src, re.S | re.M)
-if not m:
-    print("iso_off 헬퍼가 없다"); raise SystemExit
-outside = src.replace(m.group(0), "")
-outside = "\n".join(l for l in outside.splitlines() if not l.lstrip().startswith("#"))
-
-# GNU 전용 시각 구문 — 이 목록은 *예시*고, 판정은 "정본 밖에 있나"로 한다.
-PATTERNS = [
-    (r'\bdate\s+(?:-u\s+)?-d\b',  "date -d"),      # BSD 는 -v / -r
-    (r'\btouch\s+-d\b',           "touch -d"),     # BSD 는 -t 만
-    (r'\bstat\s+-c\b',            "stat -c"),      # BSD 는 -f
-    (r'\bdate\s+-r\b',            "date -r"),      # 반대쪽(BSD 전용)도 직접 쓰면 안 된다
-    (r'\bstat\s+-f\b',            "stat -f"),
-]
-hits = []
-for pat, name in PATTERNS:
-    n = len(re.findall(pat, outside))
-    if n:
-        hits.append(f"{name} {n}곳")
-print(" · ".join(hits))
-PYEOF
-)
-# 🔴 **시험 파일만 보면 반쪽이다** — 시험은 스크립트를 실행하므로, 스크립트 안의 GNU 전용 구문도
-#   룬드 맥에서 그대로 터진다. 실제로 `nino-watchdog.sh:490` 의 `stat -c %Y` 가 남아 있었고
-#   BSD 흉내 PATH 로 재보니 감지기 축 2건이 빨갰다(가드는 아무 말도 안 했다).
-#   ⇒ 스크립트도 본다. 다만 스크립트는 헬퍼를 못 쓰니(운영 코드) **같은 줄의 폴백**을 인정한다.
-wd_gnu=$(python3 - "$WD" <<'PYEOF'
-import re, sys
-PAIRS = [(r'stat\s+-c', r'stat\s+-f', 'stat -c'),
-         (r'date\s+(?:-u\s+)?-d', r'date\s+-[vr]', 'date -d')]
-bad = []
-for i, line in enumerate(open(sys.argv[1]), 1):
-    if line.lstrip().startswith('#'):
-        continue
-    for gnu, bsd, name in PAIRS:
-        if re.search(gnu, line) and not re.search(bsd, line):
-            bad.append(f"{i}행 {name}(폴백 없음)")
-print(" · ".join(bad))
-PYEOF
-)
-[[ -z "$wd_gnu" ]] && ok "스크립트에도 폴백 없는 GNU 전용 시각 구문이 없다" \
-  || bad "이식성: 스크립트" "같은 줄에 BSD 폴백" "$wd_gnu"
-[[ -z "$gnu" ]] && ok "GNU/BSD 갈리는 시각 도구는 iso_off·timeshift 정본 안에만 있다" \
-  || bad "이식성: 시각 도구" "정본 헬퍼 안에만(touch_ago·mtime_of·iso_off)" "$gnu"
+# 🔴 **이 파일의 가드는 걷어냈다** — `tests/portability.test.sh` 로 옮겼다(2026-07-31).
+#   여기 두면 **가드가 파일마다 사본**이 되고, 그러면 새 시험 파일은 *가드를 안 쓰는 것으로*
+#   통과한다. 안 쓰는 것은 조용하다 — 이 파일이 `timeshift.sh` 정본을 안 쓴 게 정확히 그것이었다.
+#   🔑 사본을 지우는 것까지가 "정본으로 옮겼다" 다. 남겨두면 두 벌이 갈린다.
+#   🔸 아래는 남긴다 — **시험이 실행하는 스크립트**는 공용 가드의 범위(tests/) 밖이다.
 
 echo ""
 echo "🔴 러너 계약 — 예상 못 한 stderr 는 실패다 (룬드 제안 2026-07-29):"
@@ -1125,6 +1075,69 @@ run_wd >/dev/null
 grep -q 'DETECTOR-RECOVERED' "$WORK/logs/watchdog.log" 2>/dev/null \
   && bad "부재 이력 없을 때" "조용함" "RECOVERED — 로그가 2분마다 시끄러워진다" \
   || ok "회귀: 부재 이력이 없으면 조용하다 (매 tick 찍지 않는다)"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 🔴 재시작 알림의 **접기** — 억제가 없던 세 자리
+#
+#   2026-07-31 실측: 전송 6곳 중 셋(재시작)에 억제가 전혀 없었다. 2분 주기라 재시작이
+#   계속 실패하면 **시간당 30건이 천장 없이** 나간다. 같은 새벽에 79초 41건을 겪은 뒤다.
+#
+# 🔑 억제와 **접기**는 다르다. 재시작 반복 실패는 진짜 장애라 조용해지면 안 된다.
+#   ⇒ 첫 건은 즉시 · 창 안의 반복은 세었다가 **다음 알림에 횟수를 실어** 보낸다.
+#     30줄이 1줄이 되면서 정보는 오히려 는다.
+# ═══════════════════════════════════════════════════════════════════════════
+echo ""
+echo "🔴 재시작 알림 접기 — 조용해지되 사라지지 않는다:"
+
+RS_STATE="$WORK/logs/watchdog-restart-DEAD-SESSION-next"
+RS_COUNT="$WORK/logs/watchdog-restart-DEAD-SESSION-count"
+rs_reset() { reset; rm -f "$WORK"/logs/watchdog-restart-*; set_hb 1; set_activity 1; make_history Tim; }
+
+rs_reset; make_tmux 1
+out1="$(run_wd)"
+[ -n "$out1" ] && ok "첫 재시작은 즉시 알린다" || bad "첫 알림" "문구 있음" "<없음>"
+case "$out1" in *번째*) bad "첫 알림 문구" "횟수 없음" "$out1 — 1회에 '1번째'는 소음이다" ;;
+                   *) ok "  → 1회에는 횟수를 안 붙인다" ;; esac
+
+out2="$(run_wd)"; out3="$(run_wd)"
+[ -z "$out2$out3" ] && ok "🔑 창 안의 반복은 조용하다 (2분마다 30건/시간을 막는다)" \
+  || bad "반복 억제" "조용함" "$out2 / $out3"
+
+# 🔴 **조용해진 것이지 사라진 것이 아니다** — 세고 있어야 한다.
+n="$(cat "$RS_COUNT" 2>/dev/null || echo '<없음>')"
+[ "$n" = "2" ] && ok "  → 조용한 동안 횟수를 센다(현재 2)" \
+  || bad "누적 횟수" "2" "$n — 접은 게 아니라 버린 것이다"
+grep -q 'DEAD-SESSION-SUPPRESSED' "$WORK/logs/watchdog.log" 2>/dev/null \
+  && ok "  → 접었다는 사실이 로그에 남는다" || bad "접힘 로그" "SUPPRESSED" "없음"
+
+# 창이 지나면 **횟수를 실어** 다시 알린다
+printf '0' > "$RS_STATE"
+out4="$(run_wd)"
+case "$out4" in
+  *"3번째"*) ok "🔑 창이 지나면 누적 횟수를 실어 알린다(3번째)" ;;
+  "")        bad "창 만료 후 알림" "3번째 포함" "<없음> — 영원히 조용해졌다" ;;
+  *)         bad "창 만료 후 횟수" "3번째 포함" "$out4" ;;
+esac
+n="$(cat "$RS_COUNT" 2>/dev/null || echo '')"
+[ "$n" = "0" ] && ok "  → 보낸 뒤 횟수를 0으로 되돌린다" || bad "횟수 초기화" "0" "$n"
+
+# 🔴 원인마다 **다른 파일** — 세션 사망이 얼어붙음을 침묵시키면 안 된다
+rs_reset; make_tmux 1; run_wd >/dev/null          # DEAD-SESSION 창을 연다
+[ -f "$RS_STATE" ] && ok "원인별 상태 파일이 생긴다(DEAD-SESSION)" || bad "상태 파일" "존재" "없음"
+[ ! -f "$WORK/logs/watchdog-restart-DEAD-PROC-next" ] \
+  && ok "  → 다른 원인(DEAD-PROC)의 창은 안 열린다 = 서로 침묵시키지 않는다" \
+  || bad "원인 격리" "DEAD-PROC 창 없음" "열려 있다"
+make_tmux 0
+
+# 🧪 [양성 대조군] 접기를 끄면 매 tick 울리는가 — 없으면 위 '조용함'이
+#   *"알림 분기 자체가 안 탄다"* 와 구별되지 않는다.
+rs_reset; make_tmux 1
+NINO_RESTART_BACKOFF=0 run_wd >/dev/null
+c1="$(NINO_RESTART_BACKOFF=0 run_wd)"; c2="$(NINO_RESTART_BACKOFF=0 run_wd)"
+[ -n "$c1" ] && [ -n "$c2" ] \
+  && ok "🧪 [양성 대조군] 창을 0으로 두면 매 tick 울린다 (분기는 살아 있다)" \
+  || bad "🧪 [양성 대조군]" "매번 알림" "c1=[$c1] c2=[$c2] — 조용함이 접기 덕인지 알 수 없다"
+make_tmux 0
 
 echo ""
 echo "결과: $pass pass, $fail fail, $skip 판정 불가"
