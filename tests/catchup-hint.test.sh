@@ -49,10 +49,14 @@ REPO="$(cd "$SCRIPT_DIR/.." && pwd)"
 HINT="$REPO/scripts/catchup-hint.sh"
 REAL_CLI="$HOME/.local/bin/yaksu-history"
 
-pass=0; fail=0; skip=0
+pass=0; fail=0; skip=0; skip_assert=0
 ok()   { echo "  ✅ $1"; pass=$((pass + 1)); }
 bad()  { echo "  ❌ $1"; echo "     want: $2"; echo "     got:  $3"; fail=$((fail + 1)); }
-skipt(){ echo "  ⏭️  $1 (사유: $2)"; skip=$((skip + 1)); }
+# 🔴 3번째 인자 = **이 갈래가 덮는 단언 수**(생략하면 1). 자매 파일 nino-watchdog 과 같은 관례.
+#   개수만 세면 크기가 사라진다 — `1 skip` 이 실제로는 단언 3개분일 수 있다.
+skipt(){ echo "  ⏭️  $1 (사유: $2 · 단언 ${3:-1}개분)"
+         skip=$((skip + 1)); skip_assert=$((skip_assert + ${3:-1})); }
+skip_note(){ [ "$skip" -gt 0 ] && printf ' (단언 %s개분)' "$skip_assert"; return 0; }
 
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK/logs" "$WORK/bin" "$WORK/memory/discord-history"
@@ -235,7 +239,7 @@ if [[ -x "$REAL_CLI" ]] && "$REAL_CLI" last-seen --help >/dev/null 2>&1; then
   seed_db 30 Tim 45 룬드
   CLI_OVERRIDE="$REAL_CLI" DB_OVERRIDE="$DB" run "내 발화가 없으면 null 경로로 떨어진다" 'null'
 else
-  skipt "실물 CLI 케이스 3건" "$REAL_CLI 없음 또는 last-seen 미지원(구버전)"
+  skipt "실물 CLI 케이스 3건" "$REAL_CLI 없음 또는 last-seen 미지원(구버전)" 3
 fi
 
 echo ""
@@ -476,5 +480,5 @@ else
 fi
 
 echo ""
-echo "결과: $pass pass, $fail fail, $skip skip"
+echo "결과: $pass pass, $fail fail, $skip skip$(skip_note)"
 [[ $fail -eq 0 ]]
