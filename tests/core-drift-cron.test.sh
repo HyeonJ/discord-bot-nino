@@ -271,7 +271,7 @@ gr() {  # gr <스크립트 인자…>   (GUARD_ENV 를 세우면 CLI_DRY_RUN 을
     g_out="$(G_SENT="$G_SENT" env BOT_DIR="$BOT" CHECK="$ROOT/check.sh" \
         HEARTBEAT="$ROOT/ghb" LOG="$ROOT/glog" NOTIFY_STATE="$ROOT/gstate$RANDOM" \
         ${GUARD_ENV:+CLI_DRY_RUN="$GUARD_ENV"} \
-        DISCORD_SEND="$ROOT/send-1" bash "$SCRIPT" "$@" 2>&1)"
+        DISCORD_SEND="$ROOT/send-1" bash "$SCRIPT" "$@" 2>"$ROOT/gerr")"
     g_rc=$?
 }
 mkfake 1 "DRIFT: repo_behind=9커밋 · process_behind=0파일 (계약시험)"

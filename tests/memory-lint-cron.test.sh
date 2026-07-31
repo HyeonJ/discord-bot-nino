@@ -140,7 +140,7 @@ gr() {  # gr <스크립트 인자…>   (GUARD_ENV 를 세우면 CLI_DRY_RUN 을
   g_out="$(FAKE_ITEMS="$ROOT/items.txt" FAKE_RC="$ROOT/rc.txt" FAKE_SENT="$ROOT/sent.txt" \
     env BOT_DIR="$ROOT" LINT="$ROOT/fake-lint.sh" DISCORD_SEND="$ROOT/fake-send-1" \
     STATE="$ROOT/gstate$RANDOM" HEARTBEAT="$ROOT/logs/hb" LOG="$ROOT/glog" \
-    ${GUARD_ENV:+CLI_DRY_RUN="$GUARD_ENV"} bash "$SCRIPT" "$@" 2>&1)"
+    ${GUARD_ENV:+CLI_DRY_RUN="$GUARD_ENV"} bash "$SCRIPT" "$@" 2>"$ROOT/gerr")"
   g_rc=$?
 }
 items "GUARD 계약시험 항목"; rc_is 1
