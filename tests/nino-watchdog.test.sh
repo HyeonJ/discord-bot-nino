@@ -575,61 +575,11 @@ echo "🔴 이식성 — 상대 봇(macOS·bash 3.2·BSD)이 이 시험을 셀 �
 #   실사용이 그대로여도 카운트가 흔들린다 — 오늘 코어에서 잡은 *계측 상수* 형태이자,
 #   *검사기가 자기를 센다* 의 네 번째 사례다.
 #   ⇒ 개수가 아니라 **구조**를 본다: iso_off 밖에 있으면 몇 개든 빨간불.
-# 🔴 **명령 목록이 아니라 성질로 잡는다** (2026-07-31 룬드 `#93` 리뷰).
-#   이 가드는 원래 `date -u -d` **하나만** 봤다. 그래서 428행 주석이
-#   *"`touch -d` 는 GNU 전용이라 룬드 맥에서 깨진다 → python os.utime 으로(이식성 가드가 잡아줬다)"*
-#   라고 증언하고 있는데도, 890·1007 행에 `touch -d '@N'` 과 `stat -c %Y` 가 새로 들어왔다.
-#   **한 번 잡혔고, 그 자리만 고쳤고, 가드는 안 넓혔다.**
-#   🔑 내가 코어 `#106` 에서 룬드에게 한 지적과 같은 축이다 — *가드가 자기 범위 밖의 같은 병을 못 본다.*
-#   ⇒ 성질: **"GNU 전용 시각 도구가 정본 헬퍼 밖에 있다"**. 명령이 늘어도 형태로 걸린다.
-gnu=$(python3 - "$0" <<'PYEOF'
-import re, sys
-src = open(sys.argv[1]).read()
-src = re.sub(r"<<'PYEOF'.*?^PYEOF", "", src, flags=re.S | re.M)   # 검사기를 대상에서 뺀다
-m = re.search(r'^iso_off\(\)\s*\{.*?^\}', src, re.S | re.M)
-if not m:
-    print("iso_off 헬퍼가 없다"); raise SystemExit
-outside = src.replace(m.group(0), "")
-outside = "\n".join(l for l in outside.splitlines() if not l.lstrip().startswith("#"))
-
-# GNU 전용 시각 구문 — 이 목록은 *예시*고, 판정은 "정본 밖에 있나"로 한다.
-PATTERNS = [
-    (r'\bdate\s+(?:-u\s+)?-d\b',  "date -d"),      # BSD 는 -v / -r
-    (r'\btouch\s+-d\b',           "touch -d"),     # BSD 는 -t 만
-    (r'\bstat\s+-c\b',            "stat -c"),      # BSD 는 -f
-    (r'\bdate\s+-r\b',            "date -r"),      # 반대쪽(BSD 전용)도 직접 쓰면 안 된다
-    (r'\bstat\s+-f\b',            "stat -f"),
-]
-hits = []
-for pat, name in PATTERNS:
-    n = len(re.findall(pat, outside))
-    if n:
-        hits.append(f"{name} {n}곳")
-print(" · ".join(hits))
-PYEOF
-)
-# 🔴 **시험 파일만 보면 반쪽이다** — 시험은 스크립트를 실행하므로, 스크립트 안의 GNU 전용 구문도
-#   룬드 맥에서 그대로 터진다. 실제로 `nino-watchdog.sh:490` 의 `stat -c %Y` 가 남아 있었고
-#   BSD 흉내 PATH 로 재보니 감지기 축 2건이 빨갰다(가드는 아무 말도 안 했다).
-#   ⇒ 스크립트도 본다. 다만 스크립트는 헬퍼를 못 쓰니(운영 코드) **같은 줄의 폴백**을 인정한다.
-wd_gnu=$(python3 - "$WD" <<'PYEOF'
-import re, sys
-PAIRS = [(r'stat\s+-c', r'stat\s+-f', 'stat -c'),
-         (r'date\s+(?:-u\s+)?-d', r'date\s+-[vr]', 'date -d')]
-bad = []
-for i, line in enumerate(open(sys.argv[1]), 1):
-    if line.lstrip().startswith('#'):
-        continue
-    for gnu, bsd, name in PAIRS:
-        if re.search(gnu, line) and not re.search(bsd, line):
-            bad.append(f"{i}행 {name}(폴백 없음)")
-print(" · ".join(bad))
-PYEOF
-)
-[[ -z "$wd_gnu" ]] && ok "스크립트에도 폴백 없는 GNU 전용 시각 구문이 없다" \
-  || bad "이식성: 스크립트" "같은 줄에 BSD 폴백" "$wd_gnu"
-[[ -z "$gnu" ]] && ok "GNU/BSD 갈리는 시각 도구는 iso_off·timeshift 정본 안에만 있다" \
-  || bad "이식성: 시각 도구" "정본 헬퍼 안에만(touch_ago·mtime_of·iso_off)" "$gnu"
+# 🔴 **이 파일의 가드는 걷어냈다** — `tests/portability.test.sh` 로 옮겼다(2026-07-31).
+#   여기 두면 **가드가 파일마다 사본**이 되고, 그러면 새 시험 파일은 *가드를 안 쓰는 것으로*
+#   통과한다. 안 쓰는 것은 조용하다 — 이 파일이 `timeshift.sh` 정본을 안 쓴 게 정확히 그것이었다.
+#   🔑 사본을 지우는 것까지가 "정본으로 옮겼다" 다. 남겨두면 두 벌이 갈린다.
+#   🔸 아래는 남긴다 — **시험이 실행하는 스크립트**는 공용 가드의 범위(tests/) 밖이다.
 
 echo ""
 echo "🔴 러너 계약 — 예상 못 한 stderr 는 실패다 (룬드 제안 2026-07-29):"
