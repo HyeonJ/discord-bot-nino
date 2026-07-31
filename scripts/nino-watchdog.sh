@@ -55,6 +55,26 @@ ALERT_CHANNEL="${ALERT_CHANNEL:-현인-업무}"
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG"; }
 
+# ── 발송 목 ──────────────────────────────────────────────────────────────────
+# 🔴 경보 발송은 **여기 한 곳**만 지난다. 예전엔 네 곳에 흩어져 있었는데, 그러면
+#    가드든 로깅이든 3곳만 덮었을 때 **덮인 3곳이 안 덮인 1곳을 가린다** — 시험은
+#    초록인데 한 갈래만 실채널로 샌다. 목이 하나면 덮었나/안 덮었나가 셀 수 있는 값이 된다.
+# 🔴 그리고 예전 네 곳은 전부 `2>/dev/null || true` 였다. 발송이 실패하면
+#    **stderr 없음 · rc 영향 없음 · 로그 없음** — 실패 신호가 셋 다 없었다.
+#    ⇒ *"경보가 안 왔다"* 와 *"경보를 보냈는데 실패했다"* 가 사람 눈에 같은 값이었다.
+#    조용한 게 정상인 감시 장치라 아무도 안 물어본다. 그래서 실패를 로그로 남긴다.
+# ⚠️ 그래도 rc 는 항상 0 이다 — **경보 실패가 감시를 멈추면 안 된다**(`set -e` 아래다).
+# ⚠️ stderr 는 계속 버린다: 여기 나오는 건 discord-send 의 진단문이고 cron 이 그걸 메일로
+#    돌린다. 사실 자체는 로그에 남으니 잃는 게 없다 — 버리는 건 문구이지 신호가 아니다.
+wd_send() {   # $@ = 본문. 채널은 $ALERT_CHANNEL 고정
+    local rc=0
+    $DISCORD_SEND "$ALERT_CHANNEL" "$@" 2>/dev/null || rc=$?
+    if [ "$rc" -ne 0 ]; then
+        log "SEND-FAILED: 경보를 못 보냈다 rc=$rc — 이 줄이 없으면 '안 왔다'와 구별이 안 된다"
+    fi
+    return 0
+}
+
 # 🔸 이름 충돌 경고 — **읽지는 않는다**(룬드 `#93` 리뷰 제안).
 #    시험이 "`.env` 가 이 두 이름을 안 쓴다"를 계약으로 잡지만, **사람이 `.env` 를 손으로 고치고
 #    시험을 안 돌리면** 그 계약은 아무 말도 안 한다. 그 창을 런타임에서 메운다.
@@ -107,7 +127,7 @@ restart_notify() {
     [ "$n" -ge 2 ] && msg="$msg
 
 🔸 최근 $((RESTART_BACKOFF / 60))분 동안 **${n}번째** 재시작이야. 반복되면 자동 복구로는 안 되는 상태일 수 있어."
-    $DISCORD_SEND "$ALERT_CHANNEL" "$msg" 2>/dev/null || true
+    wd_send "$msg"
     printf '%s' "$((now + RESTART_BACKOFF))" > "$state" 2>/dev/null || true
     printf '0' > "$count" 2>/dev/null || true
     return 0
@@ -231,13 +251,13 @@ elif [ "$AUTH_N" -ge "$AUTH_MIN_COUNT" ]; then
     case "$AUTH_NEXT" in ''|*[!0-9]*) AUTH_NEXT=0 ;; esac
     if [ "$(date +%s)" -ge "$AUTH_NEXT" ]; then
         log "AUTH: 최근 $((AUTH_WINDOW / 60))분 안에 인증 에러 ${AUTH_N}건. 사람 호출(복구 안 함)."
-        $DISCORD_SEND "$ALERT_CHANNEL" "<@353914579929268226> 🔴 니노 **로그인이 풀린 것 같아.** 최근 $((AUTH_WINDOW / 60))분 동안 인증 에러가 **${AUTH_N}건** 났어.
+        wd_send "<@353914579929268226> 🔴 니노 **로그인이 풀린 것 같아.** 최근 $((AUTH_WINDOW / 60))분 동안 인증 에러가 **${AUTH_N}건** 났어.
 
 이건 조용히 죽는 게 아니라 **에러를 뱉으면서 계속 도는 상태**라, 겉보기엔 멀쩡해 보여도 실제로는 아무 일도 못 하고 있어.
 
 확인: WSL에서 \`tmux attach -t nino\` → \`/login\`. 브라우저 인증이라 내가 못 해.
 
-재시작은 안 했어 — 토큰 문제라 재시작해도 그대로고 지금까지 맥락만 날아가거든." 2>/dev/null || true
+재시작은 안 했어 — 토큰 문제라 재시작해도 그대로고 지금까지 맥락만 날아가거든."
         echo "$(( $(date +%s) + 1800 ))" > "$AUTH_STATE"   # 30분 뒤에 다시 부를 수 있다
     fi
     exit 0
@@ -449,7 +469,7 @@ except Exception:
             fi
             if [ "$SILENT" -ge "$NEXT" ]; then
                 log "SILENT: 세션이 살아 있는데 ${SILENT}초($((SILENT / 60))분) 동안 턴을 못 끝냈다(수신 ${INCOMING}건 · 활동 ${ACT_AGE}). 사람 호출(복구 안 함)."
-                $DISCORD_SEND "$ALERT_CHANNEL" "<@353914579929268226> 🔴 니노가 **살아 있는데 $((SILENT / 60))분째 응답을 못 만들고 있어.** tmux랑 프로세스는 멀쩡해서 기존 감시엔 안 걸려 — **인증 만료(401)·사용량 소진·얼어붙음** 중 하나야.
+                wd_send "<@353914579929268226> 🔴 니노가 **살아 있는데 $((SILENT / 60))분째 응답을 못 만들고 있어.** tmux랑 프로세스는 멀쩡해서 기존 감시엔 안 걸려 — **인증 만료(401)·사용량 소진·얼어붙음** 중 하나야.
 $INCOMING_NOTE
 $ACTIVITY_NOTE
 
@@ -458,7 +478,7 @@ $ACTIVITY_NOTE
 · **session limit / 리셋 시각** → 한도 소진이야. **로그인 칠 필요 없어** — 그 시각 지나면 저절로 돌아와.
 · 둘 다 아니면 얼어붙은 거라 재시작이 답이야.
 
-이건 자동 재시작 안 했어 — 재시작해도 토큰 문제면 그대로고 지금까지 맥락만 날아가거든." 2>/dev/null || true
+이건 자동 재시작 안 했어 — 재시작해도 토큰 문제면 그대로고 지금까지 맥락만 날아가거든."
                 # 재알림 간격 2배 — 같은 상태로 2분마다 부르지 않는다
                 echo $(( SILENT * 2 )) > "$SILENCE_STATE"
             fi
@@ -502,13 +522,13 @@ detector_alert() {   # $1 = 사람이 읽는 사유
     case "$next" in ''|*[!0-9]*) next=0 ;; esac
     [ "$(date +%s)" -lt "$next" ] && return 0          # 백오프 중
     log "DETECTOR: $1 — 사람 호출(복구 안 함)."
-    $DISCORD_SEND "$ALERT_CHANNEL" "<@353914579929268226> 🟡 니노 **인증 감지기(check-auth)가 멈춘 것 같아.**
+    wd_send "<@353914579929268226> 🟡 니노 **인증 감지기(check-auth)가 멈춘 것 같아.**
 
 $1
 
 이건 지금 당장 뭐가 고장난 건 아니야 — **인증이 끊겼을 때 알려줄 장치가 없는 상태**라는 뜻이야(감시의 사각). 2026-07-25 에 이 감지기가 죽은 채로 있어서 만료 알림이 한 번도 안 나간 적이 있어.
 
-확인: \`tail -3 ~/discord-bot-nino/logs/check-auth.log\` 랑 \`crontab -l | grep check-auth\`" 2>/dev/null || true
+확인: \`tail -3 ~/discord-bot-nino/logs/check-auth.log\` 랑 \`crontab -l | grep check-auth\`"
     echo "$(( $(date +%s) + DETECTOR_BACKOFF ))" > "$DETECTOR_STATE"
 }
 detector_recovered() {

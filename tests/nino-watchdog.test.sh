@@ -1158,6 +1158,72 @@ c1="$(NINO_RESTART_BACKOFF=0 run_wd)"; c2="$(NINO_RESTART_BACKOFF=0 run_wd)"
   || bad "🧪 [양성 대조군]" "매번 알림" "c1=[$c1] c2=[$c2] — 조용함이 접기 덕인지 알 수 없다"
 make_tmux 0
 
+# ④ 발송 목 — **네 곳이 아니라 한 곳**
+# 🔴 왜 모으나: 발송이 4곳에 흩어져 있으면 cli-guard 든 로깅이든 3곳만 덮었을 때
+#    **덮인 3곳이 안 덮인 1곳을 가린다.** 시험은 초록인데 한 갈래만 실채널로 샌다.
+# 🔴 그리고 네 곳이 전부 `2>/dev/null || true` 였다. 발송이 실패하면
+#    **stderr 없음 · rc 영향 없음 · 로그 없음** — 실패 신호가 셋 다 없다.
+#    ⇒ *"경보가 안 왔다"* 와 *"경보를 보냈는데 실패했다"* 가 사람 눈에 **같은 값**이 된다.
+#    경보 장치에서 이건 최악의 형태다: 조용한 게 정상인 시스템이라 아무도 안 물어본다.
+
+WD_SRC="$WORK/scripts/nino-watchdog.sh"
+
+# 🧪 [양성 대조군] **검사기 먼저.** 경계가 틀리면 아래 개수는 아무것도 안 잰 것이다
+#   (오늘만 경로조각·주석·따옴표문자열·행두앵커로 네 번 틀렸다).
+chk_calls() { grep -cE '^[[:space:]]*"?\$\{?DISCORD_SEND' "$1" 2>/dev/null || true; }
+PROBE="$WORK/chk-probe.sh"
+{ printf '%s\n' '    $DISCORD_SEND "$C" "본문"'
+  printf '%s\n' '# $DISCORD_SEND 는 주석 안이다'
+  printf '%s\n' "    grep -qE '(DISCORD_SEND|ALERT_CHANNEL)=' \"\$F\""
+  printf '%s\n' '    log "DISCORD_SEND 를 조용히 덮는다"'; } > "$PROBE"
+PN="$(chk_calls "$PROBE")"
+[ "$PN" = "1" ] \
+  && ok "🧪 [양성 대조군] 호출 검사기: 호출만 1건 잡고 주석·grep패턴·로그문자열은 안 잡는다" \
+  || bad "🧪 [양성 대조군] 검사기 경계" "1" "$PN — 경계가 틀리면 아래 개수는 무의미하다"
+
+N_CALL="$(chk_calls "$WD_SRC")"
+[ "$N_CALL" = "1" ] \
+  && ok "🔑 발송 호출 지점이 파일 전체에 **1곳**이다" \
+  || bad "발송 목" "1곳" "$N_CALL 곳 — 흩어지면 한 곳만 덮어도 초록이 된다"
+
+# 그 1곳이 **목 함수 안**인가 — 개수만 맞고 자리가 밖이면 목이 아니다
+FN_LN="$(grep -nE '^wd_send\(\)' "$WD_SRC" 2>/dev/null | head -1 | cut -d: -f1)"
+CALL_LN="$(grep -nE '^[[:space:]]*"?\$\{?DISCORD_SEND' "$WD_SRC" 2>/dev/null | head -1 | cut -d: -f1)"
+if [ -z "$FN_LN" ]; then
+  bad "목 함수 wd_send()" "정의 존재" "<없음>"
+else
+  END_LN="$(awk -v s="$FN_LN" 'NR>s && /^}/ {print NR; exit}' "$WD_SRC")"
+  if [ -n "$CALL_LN" ] && [ "$CALL_LN" -gt "$FN_LN" ] && [ "$CALL_LN" -lt "${END_LN:-0}" ]; then
+    ok "  → 그 1곳이 wd_send() 안이다 (${FN_LN}~${END_LN} 행)"
+  else
+    bad "호출 위치" "wd_send() 안(${FN_LN}~${END_LN})" "${CALL_LN:-<없음>} 행"
+  fi
+fi
+
+# 🔴 발송 실패가 **보이는가** — 이게 목을 모으는 진짜 값이다
+FAIL_SEND="$WORK/bin/failing-send"
+printf '#!/bin/bash\nprintf "boom\\n" >&2\nexit 7\n' > "$FAIL_SEND"
+chmod +x "$FAIL_SEND"
+reset; set_hb 120; make_history Tim
+if run_wd_inject "$FAIL_SEND" "주입-채널"; then WRC=0; else WRC=$?; fi
+
+grep -q 'SEND-FAILED' "$WORK/logs/watchdog.log" 2>/dev/null \
+  && ok "🔑 발송이 실패하면 로그에 남는다 (SEND-FAILED)" \
+  || bad "발송 실패 기록" "SEND-FAILED 줄" "<없음> — '안 왔다'와 '실패했다'가 같은 값이 된다"
+grep -q 'rc=7' "$WORK/logs/watchdog.log" 2>/dev/null \
+  && ok "  → 실패 rc 까지 남긴다 (rc=7)" \
+  || bad "실패 rc" "rc=7" "<없음> — 왜 실패했는지 못 가른다"
+[ "$WRC" = "0" ] \
+  && ok "  → 그래도 워치독은 안 죽는다 (rc=0) — 경보 실패가 감시를 멈추면 안 된다" \
+  || bad "워치독 생존" "rc=0" "rc=$WRC — set -e 에 걸려 감시가 통째로 멈춘다"
+
+# 🧪 [양성 대조군] 성공하면 그 줄이 **안** 나온다 — 아니면 위 초록은 항진명제다
+reset; set_hb 120; make_history Tim
+run_wd_inject "$INJ_SEND" "주입-채널"
+grep -q 'SEND-FAILED' "$WORK/logs/watchdog.log" 2>/dev/null \
+  && bad "🧪 [양성 대조군] 성공 시" "SEND-FAILED 없음" "성공했는데도 실패로 남는다" \
+  || ok "🧪 [양성 대조군] 발송이 성공하면 SEND-FAILED 는 안 남는다"
+
 echo ""
 echo "결과: $pass pass, $fail fail, $skip 판정 불가$(skip_note)"
 # 판정 불가는 rc 를 바꾸지 않는다(자매 파일 catchup-hint 와 같은 관례) — 못 잰 것이지 깨진 게 아니다.
