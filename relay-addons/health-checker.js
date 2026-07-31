@@ -10,7 +10,6 @@
  *   DISCORD_SEND_BIN discord-send 경로 (기본: cwd/src/discord-send)
  */
 const http = require('http');
-const path = require('path');
 const { execSync } = require('child_process');
 
 const DM_DARREN = 'DM-Darren';
@@ -22,7 +21,22 @@ const COOLDOWN_MS = 5 * 60 * 1000;
 // 봇별 알림 대상: rund 이상은 Tim에게, nino/haru 이상은 Darren에게
 const OWNER_MAP = { rund: DM_TIM, nino: DM_DARREN, haru: DM_DARREN };
 
-const DISCORD_SEND_BIN = process.env.DISCORD_SEND_BIN || path.join(process.cwd(), 'src', 'discord-send');
+// 🔴 **호출 시점에 읽고, 없으면 지어내지 않는다** (2026-07-31).
+//   전엔 `process.env.DISCORD_SEND_BIN || path.join(process.cwd(), 'src', 'discord-send')` 였다.
+//   두 가지가 같이 얼었다 — env 와 **cwd**. relay 의 실제 cwd 는 systemd WorkingDirectory 인
+//   `/home/bpx27/yaksu-bot-core-live` 라, 폴백은 **존재하지 않는 경로**를 만든다.
+//   지금 안 터지는 건 `.env` 가 값을 덮고 있어서일 뿐이다 — 막아둔 게 아니라 안 밟고 있을 뿐.
+//   🔑 레포 규칙: *"기본값 넣지 말고 필수면 에러로 안내"*. 틀린 기본값은 없는 것보다 나쁘다 —
+//     설정을 빠뜨린 사람에게 **에러 대신 오작동**을 준다.
+function discordSendBin() {
+  const v = process.env.DISCORD_SEND_BIN;
+  if (!v) {
+    throw new Error(
+      'DISCORD_SEND_BIN 이 설정되지 않았다 — 경보를 보낼 수 없다. .env 에 절대경로로 지정할 것'
+    );
+  }
+  return v;
+}
 
 let checkInterval = null;
 let startTimeout = null;
@@ -51,12 +65,19 @@ function fetchHealth(url) {
   });
 }
 
+// 🔴 **발송 실패를 삼키지 않는다** — `#88`(check-auth 가 실패를 삼키고 "보냈다"로 기록)과
+//   같은 계약이다. 다만 여기는 **감시기 자신의 알림 경로**라 더 나쁘다: 실패하면
+//   *"봇이 아프다"* 를 못 알리고, **그 실패조차 아무도 모른다.**
+//   ⚠️ 던지지는 않는다(검사 루프가 죽으면 감시가 통째로 멈춘다). 대신 **성공 여부를 돌려준다** —
+//     부르는 쪽이 셀 수 있어야 "보냈다"와 "보내려다 실패했다"가 갈린다.
 function sendAlert(message, dmChannel) {
   try {
     const escaped = message.replace(/'/g, "'\\''");
-    execSync(`${DISCORD_SEND_BIN} ${dmChannel} '${escaped}'`);
+    execSync(`${discordSendBin()} ${dmChannel} '${escaped}'`);
+    return true;
   } catch (e) {
     console.error('[health-checker] alert send failed:', e.message);
+    return false;
   }
 }
 
@@ -127,6 +148,8 @@ module.exports = {
   init() { startChecking(); },
   // 순수/테스트용 export (구 src/health-checker.js와 동일 시그니처)
   startChecking,
+  sendAlert,        // 시험이 발송 축을 잴 수 있게 연다 (전엔 아무도 못 쟀다)
+  discordSendBin,
   stopChecking,
   checkAll,
   fetchHealth,
