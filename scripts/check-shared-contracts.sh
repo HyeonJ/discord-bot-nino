@@ -38,6 +38,11 @@
 #   ③ 🔴 **줄 조항은 「고쳤다」와 「지우고 새로 썼다」를 구별 못 한다** — 둘 다 해시가 바뀌어
 #      「소실+신설」로 보인다. 자리 이동은 조용하지만(해시가 같으면 파일이 달라도 같은 조항),
 #      **한 글자만 고쳐도 새 조항으로 보인다.** 오탐 수용의 대가이고, 대조 1회로 닫는다.
+#   ④ 🔴 **래핑된 논리 조항은 앞부분만 계약이 된다** — 뒷줄에 🤝 가 없으면 계약 밖이다.
+#      08-02 실측 두 건(룬드 정의 문단의 「단위」 뒷부분 · 「파일 범위」 줄) — **내가 대조하고
+#      등재한 조항이 이미 반쪽이었다.** 규약(「한 논리 조항 = 🤝 포함 한 물리 줄」)이 그의 파일에
+#      🤝 조항으로 박혔고, 이쪽은 **`➖` 경고**로 보이게 한다(소리내진 않는다 — rc 불변).
+#      ⚠️ 경고는 휴리스틱이라 완전하지 않다. 규약이 1차 방어고 경고는 2차다.
 #
 # rc: 0=변화 없음 · 1=변화 있음(대조 필요) · 2=판정 불가
 set -uo pipefail
@@ -113,8 +118,17 @@ for spec in sys.argv[1].split(":"):
     if not path:
         name, path = path or name, name
     lines = open(path, encoding="utf-8", errors="replace").read().split("\n")
-    cur, n = None, 0
-    for L in lines:
+    cur, n, fence = None, 0, False
+    for i, L in enumerate(lines):
+        # 🔴 **코드펜스 안은 «글자»지 문서 구조가 아니다** (룬드 리뷰 실측 · request-changes).
+        #   펜스를 모르면 블록 안의 `# 주석` 이 heading 으로 읽혀 **절이 거기서 끊긴다** —
+        #   뒤따르는 조항이 통째로 소실되고 **조용하다**(미탐 방향).
+        #   예시 블록에 🤝 를 쓰는 것도 «설명»이지 계약이 아니다 ⇒ 블록 전체를 건너뛴다.
+        if re.match(r"^\s*(```|~~~)", L):
+            fence = not fence
+            continue
+        if fence:
+            continue
         if L.startswith("#"):
             if cur is not None:
                 out.append(("S", cur, str(n)))
@@ -131,6 +145,18 @@ for spec in sys.argv[1].split(":"):
             if t:
                 out.append(("L", hashlib.sha1(t.encode()).hexdigest()[:10],
                             f"{name}: {t[:70]}"))
+                # 🔴 **래핑된 논리 조항은 앞부분만 계약이 된다 — 조용히 잘린다.**
+                #   08-02 실측 두 건: 🤝 «단위» 조항의 뒷부분("본문·표 줄이면…")과
+                #   «파일 범위» 줄이 둘 다 🤝 없는 다음 줄이라 **계약 밖**이었다.
+                #   내가 어제 «대조하고 등재한» 조항이 이미 반쪽이었다는 뜻이다.
+                #   ⇒ 규약(「한 논리 조항 = 🤝 포함 한 물리 줄」)은 룬드 파일에 박혔지만,
+                #     규약만 두면 「사람이 기억한다」에 기댄다 ⇒ **보이게** 한다(소리내진 않는다).
+                nxt = lines[i + 1] if i + 1 < len(lines) else ""
+                if (nxt.strip() and "🤝" not in nxt
+                        and not re.match(r"^\s*(#|```|~~~|[-*+]\s|\d+\.\s|\|)", nxt)
+                        and nxt.lstrip().startswith(">") == L.lstrip().startswith(">")):
+                    out.append(("W", "wrap", f"{name}: 🤝 줄 다음이 «이어지는 줄»로 보인다 — "
+                                             f"래핑이면 뒷부분이 계약 밖이다 → 「{nxt.strip()[:50]}」"))
     if cur is not None:
         out.append(("S", cur, str(n)))
 
@@ -140,6 +166,13 @@ PY
 )"
 rc=$?
 [ "$rc" -eq 0 ] || { echo "🔴 판정 불가 — 원본 파싱 실패: $SRC" >&2; exit 2; }
+
+# 🔑 경고(W)는 **조항이 아니다** — 기준선에도 안 들어가고 rc 도 안 바꾼다.
+#   「보이게 하되 소리내지 않는다」 — 분모 0 을 위반으로 안 만든 것과 같은 축이다.
+#   매번 시끄러우면 사람은 파일이 아니라 검사를 끈다.
+NOTICE="$(printf '%s\n' "$COUNTS" | LC_ALL=C grep '^W	' | cut -f3-)"
+COUNTS="$(printf '%s\n' "$COUNTS" | LC_ALL=C grep -v '^W	')"
+[ -n "$NOTICE" ] && printf '%s\n' "$NOTICE" | sed 's/^/  ➖ /'
 
 # 🔑 0개는 «다 사라졌다»가 아니라 **파일 형식이 바뀐 것**일 가능성이 크다.
 #   0 을 변화로 읽으면 형식 변경 때마다 「전부 소실」이라 외치고, 이상 없음으로 읽으면

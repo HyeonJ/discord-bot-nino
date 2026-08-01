@@ -184,6 +184,34 @@ SHARED_CONTRACT_SRC="$W/D1.md" SHARED_CONTRACT_BASELINE="$W/D.base" bash "$CHECK
 out="$(run "$W/D2.md" "$W/D.base")"; rc=$?
 [ "$rc" -eq 0 ] && ok "장식(인용/불릿/표)이 달라도 같은 조항이다" || bad "장식 차이를 조항 변경으로 읽는다" 0 "$rc"
 
+# 🔴 **코드펜스 안의 `#` 이 절을 끊는다** (룬드 리뷰 실측 · request-changes).
+#   조용한 미탐이다 — 블록 뒤 조항이 통째로 소실되는데 아무 소리도 안 난다.
+#   🔑 ⑨절을 쓸 때 펜스 픽스처가 «하나도» 없었다. 픽스처가 축을 안 가른 **네 번째**다
+#     (#119 ⑤절 · #131 M7·M10 · #121 N7). 같은 PR 안에서 그 습관을 자백하고 또 밟았다.
+printf '## 🤝 절A — 공유 계약\n\n- 조항1\n\n```sh\n# 주석\n```\n\n- 조항2\n' > "$W/fence.md"
+SHARED_CONTRACT_SRC="$W/fence.md" SHARED_CONTRACT_BASELINE="$W/fence.base" bash "$CHECK" --write-baseline >/dev/null 2>&1
+got="$(LC_ALL=C grep -a '^S' "$W/fence.base" | cut -f3)"
+[ "$got" = "2" ] && ok "펜스 안 # 이 절을 안 끊는다 (조항2 보존)" || bad "펜스가 절을 끊는다" 2 "$got"
+
+# 예시 블록 안의 🤝 는 «설명»이지 계약이 아니다 — 실행되지 않는 글자와 같은 취급
+printf '## 보통 절\n\n```md\n> 🤝 예시 조항\n```\n' > "$W/fence2.md"
+out="$(SHARED_CONTRACT_SRC="$W/fence2.md" SHARED_CONTRACT_BASELINE="$W/fence2.base" bash "$CHECK" --write-baseline 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] && ok "펜스 안 🤝 만 있으면 조항 0개 → rc=2 (판정 불가)" || bad "펜스 안 🤝 를 조항으로 센다" 2 "$rc"
+
+echo
+echo "⑩ ➖ 래핑 경고 — «보이게 하되 소리내지 않는다»"
+# 🔴 실측 두 건: 룬드 정의 문단에서 🤝 «단위» 조항의 뒷부분과 «파일 범위» 줄이
+#   둘 다 🤝 없는 다음 줄이라 **계약 밖**이었다. 내가 대조하고 등재한 조항이 이미 반쪽이었다.
+printf '> 🤝 조항 앞부분이고\n>    이어지는 뒷부분이다\n' > "$W/wrap.md"
+out="$(SHARED_CONTRACT_SRC="$W/wrap.md" SHARED_CONTRACT_BASELINE="$W/wrap.base" bash "$CHECK" --write-baseline 2>&1)"; rc=$?
+case "$out" in *"래핑"*) ok "래핑 의심 줄을 ➖ 로 알린다" ;; *) bad "래핑을 못 본다" "래핑 언급" "«$out»" ;; esac
+[ "$rc" -eq 0 ] && ok "경고는 rc 를 안 바꾼다 (조항이 아니다)" || bad "경고가 rc 를 바꾼다" 0 "$rc"
+[ "$(LC_ALL=C grep -ac '^W' "$W/wrap.base")" = "0" ] && ok "경고는 기준선에 안 들어간다" || bad "경고가 기준선에 샌다"
+# 🔴 대조군 — 규약대로 «한 줄»로 적으면 조용해야 한다. 아니면 상시 경고라 곧 무시된다
+printf '> 🤝 조항이 한 줄에 다 있다.\n\n> 다른 문단\n' > "$W/nowrap.md"
+out="$(SHARED_CONTRACT_SRC="$W/nowrap.md" SHARED_CONTRACT_BASELINE="$W/nowrap.base" bash "$CHECK" --write-baseline 2>&1)"
+case "$out" in *"래핑"*) bad "대조군 실패 — 한 줄짜리에도 경고한다" "무음" "«$out»" ;; *) ok "대조군: 한 줄로 적으면 조용하다" ;; esac
+
 # 🔴 옛 기준선(v1: 2열)을 «변화 있음»으로 읽으면 시끄럽게 거짓이다 — 판정 불가여야 한다
 printf '🤝 어떤 절\t3\n' > "$W/v1.base"
 out="$(run "$W/L1.md" "$W/v1.base")"; rc=$?
