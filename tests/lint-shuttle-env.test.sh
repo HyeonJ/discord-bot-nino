@@ -31,7 +31,7 @@ WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 STUB="$WORK/fake-canonical.sh"
 cat > "$STUB" <<'SH'
 #!/usr/bin/env bash
-for v in WIKI_ORPHAN_EXCLUDES MEMORY_WIKI_DIR MEMORY_AUTO_DIR MEMORY_SHARED_DIR; do
+for v in WIKI_ORPHAN_EXCLUDES SIZE_BASELINE MEMORY_WIKI_DIR MEMORY_AUTO_DIR MEMORY_SHARED_DIR; do
   printf '%s=%s\n' "$v" "${!v-«unset»}"
 done
 SH
@@ -86,6 +86,23 @@ for v in MEMORY_WIKI_DIR MEMORY_AUTO_DIR MEMORY_SHARED_DIR; do
     *)            bad "$v 가 절대경로가 아니다" "/로 시작" "«${g}»" ;;
   esac
 done
+
+echo "⑤ 🔴 SIZE_BASELINE 도 **빈 값으로 끌 수 있다** — 같은 결함이 여기에도 있었다"
+# 🔑 이 절은 룬드가 자기 셔틀의 SIZE_BASELINE 을 같은 이유로 고친 커밋(assistant `112177a`)을 보고
+#   **내 분모를 훑어서** 찾았다. `:-` 를 하나 고친 걸로 「그 축은 닫혔다」고 읽으면 안 된다 —
+#   같은 파일 안에 같은 기전이 하나 더 살아 있었다.
+# 실측(고치기 전): SIZE_BASELINE='' 로 준 출력과 기본값 출력이 **225줄 내내 diff 0** 이었다.
+#   면제 24건을 밖에서 끌 방법이 없어서, 「면제가 무엇을 가리고 있나」를 잴 수 없었다.
+out5="$(SIZE_BASELINE='' run_shuttle)"
+got5="$(val_of "$out5" SIZE_BASELINE)"
+[ -z "$got5" ] \
+  && ok "빈 값을 주면 빈 채로 간다 → 면제를 끄고 원래 위반을 볼 수 있다" \
+  || bad "빈 값이 덮였다 — 면제를 못 꺼서 무엇을 가리는지 못 잰다" "빈 문자열" "«${got5}»"
+got5b="$(val_of "$out2" SIZE_BASELINE)"
+case "$got5b" in
+  /*) ok "  → 기본값은 그대로 절대경로로 간다 (끄는 걸 만들다 켜는 걸 깨지 않았다)" ;;
+  *)  bad "기본 SIZE_BASELINE 이 절대경로가 아니다" "/로 시작" "«${got5b}»" ;;
+esac
 
 echo
 echo "  통과 $pass · 실패 $fail"
