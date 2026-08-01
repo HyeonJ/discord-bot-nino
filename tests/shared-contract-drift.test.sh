@@ -140,13 +140,13 @@ mk_line_src() {  # $1=파일 · $2.. = 절 밖 🤝 줄들
 mk_line_src "$W/L1.md" '> 🤝 표 밖 조항 하나'
 run "$W/L1.md" "$W/L1.base" >/dev/null 2>&1
 SHARED_CONTRACT_SRC="$W/L1.md" SHARED_CONTRACT_BASELINE="$W/L1.base" bash "$CHECK" --write-baseline >/dev/null 2>&1
-nL="$(LC_ALL=C grep -ac '^L	' "$W/L1.base")"
+nL="$(LC_ALL=C grep -ac '^L.*표 밖 조항' "$W/L1.base")"
 [ "$nL" = "1" ] && ok "계측기: 절 밖 🤝 줄이 조항으로 잡힌다" || bad "절 밖 줄이 안 잡힌다" 1 "$nL"
 
 # 표 한 칸의 🤝 (룬드가 실제로 세운 형태)
 mk_line_src "$W/L2.md" '| 🔴 해시를 줬다 | origin 조회 200 (🤝 양봇 규칙) |'
 SHARED_CONTRACT_SRC="$W/L2.md" SHARED_CONTRACT_BASELINE="$W/L2.base" bash "$CHECK" --write-baseline >/dev/null 2>&1
-[ "$(LC_ALL=C grep -ac '^L	' "$W/L2.base")" = "1" ] && ok "표 한 칸의 🤝 도 조항이다" || bad "표 줄을 놓친다"
+[ "$(LC_ALL=C grep -ac '^L.*origin 조회 200' "$W/L2.base")" = "1" ] && ok "표 한 칸의 🤝 도 조항이다" || bad "표 줄을 놓친다"
 
 # 🔑 자리를 옮겨도 조용해야 한다 — 절 밖 줄은 원래 옮겨다닌다(합의)
 mk_line_src "$W/L3.md" '- 앞줄' '> 🤝 표 밖 조항 하나'
@@ -160,19 +160,21 @@ out="$(run "$W/L4.md" "$W/L1.base")"; rc=$?
 case "$out" in *"줄 조항이 사라졌다"*) ok "사라진 줄을 짚는다" ;; *) bad "사라진 줄 미지목" "줄 조항이 사라졌다" "«$out»" ;; esac
 case "$out" in *"줄 조항이 생겼다"*)  ok "생긴 줄도 짚는다 (늘어도 같은 무게)" ;; *) bad "신설 줄 미지목" "줄 조항이 생겼다" "«$out»" ;; esac
 
-# 🔑 절 «안»의 불릿은 절이 이미 센다 — 줄로 또 세면 이중계산이다
+# 🔑 절 «안»의 불릿도 조항이다(08-02 룬드 판정 — 수 보존 교체 미탐 때문에 뒤집혔다).
+#   단 «한 번만» 잡혀야 한다 — S 행은 개수, L 행은 어느 조항인지. 같은 불릿이 L 로 두 번 나오면 이중계산이다
 mk_line_src "$W/L5.md" '> 🤝 표 밖 조항 하나'
 printf -- '- 🤝 절 안 불릿\n' >> "$W/L5.md"
 SHARED_CONTRACT_SRC="$W/L5.md" SHARED_CONTRACT_BASELINE="$W/L5.base" bash "$CHECK" --write-baseline >/dev/null 2>&1
-[ "$(LC_ALL=C grep -ac '^L	' "$W/L5.base")" = "1" ] && ok "절 안 불릿은 줄로 또 세지 않는다" \
-    || bad "이중계산" "L 1개" "$(LC_ALL=C grep -ac '^L	' "$W/L5.base")개"
+[ "$(LC_ALL=C grep -ac '^L.*절 안 불릿' "$W/L5.base")" = "1" ] && ok "절 안 불릿은 L 로 정확히 한 번" \
+    || bad "이중계산" "L 1개" "$(LC_ALL=C grep -ac '^L.*절 안 불릿' "$W/L5.base")개"
 
 # 🔴 파일이 둘이다 — 하나만 보면 다른 하나의 조항이 통째로 분모 밖이 된다 (룬드 rc=2 실측)
 mk_line_src "$W/F1.md" '> 🤝 파일1 조항'
 mk_line_src "$W/F2.md" '> 🤝 파일2 조항'
 SHARED_CONTRACT_SRC="a=$W/F1.md:b=$W/F2.md" SHARED_CONTRACT_BASELINE="$W/F.base" bash "$CHECK" --write-baseline >/dev/null 2>&1
-[ "$(LC_ALL=C grep -ac '^L	' "$W/F.base")" = "2" ] && ok "두 파일의 줄 조항을 다 센다" \
-    || bad "파일 하나만 본다" "L 2개" "$(LC_ALL=C grep -ac '^L	' "$W/F.base")개"
+nF="$(LC_ALL=C grep -ac '^L.*파일[12] 조항' "$W/F.base")"
+[ "$nF" = "2" ] && ok "두 파일의 줄 조항을 다 센다" \
+    || bad "파일 하나만 본다" "L 2개" "${nF}개"
 
 # 🔴 **같은 조항이 봇마다 다른 «장식»으로 산다** — 룬드는 표 한 칸, 나는 하위 불릿에 세웠다.
 #   장식이 다르다고 다른 조항이면 양봇 대조가 매번 「소실+신설」이라 도구가 못 쓴다.
@@ -216,6 +218,35 @@ case "$out" in *"래핑"*) bad "대조군 실패 — 한 줄짜리에도 경고�
 printf '🤝 어떤 절\t3\n' > "$W/v1.base"
 out="$(run "$W/L1.md" "$W/v1.base")"; rc=$?
 [ "$rc" -eq 2 ] && ok "v1 기준선은 rc=2 (비교 자체가 성립 안 함)" || bad "v1 을 변화로 읽는다" 2 "$rc"
+
+echo
+echo "⑪ 🔴 🤝 절 «안» 불릿도 조항이다 — 수 보존 교체 미탐 회귀 (c5a97ff 실물)"
+# 실측: 룬드가 축약·이관 절의 ③⑤ 두 불릿을 «다시 써서» 올렸는데(c5a97ff) 불릿 수가 6→6 이라
+#   개수만 세던 판정은 **rc=0 으로 조용했다**. 계약 문구가 바뀐 걸 상대가 모르는 게 이 도구의 실패다.
+#   ⇒ 룬드 판정(08-02): 다듬을 때마다 울리는 건 소음이 아니라 «상대가 봐야 하는 사건»이다.
+printf '## 🤝 절A — 공유 계약\n\n- 조항 하나\n- 조항 둘\n' > "$W/b1.md"
+out="$(SHARED_CONTRACT_SRC="$W/b1.md" SHARED_CONTRACT_BASELINE="$W/b1.base" bash "$CHECK" --write-baseline 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] && ok "절 안 불릿으로 기준선을 쓴다" || bad "기준선 실패" 0 "$rc«$out»"
+
+# 🔑 핵심 회귀: 개수는 그대로(2 → 2), 내용만 바뀐다
+printf '## 🤝 절A — 공유 계약\n\n- 조항 하나\n- 조항 둘을 «다시 썼다»\n' > "$W/b2.md"
+out="$(run "$W/b2.md" "$W/b1.base")"; rc=$?
+[ "$rc" -eq 1 ] && ok "수 보존 교체가 울린다 (2→2 인데 내용이 다르다)" \
+  || bad "c5a97ff 미탐 재현 — 내용이 바뀌었는데 조용하다" 1 "$rc«$out»"
+
+# 🔴 대조군 — 안 바꾸면 조용해야 한다. 아니면 매번 울려서 곧 무시된다
+out="$(run "$W/b1.md" "$W/b1.base")"; rc=$?
+[ "$rc" -eq 0 ] && ok "  대조군: 그대로면 조용하다" || bad "안 바꿨는데 울린다" 0 "$rc«$out»"
+
+# 장식만 다른 같은 조항은 같다 — 줄 조항(⑨)과 같은 정규화가 절 안에도 걸려야 한다
+printf '## 🤝 절A — 공유 계약\n\n*  조항 하나\n-   조항 둘\n' > "$W/b3.md"
+out="$(run "$W/b3.md" "$W/b1.base")"; rc=$?
+[ "$rc" -eq 0 ] && ok "  불릿 기호·공백 차이는 같은 조항 (정규화)" || bad "장식 차이를 변경으로 읽는다" 0 "$rc«$out»"
+
+# 개수가 «줄어드는» 자리는 여전히 잡힌다 — 새 축이 옛 축을 먹으면 안 된다
+printf '## 🤝 절A — 공유 계약\n\n- 조항 하나\n' > "$W/b4.md"
+out="$(run "$W/b4.md" "$W/b1.base")"; rc=$?
+[ "$rc" -eq 1 ] && ok "  불릿이 사라지는 것도 여전히 잡는다" || bad "소실을 놓친다" 1 "$rc«$out»"
 
 echo
 echo "  통과 $pass · 실패 $fail"
