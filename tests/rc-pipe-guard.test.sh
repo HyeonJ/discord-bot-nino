@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+# rc-pipe-guard.test.sh — PreToolUse(Bash) 가드가 「rc 를 볼 자리의 파이프」를 잡는지
+#
+# 🔴 이 가드가 생긴 이유 (실사고):
+#   `git commit -F msg.txt file.sh | tail -2 && git push`
+#   → 파이프라인의 rc 는 **마지막 명령(tail)의 것**이라 commit 이 pathspec 오류로 실패해도
+#     `&&` 가 못 보고 **빈 브랜치를 push** 했다. 규칙(shell-git-procedure 1번)은 7/2x 부터
+#     있었는데 그 뒤로도 밟았다 — **판단을 요구하는 규칙은 샌다**(대전제 Ⅳ: 도구에 넣는다).
+#
+# 🔑 판정 축 (룬드 조건 반영 — 오탐 잠금이 절반이다):
+#   ①파이프 끝이 **관찰·자름 도구**  ②그 파이프라인의 rc 가 `&&`/`||` 로 **소비된다**
+#   ③파이프 앞머리가 **rc 가 의미 있는(부작용) 명령**   ④`pipefail` 이 없다
+#   넷이 **다 참일 때만** 막는다. 하나라도 빠지면 정상 관용구다.
+#
+# ⚠️ 가장 큰 오탐원은 **내가 보내는 메시지 본문**이다 — 나는 이 사고 예시를 코드블록으로
+#    룬드·Tim 에게 자주 보낸다. heredoc·따옴표 안은 **셸이 실행하지 않는 글자**이므로 분석 전에 지운다.
+#    (이게 없으면 가드가 자기 사고 설명을 못 보내게 막는다 = 가드를 죽이는 오탐)
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO="$(cd "$SCRIPT_DIR/.." && pwd)"
+GUARD="${RC_PIPE_GUARD:-$REPO/claude-config/hooks/rc-pipe-guard.sh}"
+
+pass=0; fail=0
+ok()  { echo "  ✅ $1"; pass=$((pass + 1)); }
+bad() { echo "  ❌ $1"; [ -n "${2:-}" ] && echo "     want rc=$2  got rc=$3"; fail=$((fail + 1)); }
+
+[ -f "$GUARD" ] || { echo "❌ 없음: $GUARD"; exit 1; }
+
+# PreToolUse 페이로드를 만들어 먹인다 (기존 가드들과 같은 계약: stdin JSON, exit 2 = 차단)
+run() {
+  printf '%s' "$1" | python3 -c 'import json,sys; print(json.dumps({"tool_name":"Bash","tool_input":{"command":sys.stdin.read()}}))' \
+    | bash "$GUARD" >/dev/null 2>&1
+  echo $?
+}
+blocks()  { local rc; rc="$(run "$2")"; [ "$rc" = "2" ] && ok "$1" || bad "$1" 2 "$rc"; }
+passes()  { local rc; rc="$(run "$2")"; [ "$rc" = "0" ] && ok "$1" || bad "$1" 0 "$rc"; }
+
+echo "① 🔑 계측기 먼저 — 가드가 실제로 무언가를 막을 수 있나"
+blocks "실사고 원문을 막는다" 'git commit -F msg.txt file.sh | tail -2 && git push'
+
+echo
+echo "② 막힘 — 네 조건이 다 참인 자리"
+blocks "head 로 끝나고 && 로 소비"      'git push origin main | head -3 && echo done'
+blocks "|| 로 소비해도 같다"            'git commit -F m.txt a.sh | tail -1 || echo failed'
+blocks "wc 도 관찰 도구다"              'npm ci | wc -l && npm test'
+blocks "중간 파이프가 여럿이어도 끝이 기준" 'git commit -F m.txt a.sh | grep x | tail -2 && git push'
+
+echo
+echo "②-b 🔴 룬드 실측 미탐 2건 (리뷰 REQUEST_CHANGES) — 둘 다 «흔한 표기»라 사각이 크다"
+# ① `git -C` 는 우리 둘 다 cwd 함정 때문에 표준으로 쓰는 관용구다. 막으려는 사고가
+#    가장 자주 나타나는 표기로 오면 통과하고 있었다 — 옵션의 «인자»가 하위명령 자리에 남는다.
+blocks "git -C <경로> commit"        'git -C /home/bpx27/yaksu-shared-data commit -m x f.md | tail -2 && git push'
+blocks "git -c k=v commit"           'git -c core.hooksPath=/dev/null commit -q -m x f.sh | tail -2 && git push'
+blocks "git --git-dir=… push"        'git --git-dir=/x/.git push origin main | head -3 && echo done'
+# ② `<<<` 는 heredoc 이 아니다. heredoc 으로 오인하면 델리미터가 영영 안 와서
+#    **그 뒤 문장 전부가 사각**이 된다 — 무음이라 더 나쁘다.
+blocks "herestring 뒤 문장의 위반"    'grep x <<< "abc"
+git commit -F m.txt a.sh | tail -2 && git push'
+
+echo
+echo "③ 풀림 — 하나라도 빠지면 정상 관용구다 (여기가 오탐 잠금)"
+# 🔑 ②-b 의 짝. 「-C 를 읽는다」가 「-C 면 다 막는다」가 되지 않았는지 본다
+passes "git -C 인데 읽기 하위명령"    'git -C /x log --oneline | head -5'
+passes "git -c 인데 읽기 하위명령"    'git -c a=b status --short | wc -l && echo ok'
+passes "herestring 만 있고 위반 없음" 'grep x <<< "abc"
+git log --oneline | head -3'
+passes "rc 미소비: 그냥 보기만 한다"     'git log --oneline | head -5'
+# 🔴 위 줄만으론 **rc 소비 축을 못 가른다** — `git log` 가 부작용 명령이 아니라서
+#    소비 조건을 통째로 지워도 통과한다(변이 M2 실증). 부작용 명령으로 축을 분리한다.
+passes "rc 미소비 + 부작용 명령 (M2 격리)" 'git commit -F m.txt a.sh | tail -2'
+# 🔑 위와 **다른 자리**다. 위는 「`&&` 가 아예 없다」, 아래는 「파이프라인이 **마지막 조각**이라
+#    그 뒤에 rc 를 볼 사람이 없다」. 코드에서도 각각 `len(segs)<2` 와 `segs[:-1]` 이 지킨다 —
+#    아래 케이스가 없을 때 `segs[:-1]→segs` 변이가 **안 죽었다**(M2' 실증).
+passes "마지막 조각의 파이프 (M2' 격리)"  'echo start && git commit -F m.txt a.sh | tail -2'
+passes "파이프 없음: rc 가 정직하다"     'git commit -F m.txt a.sh && git push'
+passes "rc 를 눈으로 받는 정본 형태"     'git commit -F m.txt a.sh
+rc=$?; echo "commit rc=$rc"'
+passes "pipefail 이 켜져 있다"           'set -o pipefail; git commit -F m.txt a.sh | tail -2 && git push'
+passes "grep 은 관찰 도구가 아니다 (-q 관용구)" 'cat f | grep -q x && echo found'
+passes "앞머리가 부작용 없는 명령"       'echo hi | head -1 && echo ok'
+passes "관찰 파이프라인끼리 이어짐"      'git status --short | wc -l && git log --oneline | head -3'
+
+echo
+echo "④ 🔑 문장 단위로 가른다 — 한 호출에 여러 문장이 산다"
+# 이걸 안 하면 「앞 문장의 파이프 + 뒷 문장의 &&」가 붙어 보여서 오탐이 난다
+passes "관찰 문장 다음 줄에 정상 커밋"   'git log --oneline | head -3
+git commit -F m.txt a.sh && git push'
+blocks "여러 문장 중 하나만 위반이어도 막는다" 'git status --short
+git commit -F m.txt a.sh | tail -2 && git push
+echo done'
+
+echo
+echo "⑤ 🔴 오탐 잠금 — 실행되지 않는 글자(본문·주석)는 코드가 아니다"
+# 나는 이 사고 예시를 코드블록으로 자주 보낸다. 여기서 막히면 가드가 자기 설명을 못 하게 한다
+# 🔴 픽스처 주의 — 예시 줄이 **문장 첫머리에서 부작용 명령으로 시작**해야 이 축이 갈린다.
+#    처음엔 `나쁜 예: git commit …` 처럼 앞에 말을 붙였는데, 그러면 첫 낱말이 `나쁜` 이라
+#    **is_effect 가 대신 막아준다** — heredoc·따옴표 제거를 통째로 꺼도 초록이었다(변이 M4·M5 실증).
+#    🔑 초록의 이유가 내가 적은 이유와 달랐다. 시험 문구가 아니라 **픽스처**가 축을 정한다.
+passes "heredoc 본문 안의 예시" 'read -r -d '"'"''"'"' P <<'"'"'EOF'"'"'
+git commit -F m.txt a.sh | tail -2 && git push
+EOF
+./src/discord-send 봇-놀이터 "$P"'
+passes "큰따옴표 인자 안의 예시" './src/discord-send 봇-놀이터 "예시:
+git commit -F m.txt a.sh | tail -2 && git push"'
+passes "작은따옴표 인자 안의 예시" "./src/discord-send 봇-놀이터 '예시:
+git commit -F m.txt a.sh | tail -2 && git push'"
+passes "주석 안의 예시" '# git commit -F m.txt a.sh | tail -2 && git push
+git status'
+# 🔴 위 줄도 축을 못 가른다 — 주석 제거를 꺼도 첫 낱말이 `#` 라 is_effect 가 막아준다(변이 M8).
+#    **꼬리 주석**이라야 부작용 명령이 문장 첫머리에 남아 주석 제거만 남는다.
+passes "꼬리 주석 안의 예시 (M8 격리)" 'git commit -F m.txt a.sh   # 참고: | tail -2 && git push'
+# 🔑 대조군: 지우기가 **너무 많이** 지우면 ①이 통과해버린다 → ①이 그 자리를 지킨다
+
+echo
+echo "⑥ 차단 메시지가 무엇을 하라는지 말하나 (막기만 하면 사람이 우회한다)"
+msg="$(printf '%s' 'git commit -F m.txt a.sh | tail -2 && git push' \
+  | python3 -c 'import json,sys; print(json.dumps({"tool_name":"Bash","tool_input":{"command":sys.stdin.read()}}))' \
+  | bash "$GUARD" 2>&1 >/dev/null)"
+case "$msg" in
+  *'rc='*) ok "처방(rc 를 먼저 받는 형태)이 메시지에 있다" ;;
+  *)       bad "차단 메시지에 처방이 없다" "rc= 포함" "«$msg»" ;;
+esac
+case "$msg" in
+  *pipefail*) ok "대안(pipefail)도 알려준다" ;;
+  *)          bad "대안 미안내" "pipefail 언급" "«$msg»" ;;
+esac
+
+echo
+echo "⑦ Bash 도구가 아니면 관여하지 않는다"
+rc="$(printf '%s' '{"tool_name":"Edit","tool_input":{"file_path":"/tmp/x"}}' | bash "$GUARD" >/dev/null 2>&1; echo $?)"
+[ "$rc" = "0" ] && ok "Edit 페이로드는 통과" || bad "Edit 에 관여" 0 "$rc"
+rc="$(printf '%s' 'not json at all' | bash "$GUARD" >/dev/null 2>&1; echo $?)"
+[ "$rc" = "0" ] && ok "파싱 불가는 통과 (가드가 도구를 못 쓰게 만들면 안 된다)" || bad "파싱 실패 시 차단" 0 "$rc"
+
+echo
+echo "  통과 $pass · 실패 $fail"
+[ "$fail" -eq 0 ] || exit 1
