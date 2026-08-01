@@ -64,9 +64,11 @@ WRITE=0
 #      ⇒ 템플릿형으로 경로를 **명시**한다. 이식성과 시험 가능성이 같이 닫힌다.
 #   ⚠️ TMP_SRC 는 이제 **여러 경로**다(파일이 둘이라). 인용하면 한 이름으로 붙으므로 안 지운다 —
 #     mktemp 경로엔 공백이 없으므로 비인용 확장이 맞다. `set -u` 때문에 빈 값 초기화는 필수.
-TMP_SRC=""; TMP_NOW=""
+TMP_SRC=""; TMP_NOW=""; TMP_PY=""
 # shellcheck disable=SC2086
-trap 'rm -f $TMP_SRC "$TMP_NOW"' EXIT
+# ⚠️ TMP_PY 도 «여러 경로»다(파서용·비교용 둘) — TMP_SRC 와 같은 이유로 **비인용** 확장이다.
+#    인용하면 공백 포함 한 이름으로 붙어서 rm 이 조용히 실패한다(실측: 시험 ⑧이 4건 잔존으로 잡았다).
+trap 'rm -f $TMP_SRC "$TMP_NOW" $TMP_PY' EXIT
 
 # 🔑 **파일이 둘이다** (합의). 하나만 보면 다른 하나에 세운 조항이 통째로 분모 밖이 된다 —
 #   실측: 룬드의 「origin 조회」 조항이 루트 CLAUDE.md 에 있어서 v1 이 못 봤다.
@@ -98,7 +100,15 @@ done
 #   #120 에서 한 번 밟았는데, 새 코드를 쓰면서 또 파이프로 줬다.
 #   🔑 **적어둔 것이 다음 번을 막지 못한다** — 주석은 «읽을 때» 발동하고 실수는 «쓸 때» 난다.
 #   ⇒ 값은 항상 argv 나 파일로. (도구로 박는 축 = 대전제 Ⅳ)
-COUNTS="$(python3 - "$SRC" <<'PY'
+# 🔴 **`$(...)` 안에 heredoc 을 두지 않는다 — 맥 bash 3.2 가 여기서 죽는다** (룬드 실측 08-02).
+#   3.2 의 낡은 파서는 명령 치환 안의 heredoc **본문을 다시 토큰 스캔**해서, `<<'PY'` 로
+#   인용했는데도 파이썬 정규식 안의 백틱 3개(``` 펜스 매칭)를 명령 치환 시작으로 읽고
+#   `syntax error near unexpected token '('` 로 죽는다. 내 WSL(bash 5.2)은 재귀 파서라 **무증상**이라
+#   여기까지의 모든 확인이 **WSL 축 하나**였다(맥 축 분모 0 — 63행에 내가 적어둔 «작성자 기계에서만
+#   참인 시험»의 두 번째 발현이고, 이번엔 시험이 아니라 **도구 자체**가 안 돌았다).
+#   ⇒ heredoc 을 치환 **밖**으로 빼서 파일로 쓰고, 실행만 치환 안에서 한다. 형태로 닫는다.
+TMP_PY="$(mktemp "${TMPDIR:-/tmp}/csc-parse.XXXXXX")"
+cat > "$TMP_PY" <<'PY'
 import hashlib, re, sys
 
 # 🔑 조항의 «신원» — 절은 제목, 줄은 **정규화 내용의 해시**다.
@@ -173,7 +183,7 @@ for spec in sys.argv[1].split(":"):
 for kind, key, val in out:
     print(f"{kind}\t{key}\t{val}")
 PY
-)"
+COUNTS="$(python3 "$TMP_PY" "$SRC")"
 rc=$?
 [ "$rc" -eq 0 ] || { echo "🔴 판정 불가 — 원본 파싱 실패: $SRC" >&2; exit 2; }
 
@@ -211,7 +221,10 @@ fi
 #   앞에 파이프를 붙여도 그 값은 `sys.stdin` 에 안 남는다(실측: 전 절이 「사라졌다」로 나왔다 —
 #   즉 «판별식이 죽은 채 시끄러운» 형태라 초록/무음 어느 쪽으로도 안 보였다).
 NOWF="$(mktemp "${TMPDIR:-/tmp}/csc-now.XXXXXX")"; TMP_NOW="$NOWF"; printf '%s\n' "$COUNTS" > "$NOWF"
-DIFF="$(python3 - "$BASE" "$NOWF" <<'PY'
+# 🔴 여기도 «치환 밖»으로 뺀다 — 지금 이 본문엔 백틱이 없어서 3.2 가 «우연히» 통과하지만,
+#   다음에 주석 한 줄만 넣어도 죽는다. 우연히 도는 형태를 남기면 **다음 편집이 지뢰**다.
+TMP_PY2="$(mktemp "${TMPDIR:-/tmp}/csc-diff.XXXXXX")"; TMP_PY="$TMP_PY $TMP_PY2"
+cat > "$TMP_PY2" <<'PY'
 import sys
 
 # 🔴 형식이 v1(2열: 제목\t수)이면 **판정 불가**다. v2 는 3열(종류\t키\t값).
@@ -255,7 +268,7 @@ for (kind, key), val in now.items():
         else:
             print(f"  🔴 줄 조항이 생겼다: 「{val}」")
 PY
-)"
+DIFF="$(python3 "$TMP_PY2" "$BASE" "$NOWF")"
 drc=$?
 if [ "$drc" -eq 3 ]; then
     echo "🔴 판정 불가 — 기준선이 옛 형식(v1: 제목+수)이다: $BASE" >&2
