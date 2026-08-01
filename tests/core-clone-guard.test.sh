@@ -79,7 +79,9 @@ git -C "$TMP/prod" checkout -q --detach 2>/dev/null
 out="$(bash "$GUARD" "$TMP/prod" main 2>&1)"; rc=$?
 case "$out" in
   *"(detached)"*) ok "detached → 브랜치 자리에 (detached) 라벨이 찍힌다" ;;
-  *) bad "detached 라벨이 없다 — 빈 브랜치명이 기대와 같아 보인다 (out=«$out» rc=$rc)" ;;
+  # ⚠️ `${out}` 중괄호 필수 — bash 3.2 는 `"$out»"` 에서 `»` 의 선두 바이트를 변수명에 먹어
+  #   `unbound variable` 로 죽는다(룬드 맥 실측). 잠금: tests/repo-hygiene.test.sh
+  *) bad "detached 라벨이 없다 — 빈 브랜치명이 기대와 같아 보인다 (out=«${out}» rc=${rc})" ;;
 esac
 
 # ⑦ 가드는 **차단하지 않는다** — 경고만 하고 rc=0 (셔틀 본작업을 막으면 안 된다)
