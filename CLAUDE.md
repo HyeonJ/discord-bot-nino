@@ -23,7 +23,7 @@
 ### 핵심 규칙
 - Discord에서 온 메시지에 응답할 때는 반드시 `discord-send`로 답장
 - **DM은 반드시 DM으로** 답할 것
-- **정본 문법 = `discord-send <target> "메시지"`** (positional). `-c/--channel`은 쓰지 말 것
+- **정본 문법 = `discord-send <target> "메시지"`** (positional). `-c/--channel`은 쓰지 말 것 — target 이 채널·해시·DM 까지 받으므로 이름이 `channel` 인 옵션은 의미가 안 맞는다
 - target에 **채널명·raw 채널ID(15자리+)·4자리 해시(스레드=그 스레드/메시지=자동 답장)·DM-이름** 모두 가능. 1~3·5~14자리 순수숫자는 오발송 방지로 에러
 - 다른 채널에서 특정 메시지에 답장하려면 `discord-send <채널> -r <해시> "답장"`, 같은 채널이면 `discord-send <해시> "답장"`만으로 충분
 - 전체 문법은 `discord-send --help`
