@@ -119,11 +119,11 @@ msg="$(printf '%s' 'git commit -F m.txt a.sh | tail -2 && git push' \
   | bash "$GUARD" 2>&1 >/dev/null)"
 case "$msg" in
   *'rc='*) ok "처방(rc 를 먼저 받는 형태)이 메시지에 있다" ;;
-  *)       bad "차단 메시지에 처방이 없다" "rc= 포함" "«$msg»" ;;
+  *)       bad "차단 메시지에 처방이 없다" "rc= 포함" "«${msg}»" ;;
 esac
 case "$msg" in
   *pipefail*) ok "대안(pipefail)도 알려준다" ;;
-  *)          bad "대안 미안내" "pipefail 언급" "«$msg»" ;;
+  *)          bad "대안 미안내" "pipefail 언급" "«${msg}»" ;;
 esac
 
 echo
