@@ -72,11 +72,15 @@ out="$(bash "$GUARD" "$TMP/plain" main 2>&1)"; rc=$?
 [ -n "$out" ] && ok "비-git 경로 → 판정 불가를 말한다" \
     || bad "비-git 이 조용히 통과했다 (rc=$rc)"
 
-# ⑥ detached HEAD → 브랜치명 자리에 무엇이든 **말은 한다** (빈 문자열로 통과 금지)
+# ⑥ detached HEAD → 브랜치명 자리에 **읽을 수 있는 라벨**이 들어간다
+# ⚠️ `[ -n "$out" ]` 만으로는 부족하다 — 라벨을 '' 로 바꿔도 「기대=main 실제= …」 로
+#    출력은 비지 않아서 **변이가 살아남는다**(룬드 실측, 맥에서 8/0 통과). 라벨 자체를 본다.
 git -C "$TMP/prod" checkout -q --detach 2>/dev/null
 out="$(bash "$GUARD" "$TMP/prod" main 2>&1)"; rc=$?
-[ -n "$out" ] && ok "detached → 조용히 통과하지 않는다" \
-    || bad "detached 가 무음으로 통과했다 — 빈 브랜치명이 기대와 같아 보였을 수 있다 (rc=$rc)"
+case "$out" in
+  *"(detached)"*) ok "detached → 브랜치 자리에 (detached) 라벨이 찍힌다" ;;
+  *) bad "detached 라벨이 없다 — 빈 브랜치명이 기대와 같아 보인다 (out=«$out» rc=$rc)" ;;
+esac
 
 # ⑦ 가드는 **차단하지 않는다** — 경고만 하고 rc=0 (셔틀 본작업을 막으면 안 된다)
 out="$(bash "$GUARD" "$TMP/dev" main 2>&1)"; rc=$?
