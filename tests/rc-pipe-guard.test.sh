@@ -47,7 +47,24 @@ blocks "wc 도 관찰 도구다"              'npm ci | wc -l && npm test'
 blocks "중간 파이프가 여럿이어도 끝이 기준" 'git commit -F m.txt a.sh | grep x | tail -2 && git push'
 
 echo
+echo "②-b 🔴 룬드 실측 미탐 2건 (리뷰 REQUEST_CHANGES) — 둘 다 «흔한 표기»라 사각이 크다"
+# ① `git -C` 는 우리 둘 다 cwd 함정 때문에 표준으로 쓰는 관용구다. 막으려는 사고가
+#    가장 자주 나타나는 표기로 오면 통과하고 있었다 — 옵션의 «인자»가 하위명령 자리에 남는다.
+blocks "git -C <경로> commit"        'git -C /home/bpx27/yaksu-shared-data commit -m x f.md | tail -2 && git push'
+blocks "git -c k=v commit"           'git -c core.hooksPath=/dev/null commit -q -m x f.sh | tail -2 && git push'
+blocks "git --git-dir=… push"        'git --git-dir=/x/.git push origin main | head -3 && echo done'
+# ② `<<<` 는 heredoc 이 아니다. heredoc 으로 오인하면 델리미터가 영영 안 와서
+#    **그 뒤 문장 전부가 사각**이 된다 — 무음이라 더 나쁘다.
+blocks "herestring 뒤 문장의 위반"    'grep x <<< "abc"
+git commit -F m.txt a.sh | tail -2 && git push'
+
+echo
 echo "③ 풀림 — 하나라도 빠지면 정상 관용구다 (여기가 오탐 잠금)"
+# 🔑 ②-b 의 짝. 「-C 를 읽는다」가 「-C 면 다 막는다」가 되지 않았는지 본다
+passes "git -C 인데 읽기 하위명령"    'git -C /x log --oneline | head -5'
+passes "git -c 인데 읽기 하위명령"    'git -c a=b status --short | wc -l && echo ok'
+passes "herestring 만 있고 위반 없음" 'grep x <<< "abc"
+git log --oneline | head -3'
 passes "rc 미소비: 그냥 보기만 한다"     'git log --oneline | head -5'
 # 🔴 위 줄만으론 **rc 소비 축을 못 가른다** — `git log` 가 부작용 명령이 아니라서
 #    소비 조건을 통째로 지워도 통과한다(변이 M2 실증). 부작용 명령으로 축을 분리한다.

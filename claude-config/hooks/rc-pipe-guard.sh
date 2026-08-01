@@ -43,7 +43,10 @@ def strip_heredocs(text):
     while i < len(lines):
         line = lines[i]
         out.append(line)
-        m = re.search(r"<<-?\s*([\"\x27]?)([A-Za-z_][A-Za-z0-9_]*)\1", line)
+        # ⚠️ `<<<` 는 herestring 이지 heredoc 이 아니다. 오인하면 델리미터가 영영 안 와서
+        #    **그 뒤 문장 전부가 사각**이 된다(룬드 실측, 그도 코어 ⑯-g 로 같은 축을 잠갔다).
+        #    ⇒ `<<` 앞뒤에 `<` 가 없어야 heredoc.
+        m = re.search(r"(?<!<)<<(?!<)-?\s*([\"\x27]?)([A-Za-z_][A-Za-z0-9_]*)\1", line)
         i += 1
         if m:
             delim = m.group(2)
@@ -101,12 +104,29 @@ def first_word(seg):
         return w
     return ""
 
+# git 의 **전역 옵션 중 값을 따로 받는 것**. 이걸 모르면 그 «값»이 하위명령 자리에 남는다.
+# 🔴 룬드 실측: `git -C /path commit … | tail && push` 가 rc=0 이었다 — `-C` 는 옵션이라 걸러지고
+#    `/path` 가 parts[1] 이 돼 GIT_EFFECT 불매치. 우리 둘 다 cwd 함정 때문에 `git -C` 를 표준으로
+#    쓰므로, **막으려는 사고가 가장 자주 나타나는 표기로 오면 통과**하고 있었다.
+GIT_VALUE_GLOBALS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace",
+                     "--exec-path", "--super-prefix", "--config-env"}
+
+def git_subcommand(seg):
+    """옵션(과 그 값)을 건너뛰고 **첫 비옵션 낱말**을 하위명령으로 본다."""
+    toks = seg.split()
+    i = 1
+    while i < len(toks):
+        t = toks[i]
+        if not t.startswith("-"):
+            return t
+        i += 2 if (t in GIT_VALUE_GLOBALS and "=" not in t) else 1
+    return ""
+
 def is_effect(seg):
     w = first_word(seg)
     base = w.rsplit("/", 1)[-1]
     if base == "git":
-        parts = [p for p in seg.split() if not p.startswith("-")]
-        return len(parts) > 1 and parts[1] in GIT_EFFECT
+        return git_subcommand(seg) in GIT_EFFECT
     return base in EFFECT
 
 def is_observe(seg):
