@@ -1,3 +1,8 @@
-🤝 파일 스키마 (frontmatter v2) — 공유 계약 (lint 는 «있는 값의 정합성»만 강제)	3
-🤝 WAL (current-tasks.md) — 양봇 공동 표준 (7/22 채택 · 변경 시 니노와 조율)	6
-🤝 축약·이관 규칙 (④에서 양봇이 같이 세움 — 8/5 니노 감사도 같은 기준)	6
+L	97a56386dc	CLAUDE.md: 🔴 **커밋 해시를 남에게 줬다** | **origin 조회** — `gh api repos/<o>/<r>/commits/<해
+L	d3b7793edb	memory/CLAUDE.md: 🤝 표시 = **양봇 공유 계약** — 니노 쪽 착지 파일이 달라도(예: project_bot_memory_standardiz
+L	71f672ea52	memory/CLAUDE.md: 코어(memory-schema)로 뺄 때 이 표시가 추출 목록이다. 이 파일을 줄여도 🤝 조항은 **내용을 줄이지 않는다.**
+L	1671ef09f2	memory/CLAUDE.md: **단위(08-02 룬드 확정, Ⅲ)**: 🤝 가 찍힌 **줄 전부**가 계약이다 — 절 제목이면 그 절의 불릿들이,
+L	7892478bad	memory/CLAUDE.md: 설명·인용 줄의 🤝 도 세어진다(오탐은 대조 1회로 닫는다 — 소실 미탐이 더 비싸다). 감시: 코어 #120 계열.
+S	파일 스키마 (frontmatter v2) — 공유 계약 (lint 는 «있는 값의 정합성»만 강제)	3
+S	WAL (current-tasks.md) — 양봇 공동 표준 (7/22 채택 · 변경 시 니노와 조율)	6
+S	축약·이관 규칙 (④에서 양봇이 같이 세움 — 8/5 니노 감사도 같은 기준)	6

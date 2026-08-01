@@ -123,5 +123,72 @@ bare="$(LC_ALL=C grep -c 'mktemp)' "$CHECK" 2>/dev/null || true)"
                        || bad "인자 없는 mktemp 가 있다 — 맥에서 ⑧이 분모 0이 된다" "0건" "${bare}건"
 
 echo
+echo "⑨ 🔑 계약의 단위 = 🤝 가 찍힌 «줄» 전부 (2026-08-02 룬드 확정 · Ⅲ)"
+# 🔴 왜 줄 단위인가 — 절 단위(v1)로 두니 **하루에 세 번 밖으로 샜다**:
+#   ⓐ 룬드가 「origin 조회」 조항을 **루트 CLAUDE.md 표 한 칸**에 세움
+#   ⓑ 나는 같은 조항을 내 CLAUDE.md **하위 불릿**에 세움
+#   ⓒ 🤝 단위를 정의한 **그 문장 자체**가 절 밖 blockquote 에 있었다
+#   ⇒ 합의가 사는 자리와 계약 표시가 갈리면 **표시 쪽이 진다.**
+mk_line_src() {  # $1=파일 · $2.. = 절 밖 🤝 줄들
+    local f="$1"; shift
+    printf '# 문서\n\n' > "$f"
+    for l in "$@"; do printf '%s\n' "$l" >> "$f"; done
+    printf '\n## 🤝 진짜 절 — 공유 계약\n\n- 조항 A\n- 조항 B\n' >> "$f"
+}
+
+# 🔑 계측기 — 절 밖 줄이 «실제로 세어지나». 아니면 아래가 전부 항진명제다
+mk_line_src "$W/L1.md" '> 🤝 표 밖 조항 하나'
+run "$W/L1.md" "$W/L1.base" >/dev/null 2>&1
+SHARED_CONTRACT_SRC="$W/L1.md" SHARED_CONTRACT_BASELINE="$W/L1.base" bash "$CHECK" --write-baseline >/dev/null 2>&1
+nL="$(LC_ALL=C grep -ac '^L	' "$W/L1.base")"
+[ "$nL" = "1" ] && ok "계측기: 절 밖 🤝 줄이 조항으로 잡힌다" || bad "절 밖 줄이 안 잡힌다" 1 "$nL"
+
+# 표 한 칸의 🤝 (룬드가 실제로 세운 형태)
+mk_line_src "$W/L2.md" '| 🔴 해시를 줬다 | origin 조회 200 (🤝 양봇 규칙) |'
+SHARED_CONTRACT_SRC="$W/L2.md" SHARED_CONTRACT_BASELINE="$W/L2.base" bash "$CHECK" --write-baseline >/dev/null 2>&1
+[ "$(LC_ALL=C grep -ac '^L	' "$W/L2.base")" = "1" ] && ok "표 한 칸의 🤝 도 조항이다" || bad "표 줄을 놓친다"
+
+# 🔑 자리를 옮겨도 조용해야 한다 — 절 밖 줄은 원래 옮겨다닌다(합의)
+mk_line_src "$W/L3.md" '- 앞줄' '> 🤝 표 밖 조항 하나'
+out="$(run "$W/L3.md" "$W/L1.base")"; rc=$?
+[ "$rc" -eq 0 ] && ok "같은 내용이 자리를 옮기면 조용하다 (해시 단위)" || bad "자리 이동에 울린다" 0 "$rc"
+
+# 🔴 대조군 — 위 초록이 «아무것도 안 본다»가 아닌지. 내용이 바뀌면 반드시 울려야 한다
+mk_line_src "$W/L4.md" '> 🤝 표 밖 조항 하나를 고쳤다'
+out="$(run "$W/L4.md" "$W/L1.base")"; rc=$?
+[ "$rc" -eq 1 ] && ok "대조군: 내용이 바뀌면 울린다" || bad "내용 변경이 조용하다" 1 "$rc"
+case "$out" in *"줄 조항이 사라졌다"*) ok "사라진 줄을 짚는다" ;; *) bad "사라진 줄 미지목" "줄 조항이 사라졌다" "«$out»" ;; esac
+case "$out" in *"줄 조항이 생겼다"*)  ok "생긴 줄도 짚는다 (늘어도 같은 무게)" ;; *) bad "신설 줄 미지목" "줄 조항이 생겼다" "«$out»" ;; esac
+
+# 🔑 절 «안»의 불릿은 절이 이미 센다 — 줄로 또 세면 이중계산이다
+mk_line_src "$W/L5.md" '> 🤝 표 밖 조항 하나'
+printf -- '- 🤝 절 안 불릿\n' >> "$W/L5.md"
+SHARED_CONTRACT_SRC="$W/L5.md" SHARED_CONTRACT_BASELINE="$W/L5.base" bash "$CHECK" --write-baseline >/dev/null 2>&1
+[ "$(LC_ALL=C grep -ac '^L	' "$W/L5.base")" = "1" ] && ok "절 안 불릿은 줄로 또 세지 않는다" \
+    || bad "이중계산" "L 1개" "$(LC_ALL=C grep -ac '^L	' "$W/L5.base")개"
+
+# 🔴 파일이 둘이다 — 하나만 보면 다른 하나의 조항이 통째로 분모 밖이 된다 (룬드 rc=2 실측)
+mk_line_src "$W/F1.md" '> 🤝 파일1 조항'
+mk_line_src "$W/F2.md" '> 🤝 파일2 조항'
+SHARED_CONTRACT_SRC="a=$W/F1.md:b=$W/F2.md" SHARED_CONTRACT_BASELINE="$W/F.base" bash "$CHECK" --write-baseline >/dev/null 2>&1
+[ "$(LC_ALL=C grep -ac '^L	' "$W/F.base")" = "2" ] && ok "두 파일의 줄 조항을 다 센다" \
+    || bad "파일 하나만 본다" "L 2개" "$(LC_ALL=C grep -ac '^L	' "$W/F.base")개"
+
+# 🔴 **같은 조항이 봇마다 다른 «장식»으로 산다** — 룬드는 표 한 칸, 나는 하위 불릿에 세웠다.
+#   장식이 다르다고 다른 조항이면 양봇 대조가 매번 「소실+신설」이라 도구가 못 쓴다.
+#   ⚠️ 이 픽스처가 없을 때 「인용부호·리스트마커 제거를 빼는」 변이(N7)가 **안 죽었다** —
+#     정규화가 하중을 받는 자리를 어느 시험도 안 밟고 있었다.
+mk_line_src "$W/D1.md" '> 🤝 해시를 남에게 줄 땐 origin 조회까지'
+mk_line_src "$W/D2.md" '  - 🤝 해시를 남에게 줄 땐 origin 조회까지'
+SHARED_CONTRACT_SRC="$W/D1.md" SHARED_CONTRACT_BASELINE="$W/D.base" bash "$CHECK" --write-baseline >/dev/null 2>&1
+out="$(run "$W/D2.md" "$W/D.base")"; rc=$?
+[ "$rc" -eq 0 ] && ok "장식(인용/불릿/표)이 달라도 같은 조항이다" || bad "장식 차이를 조항 변경으로 읽는다" 0 "$rc"
+
+# 🔴 옛 기준선(v1: 2열)을 «변화 있음»으로 읽으면 시끄럽게 거짓이다 — 판정 불가여야 한다
+printf '🤝 어떤 절\t3\n' > "$W/v1.base"
+out="$(run "$W/L1.md" "$W/v1.base")"; rc=$?
+[ "$rc" -eq 2 ] && ok "v1 기준선은 rc=2 (비교 자체가 성립 안 함)" || bad "v1 을 변화로 읽는다" 2 "$rc"
+
+echo
 echo "  통과 $pass · 실패 $fail"
 [ "$fail" -eq 0 ] || exit 1
