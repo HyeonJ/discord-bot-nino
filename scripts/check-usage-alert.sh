@@ -61,7 +61,7 @@ emit_log() {
     # 🔑 임시파일 뒤처리도 여기에 둔다 — **조기 종료가 뒤처리를 건너뛰는** 자리를 없앤다.
     #    ⚠️ `trap 'rm …' EXIT` 를 따로 걸면 안 된다: bash 는 EXIT trap 을 **덮어쓴다**(실측).
     #    위의 emit_log 가 조용히 사라진다. 뒤처리가 여럿이면 **한 trap 안에** 모은다.
-    rm -f ${HDR:+"$HDR"} ${PARSE_ERR:+"$PARSE_ERR"}
+    rm -f ${HDR:+"$HDR"} ${PARSE_ERR:+"$PARSE_ERR"} ${TMP_PY:+"$TMP_PY"}
     return 0
 }
 trap emit_log EXIT
@@ -171,7 +171,14 @@ fi
 
 # ── 3. 현재 속도로 리셋 전 한도 도달하는지 판단 ──────────────────────────────
 PARSE_ERR="$(mktemp)"
-ALERT_MSG="$(RESPONSE="$RESPONSE" python3 2>"$PARSE_ERR" << 'PYEOF'
+# 🔴 heredoc 을 `$(…)` 안에 두지 않는다 — 맥 bash 3.2 는 치환 안 heredoc 본문을 **재스캔**해서
+#   인용 heredoc 이어도 **짝 안 맞는 백틱**이 생기는 순간 syntax error 로 죽는다.
+#   ⚠️ 죽는 조건은 «백틱 유무»가 아니라 «짝»이다 — 짝수면 3.2 도 통과하고 실행도 안 된다(08-02 대조군).
+#   bash 5 는 둘 다 통과하므로 `bash -n` 으로는 이 기계에서 영영 안 보인다 ⇒ **형태로만** 미리 막힌다.
+#   이 본문은 백틱 2개(짝수, 아래 주석 안)라 «우연히» 통과 중이었다 — 다음 편집 한 번이 지뢰다.
+#   같은 결함의 세 번째 사본이었다(코어 #133 · 룬드 레포 4c5a173 · 여기). inbox #154
+TMP_PY="$(mktemp "${TMPDIR:-/tmp}/check-usage-parse.XXXXXX")"
+cat > "$TMP_PY" <<'PYEOF'
 import json, os, sys
 from datetime import datetime, timezone
 
@@ -256,7 +263,7 @@ for key, (label, window_hours) in windows.items():
 if alerts:
     print("⚠️ **니노 사용량 경고**\n" + "\n".join(alerts))
 PYEOF
-)"
+ALERT_MSG="$(RESPONSE="$RESPONSE" python3 "$TMP_PY" 2>"$PARSE_ERR")"
 PARSE_RC=$?
 # 이유는 파이썬이 이름으로 준다. 아는 이름이 아니면 unknown — 트레이스백을 이유로 착각하지 않는다.
 PARSE_WHY="$(tr -d '\r\n' < "$PARSE_ERR" 2>/dev/null)"
