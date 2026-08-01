@@ -385,8 +385,8 @@ GUARD_ENV="" gr --dry-run
   || bad "dry-run 백오프" "도장 없음" "찍힘 — 진단이 다음 실경보를 지연시킨다"
 # 🔑 **기록이 사실이어야 한다.** 안 보낸 것을 sent 로 적으면 로그가 거짓이 되고,
 #   나중에 "그때 알렸는데 왜 못 봤나"로 사람이 엉뚱한 데를 판다.
-grep -q 'alert=dry_run' "$G_LOG" 2>/dev/null && ok "  🔑 로그가 사실대로 alert=dry_run 이다" \
-  || bad "dry-run 로그" "alert=dry_run" "$(grep -o 'alert=[a-z_+]*' "$G_LOG" 2>/dev/null | tail -1)"
+grep -q 'alert=sent_dry_run' "$G_LOG" 2>/dev/null && ok "  🔑 로그가 사실대로 alert=sent_dry_run — 어느 경보였는지까지 남는다" \
+  || bad "dry-run 로그" "alert=sent_dry_run" "$(grep -o 'alert=[a-z_+]*' "$G_LOG" 2>/dev/null | tail -1)"
 
 # 🔴 환경 상속은 **거절**한다(코어 계약 ④). 무시하면 dry-run 을 기대한 쪽이 발송당하고,
 #   따르면 발송을 기대한 쪽이 조용해진다 — 어느 쪽으로 접어도 조용히 틀린다.
