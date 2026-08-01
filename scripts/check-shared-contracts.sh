@@ -36,12 +36,16 @@ WRITE=0
 #   (룬드 실측: 실행 1회당 TMPDIR 에 tmp.* 1개 잔존). trap 은 처음에 한 번만 건다.
 #   ⚠️ SRC 를 env 로 받은 경우는 **내 파일이 아니므로** 지우지 않는다 (그래서 변수를 따로 둔다).
 #   ⚠️ 배열을 안 쓴다 — 룬드 맥(bash 3.2)은 `a+=()` 가 없고 빈 배열 확장이 `set -u` 에서 죽는다.
+#   🔴 **`mktemp` 를 인자 없이 부르지 말 것.** BSD(맥) mktemp 는 **env `TMPDIR` 를 무시**하고
+#      `/var/folders/…` 에 만든다(룬드 실측). 그러면 TMPDIR 를 갈라 쓰는 누수 시험이 맥에서
+#      **분모 0** 이 되어 — 구판 checker 로 돌려도 초록이었다. 「작성자 기계에서만 참인 시험」이다.
+#      ⇒ 템플릿형으로 경로를 **명시**한다. 이식성과 시험 가능성이 같이 닫힌다.
 TMP_SRC=""; TMP_NOW=""
 trap 'rm -f "$TMP_SRC" "$TMP_NOW"' EXIT
 
 # 원본을 안 주면 상대 봇 파일을 받아온다. 받기 실패는 **판정 불가**지 이상 없음이 아니다.
 if [ -z "$SRC" ]; then
-    SRC="$(mktemp)"; TMP_SRC="$SRC"
+    SRC="$(mktemp "${TMPDIR:-/tmp}/csc-src.XXXXXX")"; TMP_SRC="$SRC"
     if ! gh api repos/dazebug/assistant/contents/memory/CLAUDE.md \
          --jq '.content' 2>/dev/null | base64 -d > "$SRC" || [ ! -s "$SRC" ]; then
         echo "🔴 판정 불가 — 상대 계약 파일을 받지 못했다 (gh 인증·네트워크 확인)" >&2
@@ -99,7 +103,7 @@ fi
 # ⚠️ 현재값을 **파일로** 넘긴다. `python3 - <<'PY'` 는 **스크립트를 stdin 으로 읽으므로**
 #   앞에 파이프를 붙여도 그 값은 `sys.stdin` 에 안 남는다(실측: 전 절이 「사라졌다」로 나왔다 —
 #   즉 «판별식이 죽은 채 시끄러운» 형태라 초록/무음 어느 쪽으로도 안 보였다).
-NOWF="$(mktemp)"; TMP_NOW="$NOWF"; printf '%s\n' "$COUNTS" > "$NOWF"
+NOWF="$(mktemp "${TMPDIR:-/tmp}/csc-now.XXXXXX")"; TMP_NOW="$NOWF"; printf '%s\n' "$COUNTS" > "$NOWF"
 DIFF="$(python3 - "$BASE" "$NOWF" <<'PY'
 import sys
 def load(p):

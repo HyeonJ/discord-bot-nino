@@ -114,6 +114,13 @@ after="$(count_tmp)"
 : > "$T/probe-$$"; [ "$(count_tmp)" != "$before" ] && ok "대조군: 이 자리에 파일이 생기면 세어진다" \
                                                    || bad "대조군 실패 — 세는 자리가 틀렸다" "증가" "그대로"
 rm -f "$T/probe-$$"
+# 🔴 **위 대조군도 맥에선 통과하면서 시험은 죽는다** — BSD mktemp 가 env TMPDIR 를 무시해서
+#   주입이 checker 에 안 닿기 때문이다(룬드 실측: 구판으로 돌려도 0→0 초록 = **분모 0**).
+#   대조군은 「내가 세는 자리」만 보고 「checker 가 쓰는 자리」는 안 봤다 — 두 자리가 갈릴 수 있다.
+#   ⇒ checker 가 인자 없는 `mktemp` 로 돌아가면 이 시험이 조용히 무력해지므로 형태를 잠근다.
+bare="$(LC_ALL=C grep -c 'mktemp)' "$CHECK" 2>/dev/null || true)"
+[ "${bare:-0}" -eq 0 ] && ok "checker 가 mktemp 를 템플릿형으로 부른다 (BSD 도 TMPDIR 존중)" \
+                       || bad "인자 없는 mktemp 가 있다 — 맥에서 ⑧이 분모 0이 된다" "0건" "${bare}건"
 
 echo
 echo "  통과 $pass · 실패 $fail"
