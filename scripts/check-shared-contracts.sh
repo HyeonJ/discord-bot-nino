@@ -51,7 +51,8 @@ set -uo pipefail
 SRC="${SHARED_CONTRACT_SRC:-}"
 BASE="${SHARED_CONTRACT_BASELINE:-$HOME/discord-bot-nino/config/shared-contracts.baseline}"
 WRITE=0
-[ "${1:-}" = "--write-baseline" ] && WRITE=1
+WRITE_TOKEN=""
+[ "${1:-}" = "--write-baseline" ] && { WRITE=1; WRITE_TOKEN="${2:-}"; }
 
 # 🔑 임시파일은 **한 곳에서** 치운다 — 원래는 SRC 를 받아올 때만 trap 을 걸어서
 #   ⓐ SRC 를 env 로 주면 trap 이 아예 없고 ⓑ 나중에 만드는 NOWF 는 어느 경로에서도 안 지워졌다
@@ -202,12 +203,44 @@ if [ -z "$COUNTS" ]; then
     exit 2
 fi
 
+# 🔑 지금 상태의 «지문». 대조한 내용과 «쓰는 내용»이 같은지 형태로 잠근다.
+NOW_TOKEN="$(printf '%s\n' "$COUNTS" | LC_ALL=C shasum 2>/dev/null | cut -c1-12)"
+[ -n "$NOW_TOKEN" ] || NOW_TOKEN="$(printf '%s\n' "$COUNTS" | LC_ALL=C sha1sum | cut -c1-12)"
+
+# 🔴 **기준선이 tracked 인데 커밋 안 됐으면 브랜치 전환에 «대조 작업이 증발»한다** (08-02 자기 실측:
+#   07:00 에 4행을 읽고 대조한 뒤 갱신했는데 커밋을 안 해서, `git checkout` 이 되돌렸고 23분 뒤
+#   같은 4행이 또 울렸다). 도구는 초록/빨강만 말하지 «내 대조가 저장됐는지»는 말하지 않는다.
+#   ⇒ 보이게 한다(소리내진 않는다 — rc 불변). 「했다 vs 닿았다」 사각의 로컬판.
+warn_uncommitted() {
+    git -C "$(dirname "$BASE")" rev-parse --git-dir >/dev/null 2>&1 || return 0
+    git -C "$(dirname "$BASE")" ls-files --error-unmatch "$BASE" >/dev/null 2>&1 || return 0
+    git -C "$(dirname "$BASE")" diff --quiet -- "$BASE" 2>/dev/null && return 0
+    # ⚠️ `${BASE}` — 중괄호 필수. bash 3.2 는 `$BASE»` 에서 »(0xC2…)의 첫 바이트를 **식별자로 먹어**
+    #   `BASE?: unbound variable` 로 죽는다(맥 실측 08-02). WSL/bash 5.x 는 무증상이라 여기서도 안 보인다.
+    echo "  ➖ 기준선이 **커밋되지 않았다** — 브랜치를 옮기면 이 대조가 사라진다: git add/commit «${BASE}»"
+}
+
 if [ "$WRITE" -eq 1 ]; then
+    # 🔴 **CAS** — 기준선이 이미 있으면 «내가 읽은 시점의 지문»을 요구한다.
+    #   08-02 실측: 상대 push 22:00:12Z · 내 --write-baseline 22:00:33Z — **21초 차로 안 읽은 변경이
+    #   기준선에 접혔다.** 「읽고 갱신하라」가 문안으로만 있고 형태가 없어서 그렇다(Ⅱ 자리).
+    #   ⚠️ 최초 생성(기준선 부재)은 토큰 없이 통과한다 — 부트스트랩까지 막으면 도구를 못 쓴다.
+    if [ -s "$BASE" ] && [ "$WRITE_TOKEN" != "$NOW_TOKEN" ]; then
+        echo "🔴 갱신 거부 — 대조한 시점과 지금이 다를 수 있다." >&2
+        if [ -z "$WRITE_TOKEN" ]; then
+            echo "   기준선이 이미 있으면 «읽은 시점의 지문»이 필요하다." >&2
+        else
+            echo "   준 지문: $WRITE_TOKEN / 지금 지문: $NOW_TOKEN — 그 사이에 원본이 바뀌었다." >&2
+        fi
+        echo "   ⇒ 다시 대조하고: $0 --write-baseline $NOW_TOKEN" >&2
+        exit 2
+    fi
     mkdir -p "$(dirname "$BASE")"
     printf '%s\n' "$COUNTS" > "$BASE"
     _ns=$(printf '%s\n' "$COUNTS" | grep -c '^S	')
     _nl=$(printf '%s\n' "$COUNTS" | grep -c '^L	')
     echo "✅ 기준선 기록: $BASE (절 ${_ns}개 · 줄 조항 ${_nl}개)"
+    warn_uncommitted
     exit 0
 fi
 
@@ -273,7 +306,7 @@ drc=$?
 if [ "$drc" -eq 3 ]; then
     echo "🔴 판정 불가 — 기준선이 옛 형식(v1: 제목+수)이다: $BASE" >&2
     echo "   v2 는 «종류\t키\t값» 3열이다. 내용을 읽고 대조한 뒤 다시 만들 것:" >&2
-    echo "     $0 --write-baseline" >&2
+    echo "     $0 --write-baseline $NOW_TOKEN" >&2
     exit 2
 fi
 
@@ -285,7 +318,7 @@ cat <<EOF
 
   🔑 «늘어도» 소리낸다 — 재편 커밋은 「정리」로 읽혀 리뷰가 안 붙고, 조항은 거기서 사라진다.
   ⇒ 할 일: 바뀐 절을 **읽고 내 착지 파일과 대조**한 뒤, 대조가 끝나면 기준선을 갱신한다:
-       $0 --write-baseline
+       $0 --write-baseline $NOW_TOKEN
      (읽지 않고 갱신하면 이 검사는 «변화를 기록하는 도구»가 되고 아무것도 안 막는다)
 EOF
 exit 1

@@ -46,17 +46,17 @@ echo "① 🔑 계측기 먼저 — 기준선을 만들 수 있고, 그 직후�
 mk_src "$W/src.md" 3 2
 out="$(SHARED_CONTRACT_SRC="$W/src.md" SHARED_CONTRACT_BASELINE="$W/base.txt" bash "$CHECK" --write-baseline 2>&1)"; rc=$?
 [ "$rc" -eq 0 ] && [ -s "$W/base.txt" ] && ok "기준선을 쓴다 (rc=0, 파일 비어있지 않음)" \
-  || bad "기준선 생성 실패" "rc=0 + 내용" "rc=$rc «$out»"
+  || bad "기준선 생성 실패" "rc=0 + 내용" "rc=$rc «${out}»"
 out="$(run "$W/src.md" "$W/base.txt")"; rc=$?
-[ "$rc" -eq 0 ] && ok "  → 바로 다시 돌리면 무음 (rc=0)" || bad "직후 재실행이 시끄럽다" 0 "$rc«$out»"
+[ "$rc" -eq 0 ] && ok "  → 바로 다시 돌리면 무음 (rc=0)" || bad "직후 재실행이 시끄럽다" 0 "$rc«${out}»"
 
 echo
 echo "② 🔴 조항이 «줄면» 잡는다 — 재편이 조용히 빼는 자리"
 mk_src "$W/less.md" 2 2
 out="$(run "$W/less.md" "$W/base.txt")"; rc=$?
 [ "$rc" -eq 1 ] && ok "줄어들면 rc=1" || bad "줄었는데 조용하다" 1 "$rc"
-case "$out" in *"절1"*) ok "  → 어느 절인지 말한다" ;; *) bad "절을 안 짚는다" "절1 언급" "«$out»" ;; esac
-case "$out" in *3*2*|*"3 → 2"*|*"3→2"*) ok "  → 몇 개가 몇 개로 됐는지 말한다" ;; *) bad "수를 안 말한다" "3→2" "«$out»" ;; esac
+case "$out" in *"절1"*) ok "  → 어느 절인지 말한다" ;; *) bad "절을 안 짚는다" "절1 언급" "«${out}»" ;; esac
+case "$out" in *3*2*|*"3 → 2"*|*"3→2"*) ok "  → 몇 개가 몇 개로 됐는지 말한다" ;; *) bad "수를 안 말한다" "3→2" "«${out}»" ;; esac
 
 echo
 echo "③ 🔴 조항이 «늘어도» 같은 무게로 잡는다 (한쪽만 잡으면 절반짜리다)"
@@ -69,7 +69,7 @@ echo "④ 절이 통째로 «사라지거나» «생기는» 것도 변화다"
 mk_src "$W/drop.md" 3
 out="$(run "$W/drop.md" "$W/base.txt")"; rc=$?
 [ "$rc" -eq 1 ] && ok "절이 사라지면 rc=1" || bad "절 소멸이 조용하다" 1 "$rc"
-case "$out" in *"절2"*) ok "  → 사라진 절 이름을 말한다" ;; *) bad "사라진 절을 안 짚는다" "절2" "«$out»" ;; esac
+case "$out" in *"절2"*) ok "  → 사라진 절 이름을 말한다" ;; *) bad "사라진 절을 안 짚는다" "절2" "«${out}»" ;; esac
 mk_src "$W/add.md" 3 2 1
 out="$(run "$W/add.md" "$W/base.txt")"; rc=$?
 [ "$rc" -eq 1 ] && ok "절이 생겨도 rc=1" || bad "절 신설이 조용하다" 1 "$rc"
@@ -78,7 +78,7 @@ echo
 echo "⑤ 🔑 🤝 없는 절은 세지 않는다 — 분모를 넓히면 매번 시끄러워 가드가 죽는다"
 { cat "$W/src.md"; printf '## 그냥 절 (🤝 없음)\n\n- 잡음1\n- 잡음2\n'; } > "$W/noise.md"
 out="$(run "$W/noise.md" "$W/base.txt")"; rc=$?
-[ "$rc" -eq 0 ] && ok "🤝 아닌 절이 늘어도 무음" || bad "🤝 아닌 절에 반응한다" 0 "$rc «$out»"
+[ "$rc" -eq 0 ] && ok "🤝 아닌 절이 늘어도 무음" || bad "🤝 아닌 절에 반응한다" 0 "$rc «${out}»"
 
 echo
 echo "⑥ 🔴 판정 불가를 «이상 없음»으로 접지 않는다 (0건의 두 얼굴)"
@@ -93,8 +93,8 @@ out="$(run "$W/empty.md" "$W/base.txt")"; rc=$?
 echo
 echo "⑦ 출력이 «무엇을 하라»를 말하나 (막기만 하면 사람이 기준선만 갱신한다)"
 out="$(run "$W/less.md" "$W/base.txt")"
-case "$out" in *대조*|*읽*) ok "대조하라고 말한다" ;; *) bad "처방이 없다" "대조 언급" "«$out»" ;; esac
-case "$out" in *--write-baseline*) ok "기준선 갱신 방법도 알려준다 (대조 «후»)" ;; *) bad "갱신법 미안내" "--write-baseline" "«$out»" ;; esac
+case "$out" in *대조*|*읽*) ok "대조하라고 말한다" ;; *) bad "처방이 없다" "대조 언급" "«${out}»" ;; esac
+case "$out" in *--write-baseline*) ok "기준선 갱신 방법도 알려준다 (대조 «후»)" ;; *) bad "갱신법 미안내" "--write-baseline" "«${out}»" ;; esac
 
 echo
 echo "⑧ 🔴 임시파일을 남기지 않는다 (룬드 리뷰 실측 — 실행 1회당 tmp.* 1개 잔존)"
@@ -157,8 +157,8 @@ out="$(run "$W/L3.md" "$W/L1.base")"; rc=$?
 mk_line_src "$W/L4.md" '> 🤝 표 밖 조항 하나를 고쳤다'
 out="$(run "$W/L4.md" "$W/L1.base")"; rc=$?
 [ "$rc" -eq 1 ] && ok "대조군: 내용이 바뀌면 울린다" || bad "내용 변경이 조용하다" 1 "$rc"
-case "$out" in *"줄 조항이 사라졌다"*) ok "사라진 줄을 짚는다" ;; *) bad "사라진 줄 미지목" "줄 조항이 사라졌다" "«$out»" ;; esac
-case "$out" in *"줄 조항이 생겼다"*)  ok "생긴 줄도 짚는다 (늘어도 같은 무게)" ;; *) bad "신설 줄 미지목" "줄 조항이 생겼다" "«$out»" ;; esac
+case "$out" in *"줄 조항이 사라졌다"*) ok "사라진 줄을 짚는다" ;; *) bad "사라진 줄 미지목" "줄 조항이 사라졌다" "«${out}»" ;; esac
+case "$out" in *"줄 조항이 생겼다"*)  ok "생긴 줄도 짚는다 (늘어도 같은 무게)" ;; *) bad "신설 줄 미지목" "줄 조항이 생겼다" "«${out}»" ;; esac
 
 # 🔑 절 «안»의 불릿도 조항이다(08-02 룬드 판정 — 수 보존 교체 미탐 때문에 뒤집혔다).
 #   단 «한 번만» 잡혀야 한다 — S 행은 개수, L 행은 어느 조항인지. 같은 불릿이 L 로 두 번 나오면 이중계산이다
@@ -206,13 +206,13 @@ echo "⑩ ➖ 래핑 경고 — «보이게 하되 소리내지 않는다»"
 #   둘 다 🤝 없는 다음 줄이라 **계약 밖**이었다. 내가 대조하고 등재한 조항이 이미 반쪽이었다.
 printf '> 🤝 조항 앞부분이고\n>    이어지는 뒷부분이다\n' > "$W/wrap.md"
 out="$(SHARED_CONTRACT_SRC="$W/wrap.md" SHARED_CONTRACT_BASELINE="$W/wrap.base" bash "$CHECK" --write-baseline 2>&1)"; rc=$?
-case "$out" in *"래핑"*) ok "래핑 의심 줄을 ➖ 로 알린다" ;; *) bad "래핑을 못 본다" "래핑 언급" "«$out»" ;; esac
+case "$out" in *"래핑"*) ok "래핑 의심 줄을 ➖ 로 알린다" ;; *) bad "래핑을 못 본다" "래핑 언급" "«${out}»" ;; esac
 [ "$rc" -eq 0 ] && ok "경고는 rc 를 안 바꾼다 (조항이 아니다)" || bad "경고가 rc 를 바꾼다" 0 "$rc"
 [ "$(LC_ALL=C grep -ac '^W' "$W/wrap.base")" = "0" ] && ok "경고는 기준선에 안 들어간다" || bad "경고가 기준선에 샌다"
 # 🔴 대조군 — 규약대로 «한 줄»로 적으면 조용해야 한다. 아니면 상시 경고라 곧 무시된다
 printf '> 🤝 조항이 한 줄에 다 있다.\n\n> 다른 문단\n' > "$W/nowrap.md"
 out="$(SHARED_CONTRACT_SRC="$W/nowrap.md" SHARED_CONTRACT_BASELINE="$W/nowrap.base" bash "$CHECK" --write-baseline 2>&1)"
-case "$out" in *"래핑"*) bad "대조군 실패 — 한 줄짜리에도 경고한다" "무음" "«$out»" ;; *) ok "대조군: 한 줄로 적으면 조용하다" ;; esac
+case "$out" in *"래핑"*) bad "대조군 실패 — 한 줄짜리에도 경고한다" "무음" "«${out}»" ;; *) ok "대조군: 한 줄로 적으면 조용하다" ;; esac
 
 # 🔴 옛 기준선(v1: 2열)을 «변화 있음»으로 읽으면 시끄럽게 거짓이다 — 판정 불가여야 한다
 printf '🤝 어떤 절\t3\n' > "$W/v1.base"
@@ -226,27 +226,27 @@ echo "⑪ 🔴 🤝 절 «안» 불릿도 조항이다 — 수 보존 교체 미
 #   ⇒ 룬드 판정(08-02): 다듬을 때마다 울리는 건 소음이 아니라 «상대가 봐야 하는 사건»이다.
 printf '## 🤝 절A — 공유 계약\n\n- 조항 하나\n- 조항 둘\n' > "$W/b1.md"
 out="$(SHARED_CONTRACT_SRC="$W/b1.md" SHARED_CONTRACT_BASELINE="$W/b1.base" bash "$CHECK" --write-baseline 2>&1)"; rc=$?
-[ "$rc" -eq 0 ] && ok "절 안 불릿으로 기준선을 쓴다" || bad "기준선 실패" 0 "$rc«$out»"
+[ "$rc" -eq 0 ] && ok "절 안 불릿으로 기준선을 쓴다" || bad "기준선 실패" 0 "$rc«${out}»"
 
 # 🔑 핵심 회귀: 개수는 그대로(2 → 2), 내용만 바뀐다
 printf '## 🤝 절A — 공유 계약\n\n- 조항 하나\n- 조항 둘을 «다시 썼다»\n' > "$W/b2.md"
 out="$(run "$W/b2.md" "$W/b1.base")"; rc=$?
 [ "$rc" -eq 1 ] && ok "수 보존 교체가 울린다 (2→2 인데 내용이 다르다)" \
-  || bad "c5a97ff 미탐 재현 — 내용이 바뀌었는데 조용하다" 1 "$rc«$out»"
+  || bad "c5a97ff 미탐 재현 — 내용이 바뀌었는데 조용하다" 1 "$rc«${out}»"
 
 # 🔴 대조군 — 안 바꾸면 조용해야 한다. 아니면 매번 울려서 곧 무시된다
 out="$(run "$W/b1.md" "$W/b1.base")"; rc=$?
-[ "$rc" -eq 0 ] && ok "  대조군: 그대로면 조용하다" || bad "안 바꿨는데 울린다" 0 "$rc«$out»"
+[ "$rc" -eq 0 ] && ok "  대조군: 그대로면 조용하다" || bad "안 바꿨는데 울린다" 0 "$rc«${out}»"
 
 # 장식만 다른 같은 조항은 같다 — 줄 조항(⑨)과 같은 정규화가 절 안에도 걸려야 한다
 printf '## 🤝 절A — 공유 계약\n\n*  조항 하나\n-   조항 둘\n' > "$W/b3.md"
 out="$(run "$W/b3.md" "$W/b1.base")"; rc=$?
-[ "$rc" -eq 0 ] && ok "  불릿 기호·공백 차이는 같은 조항 (정규화)" || bad "장식 차이를 변경으로 읽는다" 0 "$rc«$out»"
+[ "$rc" -eq 0 ] && ok "  불릿 기호·공백 차이는 같은 조항 (정규화)" || bad "장식 차이를 변경으로 읽는다" 0 "$rc«${out}»"
 
 # 개수가 «줄어드는» 자리는 여전히 잡힌다 — 새 축이 옛 축을 먹으면 안 된다
 printf '## 🤝 절A — 공유 계약\n\n- 조항 하나\n' > "$W/b4.md"
 out="$(run "$W/b4.md" "$W/b1.base")"; rc=$?
-[ "$rc" -eq 1 ] && ok "  불릿이 사라지는 것도 여전히 잡는다" || bad "소실을 놓친다" 1 "$rc«$out»"
+[ "$rc" -eq 1 ] && ok "  불릿이 사라지는 것도 여전히 잡는다" || bad "소실을 놓친다" 1 "$rc«${out}»"
 
 echo
 echo "⑫ 🔴 맥 bash 3.2 에서 «도구 자체»가 도나 (룬드 실측 — main 이 문법에러로 죽었다)"
@@ -256,13 +256,72 @@ echo "⑫ 🔴 맥 bash 3.2 에서 «도구 자체»가 도나 (룬드 실측 �
 # 🔑 형태를 잠근다 — 문법검사는 3.2 가 있어야 도는데 시험 기계엔 없을 수 있다.
 #   ⇒ ⓐ 이 기계의 bash -n 은 항상 돌리고 ⓑ 3.2 가 죽는 «형태»는 문자열로 막는다.
 bash -n "$CHECK" 2>/dev/null && ok "bash -n 통과 (이 기계)" || bad "문법 에러" "rc=0" "rc=$?"
-nHD="$(LC_ALL=C grep -c '\$(.*<<' "$CHECK" || true)"
+# 🔴 **맥 실측 두 번째 형태(08-02)**: `$VAR»` 는 bash 3.2 가 »(0xC2…) 첫 바이트를 식별자로 먹어
+#   `VAR?: unbound variable` 로 죽는다. WSL 은 무증상 — ⑭가 맥에서만 떨어져서 알았다.
+#   ⇒ 중괄호로 경계를 명시하는 형태를 잠근다(우리 문서가 « » 를 상시로 쓰므로 상시 위험).
+# 🔑 **주석은 뺀다 — 안 그러면 «경고문이 자기 판별식을 울린다».** 오늘 두 번 났다:
+#   이 판별식을 설명하는 주석에 그 형태를 쓰면 그대로 걸린다. 형태를 «말하는 줄»과
+#   «실행하는 줄»은 다른 것이므로, 판별식의 분모는 실행되는 줄이다.
+code_only() { LC_ALL=C grep -v '^[[:space:]]*#' "$1"; }
+nGU="$(code_only "$CHECK" | LC_ALL=C grep -c '\$[A-Za-z_][A-Za-z0-9_]*»' || true)"
+[ "${nGU:-0}" -eq 0 ] && ok "중괄호 없이 » 가 붙는 변수 참조가 없다 (3.2 가 »의 첫 바이트를 식별자로 먹는다)" \
+  || bad "중괄호 없는 \$VAR» — 맥 bash 3.2 가 unbound variable 로 죽는다" "0건" "${nGU}건"
+nHD="$(code_only "$CHECK" | LC_ALL=C grep -c '\$(.*<<' || true)"
 [ "${nHD:-0}" -eq 0 ] && ok "명령 치환 안에 heredoc 이 없다 (3.2 파서가 죽는 형태)" \
   || bad "\$() 안 heredoc — 맥 bash 3.2 가 문법에러로 죽는다" "0건" "${nHD}건"
 # 🔑 대조군 — 위 0 이 «셀 곳을 잘못 봐서» 나온 게 아닌지. 그 형태를 만들면 세어져야 한다
 printf 'X="$(python3 - <<%sPY\nprint(1)\nPY\n)"\n' "'" > "$W/hd-probe.sh"
-[ "$(LC_ALL=C grep -c '\$(.*<<' "$W/hd-probe.sh")" -ge 1 ] && ok "  대조군: 그 형태가 있으면 세어진다" \
+[ "$(code_only "$W/hd-probe.sh" | LC_ALL=C grep -c '\$(.*<<')" -ge 1 ] && ok "  대조군: 그 형태가 있으면 세어진다" \
   || bad "대조군 실패 — 판별식이 그 형태를 못 잡는다" "1건 이상" "0건"
+
+echo
+echo "⑬ 🔴 기준선 갱신 무결성 — «읽고 갱신하라»를 문안이 아니라 형태로 (08-02 21초 레이스)"
+# 🔴 실측: 룬드 push 22:00:12Z · 내 --write-baseline 22:00:33Z. **21초 차로 안 읽은 변경이
+#   기준선에 접혔다.** 도구는 경고문으로 「읽지 않고 갱신하면 아무것도 안 막는다」고 말하고 있었고,
+#   그 문장을 쓴 내가 23초 뒤에 그대로 실행했다. ⇒ 문안이 아니라 **CAS(지문 대조)**로 잠근다.
+mk_src "$W/cas.md" 2 1
+out="$(SHARED_CONTRACT_SRC="$W/cas.md" SHARED_CONTRACT_BASELINE="$W/cas.base" bash "$CHECK" --write-baseline 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] && ok "부트스트랩: 기준선이 없으면 토큰 없이 만든다 (막으면 도구를 못 쓴다)" \
+  || bad "최초 생성이 막힌다" 0 "$rc«${out}»"
+
+mk_src "$W/cas2.md" 3 1                       # 원본이 바뀌었다 → 울린다 + 지문을 준다
+out="$(run "$W/cas2.md" "$W/cas.base")"; rc=$?
+tok="$(printf '%s' "$out" | LC_ALL=C sed -n 's/.*--write-baseline \([0-9a-f]\{12\}\).*/\1/p' | head -1)"
+[ "$rc" -eq 1 ] && [ -n "$tok" ] && ok "울릴 때 «읽은 시점의 지문»을 같이 준다 ($tok)" \
+  || bad "지문을 안 준다" "rc=1 + 12자 지문" "rc=$rc tok=«${tok}»"
+
+out="$(SHARED_CONTRACT_SRC="$W/cas2.md" SHARED_CONTRACT_BASELINE="$W/cas.base" bash "$CHECK" --write-baseline 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] && ok "기준선이 있는데 지문 없이 갱신하면 **거부** (rc=2)" || bad "맨손 갱신이 통과한다" 2 "$rc«${out}»"
+
+out="$(SHARED_CONTRACT_SRC="$W/cas2.md" SHARED_CONTRACT_BASELINE="$W/cas.base" bash "$CHECK" --write-baseline deadbeef1234 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] && ok "틀린 지문도 거부" || bad "아무 지문이나 통과한다" 2 "$rc«${out}»"
+
+# 🔴 핵심 회귀 — «지문을 받은 뒤 원본이 또 바뀌면» 거부해야 한다. 그게 21초 레이스다
+mk_src "$W/cas3.md" 4 1
+out="$(SHARED_CONTRACT_SRC="$W/cas3.md" SHARED_CONTRACT_BASELINE="$W/cas.base" bash "$CHECK" --write-baseline "$tok" 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] && ok "21초 레이스 회귀: 지문을 받은 «뒤» 원본이 바뀌면 거부" \
+  || bad "레이스가 그대로 통과한다" 2 "$rc«${out}»"
+
+# 🔑 대조군 — 맞는 지문이면 반드시 통과해야 한다. 아니면 위 셋은 «항상 거부»의 그림자다
+out="$(SHARED_CONTRACT_SRC="$W/cas2.md" SHARED_CONTRACT_BASELINE="$W/cas.base" bash "$CHECK" --write-baseline "$tok" 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] && ok "  대조군: 맞는 지문이면 갱신된다" || bad "맞는 지문도 거부한다 — 항상 거부다" 0 "$rc«${out}»"
+
+echo
+echo "⑭ ➖ 커밋 안 된 기준선을 짚는다 (08-02 자기 실측 — 대조가 브랜치 전환에 증발했다)"
+G="$W/repo"; mkdir -p "$G/config"
+git -C "$G" init -q 2>/dev/null; git -C "$G" config user.email t@t; git -C "$G" config user.name t
+mk_src "$G/src.md" 2 1
+SHARED_CONTRACT_SRC="$G/src.md" SHARED_CONTRACT_BASELINE="$G/config/b.base" bash "$CHECK" --write-baseline >/dev/null 2>&1
+git -C "$G" add -f config/b.base >/dev/null 2>&1; git -C "$G" commit -qm init >/dev/null 2>&1
+# 커밋된 직후엔 조용해야 한다 (상시 경고면 곧 무시된다)
+mk_src "$G/src2.md" 3 1
+tok2="$(SHARED_CONTRACT_SRC="$G/src2.md" SHARED_CONTRACT_BASELINE="$G/config/b.base" bash "$CHECK" 2>&1 \
+        | LC_ALL=C sed -n 's/.*--write-baseline \([0-9a-f]\{12\}\).*/\1/p' | head -1)"
+out="$(SHARED_CONTRACT_SRC="$G/src2.md" SHARED_CONTRACT_BASELINE="$G/config/b.base" bash "$CHECK" --write-baseline "$tok2" 2>&1)"
+case "$out" in *"커밋되지 않았다"*) ok "갱신 후 커밋 전이면 ➖ 로 짚는다" ;; *) bad "미커밋을 안 짚는다" "커밋되지 않았다" "«${out}»" ;; esac
+git -C "$G" add config/b.base >/dev/null 2>&1; git -C "$G" commit -qm base >/dev/null 2>&1
+out="$(SHARED_CONTRACT_SRC="$G/src2.md" SHARED_CONTRACT_BASELINE="$G/config/b.base" bash "$CHECK" 2>&1)"
+case "$out" in *"커밋되지 않았다"*) bad "대조군 실패 — 커밋했는데도 경고한다" "무음" "«${out}»" ;; *) ok "  대조군: 커밋하면 조용하다" ;; esac
 
 echo
 echo "  통과 $pass · 실패 $fail"
