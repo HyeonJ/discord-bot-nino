@@ -99,8 +99,10 @@ mark_alert() {
 }
 # 🔑 **기록이 사실이어야 한다** — 안 보낸 것을 `sent` 로 적으면, 나중에 *"그때 알렸는데 왜
 #   못 봤나"* 로 사람이 엉뚱한 데를 판다. 라벨도 한 자리에서 정한다.
+#   🔑 **어느 경보였는지도 남긴다** — `dry_run` 하나로 접으면 로그인 만료인지 토큰 미갱신인지가
+#   *로그 안에서의 위치*로만 유추된다(룬드 #114 리뷰). `sent_dry_run` · `expiry_dry_run`.
 sent_label() {
-    [[ "${CLI_DRY_RUN:-0}" = 1 ]] && { printf 'dry_run'; return 0; }
+    [[ "${CLI_DRY_RUN:-0}" = 1 ]] && { printf '%s_dry_run' "$1"; return 0; }
     printf '%s' "$1"
 }
 
