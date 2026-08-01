@@ -90,7 +90,19 @@ should_alert() {   # $1=상태파일  $2=간격  → 백오프가 지났으면 0
     case "$last" in ''|*[!0-9]*) last=0 ;; esac
     [[ $(( $(date +%s) - last )) -ge $iv ]]
 }
-mark_alert() { date +%s > "$1" 2>/dev/null || true; }
+# 🔴 **dry-run 은 도장을 안 찍는다.** 찍으면 진단 한 번이 다음 **실경보를 최대 1시간 늦춘다**
+#   — 아무 표시 없이. 이 감지기가 막으려는 고장이 정확히 그것이다(발송 실패 때 도장을 안 찍는
+#   위 규칙과 같은 이유). 호출부가 둘이라 **여기 한 자리**에서 막는다.
+mark_alert() {
+    [[ "${CLI_DRY_RUN:-0}" = 1 ]] && return 0
+    date +%s > "$1" 2>/dev/null || true
+}
+# 🔑 **기록이 사실이어야 한다** — 안 보낸 것을 `sent` 로 적으면, 나중에 *"그때 알렸는데 왜
+#   못 봤나"* 로 사람이 엉뚱한 데를 판다. 라벨도 한 자리에서 정한다.
+sent_label() {
+    [[ "${CLI_DRY_RUN:-0}" = 1 ]] && { printf 'dry_run'; return 0; }
+    printf '%s' "$1"
+}
 
 # 🔴 예전엔 `… >/dev/null 2>&1 || true` 였고, 호출부는 **무조건** `ALERT=sent` + 백오프를 찍었다.
 #    ⇒ discord-send 가 죽어도 로그엔 *보냈다*고 남고, 게다가 1시간 침묵했다.
@@ -154,7 +166,7 @@ if [[ "$VERDICT" == "logged_out" ]]; then
     if should_alert "$LAST_ALERT_FILE" "$ALERT_INTERVAL"; then
         if notify "$MENTION Claude Code 인증이 만료됐어! tmux attach -t nino 후 /login 해줘"; then
             mark_alert "$LAST_ALERT_FILE"
-            ALERT=sent
+            ALERT="$(sent_label sent)"
         else
             # 🔑 **백오프를 안 찍는다** — 찍으면 다음 기회를 스스로 지운다. 일시 장애였다면
             #    1시간이 통째로 사라지고, 그 사이 사람은 아무 신호도 못 받는다.
@@ -191,7 +203,7 @@ PYEOF
                     #    같은 계약이 여러 자리에 있으면 **한 자리만 덮고도 초록**이 된다(시험 ⑭).
                     if notify "$MENTION 니노 토큰이 $(( -REMAIN / 60 ))분 전에 만료됐는데 갱신이 안 되고 있어! tmux attach -t nino 후 /login 해줘"; then
                         mark_alert "$LAST_EXPIRY_FILE"
-                        ALERT="${ALERT}+expiry"
+                        ALERT="${ALERT}+$(sent_label expiry)"
                     else
                         ALERT="${ALERT}+expiry_failed"
                         NOTE="${NOTE:+$NOTE,}discord-send-failed(rc=${NOTIFY_RC:-na})"
