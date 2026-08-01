@@ -15,6 +15,14 @@
 #   판정하는 건 **「대조 없이 바뀌었나」** 하나이고, 기준선은 «대조를 마친 시점»의 스냅샷이다.
 #   그래서 처방이 「기준선을 갱신하라」가 아니라 **「읽고 대조한 «뒤» 갱신하라」** 다.
 #
+# 🔴 **이 도구가 못 잡는 자리** (룬드 리뷰 실측 — 적어두지 않으면 「검사했다」로 읽힌다):
+#   ① **절 rename 은 「소실 + 신설」 두 줄로 나온다.** 조항 수가 같이 찍혀 유추는 되지만,
+#      «진짜 소실 + 우연한 신설»과 모양이 같다. 두 줄이 붙어 나오면 rename 을 먼저 의심할 것.
+#   ② 🔴 **수 보존 교체는 무음이다** — 조항 A 를 지우고 B 를 넣으면 수가 그대로라 안 울린다.
+#      이건 ⚠️(내용 동일성은 안 본다)와 **다른 층**이다. 저건 «변화를 본 뒤 판정을 미루는 것»이고
+#      이건 **변화 자체를 놓치는 것**이다. ⇒ 후속: 절별 정규화 텍스트 «해시»를 기준선에 병기하면
+#      닫힌다(해시는 내용을 «읽는» 게 아니라 «달라졌음»만 보므로 설계축을 안 깬다).
+#
 # rc: 0=변화 없음 · 1=변화 있음(대조 필요) · 2=판정 불가
 set -uo pipefail
 
@@ -23,9 +31,17 @@ BASE="${SHARED_CONTRACT_BASELINE:-$HOME/discord-bot-nino/config/shared-contracts
 WRITE=0
 [ "${1:-}" = "--write-baseline" ] && WRITE=1
 
+# 🔑 임시파일은 **한 곳에서** 치운다 — 원래는 SRC 를 받아올 때만 trap 을 걸어서
+#   ⓐ SRC 를 env 로 주면 trap 이 아예 없고 ⓑ 나중에 만드는 NOWF 는 어느 경로에서도 안 지워졌다
+#   (룬드 실측: 실행 1회당 TMPDIR 에 tmp.* 1개 잔존). trap 은 처음에 한 번만 건다.
+#   ⚠️ SRC 를 env 로 받은 경우는 **내 파일이 아니므로** 지우지 않는다 (그래서 변수를 따로 둔다).
+#   ⚠️ 배열을 안 쓴다 — 룬드 맥(bash 3.2)은 `a+=()` 가 없고 빈 배열 확장이 `set -u` 에서 죽는다.
+TMP_SRC=""; TMP_NOW=""
+trap 'rm -f "$TMP_SRC" "$TMP_NOW"' EXIT
+
 # 원본을 안 주면 상대 봇 파일을 받아온다. 받기 실패는 **판정 불가**지 이상 없음이 아니다.
 if [ -z "$SRC" ]; then
-    SRC="$(mktemp)"; trap 'rm -f "$SRC"' EXIT
+    SRC="$(mktemp)"; TMP_SRC="$SRC"
     if ! gh api repos/dazebug/assistant/contents/memory/CLAUDE.md \
          --jq '.content' 2>/dev/null | base64 -d > "$SRC" || [ ! -s "$SRC" ]; then
         echo "🔴 판정 불가 — 상대 계약 파일을 받지 못했다 (gh 인증·네트워크 확인)" >&2
@@ -83,7 +99,7 @@ fi
 # ⚠️ 현재값을 **파일로** 넘긴다. `python3 - <<'PY'` 는 **스크립트를 stdin 으로 읽으므로**
 #   앞에 파이프를 붙여도 그 값은 `sys.stdin` 에 안 남는다(실측: 전 절이 「사라졌다」로 나왔다 —
 #   즉 «판별식이 죽은 채 시끄러운» 형태라 초록/무음 어느 쪽으로도 안 보였다).
-NOWF="$(mktemp)"; printf '%s\n' "$COUNTS" > "$NOWF"
+NOWF="$(mktemp)"; TMP_NOW="$NOWF"; printf '%s\n' "$COUNTS" > "$NOWF"
 DIFF="$(python3 - "$BASE" "$NOWF" <<'PY'
 import sys
 def load(p):

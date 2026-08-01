@@ -97,5 +97,24 @@ case "$out" in *대조*|*읽*) ok "대조하라고 말한다" ;; *) bad "처방�
 case "$out" in *--write-baseline*) ok "기준선 갱신 방법도 알려준다 (대조 «후»)" ;; *) bad "갱신법 미안내" "--write-baseline" "«$out»" ;; esac
 
 echo
+echo "⑧ 🔴 임시파일을 남기지 않는다 (룬드 리뷰 실측 — 실행 1회당 tmp.* 1개 잔존)"
+# 🔑 이 축은 **rc 로도 출력으로도 안 보인다.** 검사는 매번 초록이면서 파일만 쌓였다.
+#    원인은 trap 이 SRC 만 지웠고 그 SRC 조차 «env 로 주면» trap 이 안 걸리는 경로였던 것.
+#    ⇒ 대조군 없이는 「누수 0」과 「셀 곳을 잘못 봄」이 구별이 안 되므로 TMPDIR 를 갈라 쓴다.
+T="$W/tmpdir"; mkdir -p "$T"
+count_tmp() { find "$T" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' '; }
+before="$(count_tmp)"
+TMPDIR="$T" run "$W/src.md" "$W/base.txt" >/dev/null 2>&1     # 변화 없음 경로
+TMPDIR="$T" run "$W/less.md" "$W/base.txt" >/dev/null 2>&1    # 변화 있음(조기 반환) 경로
+TMPDIR="$T" run "$W/없는파일.md" "$W/base.txt" >/dev/null 2>&1 # 판정 불가(exit 2) 경로
+after="$(count_tmp)"
+[ "$before" = "$after" ] && ok "세 경로(0/1/2) 모두 임시파일 잔존 0 ($before → $after)" \
+                         || bad "임시파일이 남는다" "$before" "$after"
+# 🔑 대조군 — 위 「0 → 0」이 **셀 곳을 잘못 봐서** 나온 게 아닌지. 여기서 안 세지면 위 초록은 무의미하다
+: > "$T/probe-$$"; [ "$(count_tmp)" != "$before" ] && ok "대조군: 이 자리에 파일이 생기면 세어진다" \
+                                                   || bad "대조군 실패 — 세는 자리가 틀렸다" "증가" "그대로"
+rm -f "$T/probe-$$"
+
+echo
 echo "  통과 $pass · 실패 $fail"
 [ "$fail" -eq 0 ] || exit 1
