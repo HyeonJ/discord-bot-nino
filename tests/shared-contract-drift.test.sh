@@ -285,6 +285,14 @@ printf 'X="$(python3 - <<%sPY\nprint(1)\nPY\n)"\n' "'" > "$W/hd-probe.sh"
   || bad "대조군 실패 — 판별식이 그 형태를 못 잡는다" "1건 이상" "0건"
 # 🔴 **오탐 대조군 — herestring `<<<` 은 재스캔과 무관하다**(룬드 코퍼스 오탐 4곳).
 #   판별식이 «잡는 것»만 보면 오탐을 못 본다 — 안 잡아야 할 것도 픽스처로 세운다.
+# 🔴 **이스케이프 층엔 대조군이 없었다**(룬드 질문 ②, 08-02). 지금까지 이 층은 checker 자기
+#   내용으로만 «우연히» 밟혔다 — 픽스처가 없으면 sed 를 망가뜨려도 초록이다.
+#   ⇒ 한 파일에 «진짜 1 + 이스케이프 1»을 같이 두어 **양방향**을 한 번에 잰다.
+{ printf 'real() { echo "«$REAL»"; }\n'; printf 'msg="\\$VAR» 는 설명일 뿐"\n'; } > "$W/esc-probe.sh"
+nE="$(code_only "$W/esc-probe.sh" | LC_ALL=C grep -c '\$[A-Za-z_][A-Za-z0-9_]*»' || true)"
+[ "${nE:-0}" -eq 1 ] && ok "  이스케이프 대조군: 진짜 1 만 세고 이스케이프된 것은 안 센다" \
+  || bad "이스케이프 층 오작동" "1건(진짜만)" "${nE}건"
+
 printf 'X="$(tr a b <<%s hi)"\n' '<' > "$W/hs-probe.sh"
 [ "$(code_only "$W/hs-probe.sh" | LC_ALL=C grep -c '\$(.*<<')" -eq 0 ] \
   && ok "  오탐 대조군: herestring(<<<) 은 안 센다" \
