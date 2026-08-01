@@ -31,4 +31,10 @@ export CASCADE_CORPUS="${CASCADE_CORPUS:-$MEMORY_AUTO_DIR}"
 export PROJECT_CLAUDE_MD="${PROJECT_CLAUDE_MD:-$HOME/discord-bot-nino/CLAUDE.md}"
 export CASCADE_QUEUE="${CASCADE_QUEUE:-$MEMORY_AUTO_DIR/state/cascade-queue.md}"
 
+# §14 문서 크기 — SIZE_CORPUS 는 기본값 "$WIKI $AUTO" 가 그대로 맞아서 안 준다(위 두 값에서 파생).
+# SIZE_BASELINE 은 준다: 정본이 자리를 주지만 **거기 뭘 꽂을지는 봇 셔틀 소관**이라,
+# 정본을 맞춰도 "초록에서 시작"은 공유되지 않는다(2026-08-01 룬드와 실측 — 그쪽은 6줄 꽂아
+# 초록, 이쪽은 배선이 없어 19건 적색이었다). 등재분의 용법·회수 시점은 그 파일 주석에.
+export SIZE_BASELINE="${SIZE_BASELINE:-$HOME/discord-bot-nino/config/size-baseline.txt}"
+
 exec bash "$CANON" "$@"
