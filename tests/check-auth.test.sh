@@ -378,6 +378,15 @@ grep -q 'verdict=bad_args' "$G_LOG" 2>/dev/null && ok "  🔑 거절이 로그�
 
 GUARD_ENV="" gr --dry-run
 [ "$(g_sends)" -eq 0 ] && ok "--dry-run 이면 발송 0건" || bad "dry-run 발송" "0건" "$(g_sends)건"
+# 🔴 **발송 0건만으로는 부족하다.** 백오프 도장을 찍으면 진단 한 번이 다음 **실경보를
+#   최대 1시간 늦춘다** — 아무 표시 없이. 여기가 이 감지기가 막으려는 바로 그 고장이다.
+#   (룬드 assistant#50 리뷰 중 내 쪽에서 같은 구멍을 발견 — 그쪽은 이미 닫았고 내 쪽은 열려 있었다.)
+[ ! -f "$G_STATE/check-auth-last-alert" ] && ok "  🔑 --dry-run 은 백오프 도장을 안 찍는다" \
+  || bad "dry-run 백오프" "도장 없음" "찍힘 — 진단이 다음 실경보를 지연시킨다"
+# 🔑 **기록이 사실이어야 한다.** 안 보낸 것을 sent 로 적으면 로그가 거짓이 되고,
+#   나중에 "그때 알렸는데 왜 못 봤나"로 사람이 엉뚱한 데를 판다.
+grep -q 'alert=dry_run' "$G_LOG" 2>/dev/null && ok "  🔑 로그가 사실대로 alert=dry_run 이다" \
+  || bad "dry-run 로그" "alert=dry_run" "$(grep -o 'alert=[a-z_+]*' "$G_LOG" 2>/dev/null | tail -1)"
 
 # 🔴 환경 상속은 **거절**한다(코어 계약 ④). 무시하면 dry-run 을 기대한 쪽이 발송당하고,
 #   따르면 발송을 기대한 쪽이 조용해진다 — 어느 쪽으로 접어도 조용히 틀린다.
