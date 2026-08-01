@@ -263,7 +263,9 @@ bash -n "$CHECK" 2>/dev/null && ok "bash -n 통과 (이 기계)" || bad "문법 
 #   이 판별식을 설명하는 주석에 그 형태를 쓰면 그대로 걸린다. 형태를 «말하는 줄»과
 #   «실행하는 줄»은 다른 것이므로, 판별식의 분모는 실행되는 줄이다.
 code_only() { LC_ALL=C grep -v '^[[:space:]]*#' "$1"; }
-nGU="$(code_only "$CHECK" | LC_ALL=C grep -c '\$[A-Za-z_][A-Za-z0-9_]*»' || true)"
+# ⚠️ 이스케이프된 `\$VAR»` 는 «말하는 줄»이라 확장되지 않는다 — 주석 제외(#149)와 같은 축의
+#   오탐이므로 같이 뺀다. 안 빼면 이 판별식을 «설명하는 실패 메시지»가 스스로를 울린다.
+nGU="$(code_only "$CHECK" | LC_ALL=C sed 's/\\\$//g' | LC_ALL=C grep -c '\$[A-Za-z_][A-Za-z0-9_]*»' || true)"
 [ "${nGU:-0}" -eq 0 ] && ok "중괄호 없이 » 가 붙는 변수 참조가 없다 (3.2 가 »의 첫 바이트를 식별자로 먹는다)" \
   || bad "중괄호 없는 \$VAR» — 맥 bash 3.2 가 unbound variable 로 죽는다" "0건" "${nGU}건"
 nHD="$(code_only "$CHECK" | LC_ALL=C grep -c '\$(.*<<' || true)"
