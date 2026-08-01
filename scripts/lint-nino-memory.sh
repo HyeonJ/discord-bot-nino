@@ -14,6 +14,12 @@ if [[ ! -f "$CANON" ]]; then
   exit 1
 fi
 
+# 실행 직전에 **어느 클론을 보고 있는지** 를 말한다. 경고만 하고 막지 않는다(rc 항상 0).
+# 여기가 dev(feat 브랜치)를 가리키면 lint 는 **에러 없이 옛 검사를 돈다** — 그게 이 파일
+# 머리말의 사고였다. 계약·근거는 scripts/core-clone-guard.sh 와 tests/core-clone-guard.test.sh.
+bash "$(dirname "${BASH_SOURCE[0]}")/core-clone-guard.sh" \
+     "${CORE_CLONE_DIR:-$HOME/yaksu-bot-core-live}" "${CORE_CLONE_EXPECT:-main}" || true
+
 # 니노 3경로 (auto-memory=하네스 인덱스 / wiki=옵시디언 볼트 / shared=공유 데이터)
 export MEMORY_AUTO_DIR="${MEMORY_AUTO_DIR:-$HOME/.claude/projects/-home-bpx27-discord-bot-nino/memory}"
 export MEMORY_WIKI_DIR="${MEMORY_WIKI_DIR:-$HOME/obsidian-vault}"
