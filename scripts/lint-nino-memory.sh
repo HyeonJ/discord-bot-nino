@@ -68,6 +68,11 @@ export WIKI_ORPHAN_EXCLUDES="${WIKI_ORPHAN_EXCLUDES-darren}"
 # SIZE_BASELINE 은 준다: 정본이 자리를 주지만 **거기 뭘 꽂을지는 봇 셔틀 소관**이라,
 # 정본을 맞춰도 "초록에서 시작"은 공유되지 않는다(2026-08-01 룬드와 실측 — 그쪽은 6줄 꽂아
 # 초록, 이쪽은 배선이 없어 19건 적색이었다). 등재분의 용법·회수 시점은 그 파일 주석에.
-export SIZE_BASELINE="${SIZE_BASELINE:-$HOME/discord-bot-nino/config/size-baseline.txt}"
+# ⚠️ 여기도 `-`(하이픈만)다. `:-` 였을 때 `SIZE_BASELINE=''` 출력이 기본값 출력과
+#    **225줄 내내 diff 0** 이었다 — 면제 24건을 밖에서 끌 수 없어서 「면제가 무엇을 가리고
+#    있나」를 잴 방법이 아예 없었다. 이건 위 WIKI_ORPHAN_EXCLUDES 와 **같은 기전**인데,
+#    그걸 고칠 때 같이 못 봤다(룬드가 자기 셔틀의 같은 변수를 고친 걸 보고 분모를 훑어 찾음).
+#    🔑 한 자리를 고친 것은 그 축을 닫은 게 아니다 — 같은 파일 안에 하나 더 살아 있었다.
+export SIZE_BASELINE="${SIZE_BASELINE-$HOME/discord-bot-nino/config/size-baseline.txt}"
 
 exec bash "$CANON" "$@"
