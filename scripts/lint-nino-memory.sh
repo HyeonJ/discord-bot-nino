@@ -49,6 +49,21 @@ export CASCADE_CORPUS="${CASCADE_CORPUS:-$MEMORY_AUTO_DIR}"
 export PROJECT_CLAUDE_MD="${PROJECT_CLAUDE_MD:-$HOME/discord-bot-nino/CLAUDE.md}"
 export CASCADE_QUEUE="${CASCADE_QUEUE:-$MEMORY_AUTO_DIR/state/cascade-queue.md}"
 
+# §1-b 위키 고아 — 개인 폴더는 검사 범위 밖이다.
+# 🔴 왜 「링크를 달자」가 아니라 「검사에서 빼자」인가: 볼트의 `darren/` 밑 5개가 영구 고아로 떴는데,
+#    파보니 **링크 누락이 아니라 범위 불일치**였다 — 인덱스를 만드는 `vault-index.sh` 는 `wiki/` 만
+#    스캔하는데 고아 검사는 볼트 **전체**를 본다. 손으로 링크를 달아도 **다음 생성기 실행이 지운다.**
+#    고칠 수 없는 경고는 가드를 죽인다(사람은 lint 를 끄지 파일을 고치지 않는다).
+#    ⇒ 무엇이 더 나쁜지는 재서 안 나와서 Darren 이 골랐다(ⓑ 개인 폴더 제외, M:mwz4).
+# 🔑 정본(bot-core #129)의 **기본값은 비어 있다** — 안 쓰는 봇은 안 바뀌게 만들었다.
+#    그래서 정본에 코드가 들어간 것만으로는 **아무것도 안 빠진다.** 값을 주는 건 여기 셔틀 몫이다.
+#    (이 배선이 없으면 조용히 예전 그대로 돈다 — `tests/lint-shuttle-env.test.sh` 가 그 자리를 잡는다)
+# ⚠️ `:-` 가 아니라 `-` 다. `:-` 는 **빈 값도 「안 준 것」으로 쳐서** darren 을 도로 꽂는다 —
+#    실제로 그 판으로 델타를 재다가 `WIKI_ORPHAN_EXCLUDES=''` 대조군이 조용히 실험군과
+#    같아졌다(A·B 가 글자까지 동일). 즉 **대조군을 못 만드는 배선**이었다.
+#    `-` 면 빈 값으로 끌 수 있어 「제외가 실제로 무엇을 빼는지」를 잴 수 있다.
+export WIKI_ORPHAN_EXCLUDES="${WIKI_ORPHAN_EXCLUDES-darren}"
+
 # §14 문서 크기 — SIZE_CORPUS 는 기본값 "$WIKI $AUTO" 가 그대로 맞아서 안 준다(위 두 값에서 파생).
 # SIZE_BASELINE 은 준다: 정본이 자리를 주지만 **거기 뭘 꽂을지는 봇 셔틀 소관**이라,
 # 정본을 맞춰도 "초록에서 시작"은 공유되지 않는다(2026-08-01 룬드와 실측 — 그쪽은 6줄 꽂아
