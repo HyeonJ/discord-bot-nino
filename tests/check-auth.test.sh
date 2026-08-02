@@ -23,6 +23,8 @@ CHECK="$REPO/scripts/check-auth.sh"
 #   *틀린 이유로* 빨개진다(원래 빨간 판 위의 빨강은 아무도 못 본다). 이유·경위는 헬퍼에.
 . "$REPO/tests/lib/require-core.sh"
 
+. "$SCRIPT_DIR/lib/capture-rc.sh"
+
 pass=0; fail=0
 ok()  { echo "  ✅ $1"; pass=$((pass + 1)); }
 bad() { echo "  ❌ $1"; [ -n "${2:-}" ] && echo "     want: $2"; [ -n "${3:-}" ] && echo "     got:  $3"; fail=$((fail + 1)); }
@@ -322,8 +324,13 @@ for i, ln in enumerate(open(sys.argv[1]), 1):
             bad.append("%d행: `%s` 대신 `%s` 를 쓸 것" % (i, raw, fix))
 print('\n'.join(bad))
 PYEOF
+_hf_rc_viol=$?   # 🔴 PYEOF 바로 다음 줄 — 한 줄만 밀려도 딴 명령의 rc 다
 viol="$(cat "${_hf_viol}")"; rm -f "${_hf_viol}"
-[ -z "$viol" ] && ok "원시 GNU 명령을 직접 안 쓴다 (헬퍼 경유)" || bad "이식성 규약 위반" "0건" "$viol"
+if _hf_msg="$(hf_verdict "$_hf_rc_viol" "이식성")"; then
+    [ -z "$viol" ] && ok "원시 GNU 명령을 직접 안 쓴다 (헬퍼 경유)" || bad "이식성 규약 위반" "0건" "$viol"
+else
+    bad "$_hf_msg" "rc=0" "«${viol}»"
+fi
 # 음성 검사 — 이 시험이 실제로 물 수 있나(항상 초록인 시험이 아닌지)
 probe="$(mktemp)"; printf 'x="$(wc %s < "$f")"\n' '-l' > "$probe"
 _hf_pv="$(mktemp)"   # 🔴 3.2: $( … << ) 형태를 피한다 (heredoc-form-guard)
@@ -331,8 +338,13 @@ python3 - "$probe" <<'PYEOF' > "${_hf_pv}"
 import sys
 print('HIT' if 'wc' + ' -l' in open(sys.argv[1]).read() else '')
 PYEOF
+_hf_rc_pv=$?   # 🔴 PYEOF 바로 다음 줄 — 한 줄만 밀려도 딴 명령의 rc 다
 pv="$(cat "${_hf_pv}")"; rm -f "${_hf_pv}"
-[ -n "$pv" ] && ok "  → 원시 명령이 들어오면 잡는다(음성 대조군)" || bad "  이 시험은 어떤 변이로도 안 갈린다"
+if _hf_msg="$(hf_verdict "$_hf_rc_pv" "음성 대조군")"; then
+    [ -n "$pv" ] && ok "  → 원시 명령이 들어오면 잡는다(음성 대조군)" || bad "  이 시험은 어떤 변이로도 안 갈린다"
+else
+    bad "$_hf_msg" "rc=0" "«${pv}»"
+fi
 rm -f "$probe"
 
 echo "── ⑯ 🔴 인자 계약 (코어 cli-guard) — 09:50 사고의 형태를 막는다 ──"
