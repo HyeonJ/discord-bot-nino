@@ -174,6 +174,26 @@ else
   bad "md-web 응답 없음 → 차단 + 사유" "exit 2 + '응답하지 않아'" "exit $dead_rc + $(printf '%s' "$dead_err" | tr '\n' ' ' | cut -c1-100)" "(죽은 포트)"
 fi
 
+echo
+echo "🔑 훅이 «못 가릴 때 침묵하는» 갈래 — 이 갈래는 지금까지 어느 기계에서도 분모에 없었다:"
+# 🔴 훅은 두 주소를 본다. **둘 다 주입해야 「md-web 이 없는 세계」가 된다** (룬드 변이 발견 2026-08-02):
+#       MDWEB_API   → 시험이 「떠 있나」를 묻는 곳 (판정부)
+#       MDWEB_TREE  → 훅의 roots() 가 실제로 보는 곳 (bare 갈래)
+#   ⚠️ 하나만 주입하면 **반쪽 세계**가 된다 — 시험은 「없음」, 훅은 「있음」. 실제로 그렇게 재다가
+#     「수리 전 빨강」이 재현이 안 됐다(rc=0 이 나왔다). 둘 다 주입하니 그때서야 재현됐다.
+# 🔑 그리고 이 단언이 **훅의 침묵을 «양성으로» 잠근다** — CI 는 skipt 라 안 재고, 개발 기계는
+#   md-web 이 실제로 떠 있어 이 갈래에 안 들어간다. **「못 재는 것을 실패로 안 센다」에서 한 발 더,
+#   「못 재던 것을 재는 자리를 만든다」.** 침묵이 «옳은 침묵»인지는 여기서만 갈린다.
+bare_err=$(printf '%s' 'discord-send 현인-업무 "@Darren http://darren/memory/current-tasks 봐줘"' \
+  | python3 -c 'import json,sys; print(json.dumps({"tool_input":{"command":sys.stdin.read()}}))' \
+  | MDWEB_API='http://127.0.0.1:1/api/file' MDWEB_TREE='http://127.0.0.1:1/api/tree' bash "$HOOK" 2>&1 >/dev/null)
+bare_rc=$?
+if [[ "$bare_rc" == 0 ]]; then
+  ok "md-web 이 없으면 base path 누락을 «판정 불가»로 두고 발송을 막지 않는다 (rc=0)"
+else
+  bad "못 가리는데 사람 발송을 막았다" "exit 0 (침묵)" "exit $bare_rc + $(printf '%s' "$bare_err" | tr '\n' ' ' | cut -c1-100)" "(둘 다 죽은 포트)"
+fi
+
 echo "검사기(mdweb-link-check.py)가 없으면 조용히 통과하지 않는가:"
 # 없는 검사가 통과로 읽히면 이 훅은 "있는 척"이 된다 — 부재는 조용하다
 TMPD=$(mktemp -d /tmp/mdweb-guard-nochecker.XXXXXX)
