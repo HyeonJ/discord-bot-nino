@@ -18,7 +18,9 @@
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 HOOK="$SCRIPT_DIR/../claude-config/hooks/mdweb-link-guard.sh"
-API='http://localhost:58082/api/file'
+# 🔴 주입 seam — 안 그러면 «md-web 이 없는 기계» 갈래를 **실물 서비스를 죽여야만** 잴 수 있다.
+#   md-web 은 Darren 이 쓰는 서비스라 시험이 끄면 안 된다. 주소를 바꿀 수 있으면 서비스를 안 건드리고 잰다.
+API="${MDWEB_API:-http://localhost:58082/api/file}"
 TREE_API="${TREE_API:-http://localhost:58082/api/tree}"   # 하위 디렉터리 픽스처를 여기서 고른다
 
 pass=0; fail=0; skip=0
@@ -101,7 +103,18 @@ checkr "이유에 .md 뗀 주소를 준다"             'raw 가 온다: http://
 
 echo
 echo "base path(/md-web/)가 빠진 링크를 잡는가 (폴백이 200 이라 코드로는 안 보임):"
-checkr "http://darren/{rootId}/... → 차단"     'base path 가 빠졌다' 'discord-send 현인-업무 "@Darren http://darren/memory/current-tasks 봐줘"'
+# 🔴 이 단언만 게이트 밖에 있었다 — **못 재는 것을 「실패」로 세고 있었다** (2026-08-02, CI 이틀 빨강의 마지막 1건).
+#   훅의 `bare` 갈래는 `roots()` 로 「memory 가 진짜 rootId 인가」를 확인하고, 못 정하면 **조용히 통과**시킨다:
+#       if r is None or root not in r: return    # md-web 링크가 아니거나 판정 불가
+#   훅 입장에선 그게 맞다 — 못 가리는데 사람 발송을 막으면 안 된다. 틀린 것은 **시험 쪽**이었다.
+#   md-web 이 없는 기계(CI)에선 `roots()` 가 None 이라 차단이 **일어날 수 없고**, 그건 위반이 아니라 **미측정**이다.
+#   🔑 같은 파일이 이미 이 구분을 갖고 있었다(아래 `MDWEB_UP` 블록 · live 사본 대조의 「판정 불가」) —
+#      **이 한 줄만 그 관례 밖에 있었다.** #130·#133 과 같은 축의 세 번째 자리다.
+if [[ "$MDWEB_UP" == 1 ]]; then
+  checkr "http://darren/{rootId}/... → 차단"   'base path 가 빠졌다' 'discord-send 현인-업무 "@Darren http://darren/memory/current-tasks 봐줘"'
+else
+  skipt "http://darren/{rootId}/... → 차단" "md-web 이 안 떠 있어 roots() 가 None — 훅이 «판정 불가로 침묵»하는 갈래라 차단이 일어날 수 없다(미측정이지 위반이 아니다)"
+fi
 check "md-web root 아닌 경로는 안 건드림 → 통과"    0 'discord-send 현인-업무 "@Darren http://darren/health 확인했어"'
 
 echo
