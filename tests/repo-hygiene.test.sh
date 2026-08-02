@@ -71,38 +71,52 @@ echo "🔴 변수 뒤 비ASCII — bash 3.2 에서 이름 경계가 안 잡힌�
 #   ⇒ 내 기계에서 안 나는 고장을 내 기계에서 잠근다. `${VAR}` 로 감싸면 사라진다.
 #   ⚠️ 룬드 첫 결론은 "모든 bash"였고 내 반박으로 3.2 한정으로 갈렸다(assistant 9307e96).
 #     내가 안 눌렀으면 과한 규칙이, 룬드가 내 결론을 그대로 받았으면 실재하는 함정이 지워졌다.
-nonascii=$(python3 - "$SCRIPT_DIR/.." <<'PYEOF'
-import os, re, sys
-root = sys.argv[1]
-# 🔴 **검사기를 검사 대상에서 뺀다** — 이 가드가 사는 파일의 heredoc 안에 패턴 문자열이 있다.
-#   오늘 세 번 밟은 형태(grep 가드 자기 줄 · 안전형 안의 부분문자열 · 파이썬 가드의 패턴).
-pat = re.compile(r'\$[A-Za-z_][A-Za-z0-9_]*[^\x00-\x7f]')
-hits = []
-for dirpath, dirnames, filenames in os.walk(root):
-    dirnames[:] = [d for d in dirnames if d not in (".git", "node_modules", "backups")]
-    for fn in filenames:
-        if not fn.endswith(".sh"):
-            continue
-        fp = os.path.join(dirpath, fn)
-        try:
-            src = open(fp, encoding="utf-8", errors="replace").read()
-        except Exception:
-            continue
-        if fn == "repo-hygiene.test.sh":
-            src = re.sub(r"<<'PYEOF'.*?^PYEOF", "", src, flags=re.S | re.M)
-        for i, line in enumerate(src.splitlines(), 1):
-            if line.lstrip().startswith("#"):
-                continue
-            if pat.search(line):
-                hits.append(f"{os.path.relpath(fp, root)}:{i}")
-print(" ".join(hits))
-PYEOF
-)
+# 🔴 **검사기가 이 파일 heredoc 안에 살면 대조군을 못 세운다** — 다른 뿌리로 돌릴 수가 없어서
+#   대조군을 만들려면 같은 파이썬을 한 벌 더 써야 하고, 그 순간 「사본 두 벌」이 된다.
+#   그게 이 검사기가 실제로 앓던 병이었다: `shared-contract-drift.test.sh` 의 `code_only()` 는
+#   이미 세 층(주석·이스케이프·herestring)을 걷어내고 대조군까지 갖췄는데 이쪽은 진화 전 판본이라,
+#   **형제가 일부러 심어둔 양성 대조군 픽스처를 위반으로 셌다**(진짜 위반을 다 고쳐도 0 이 안 됐다).
+#   🔑 사본이 두 벌이면 **고쳐진 쪽이 안 고쳐진 쪽에 걸린다** — 규칙이 아니라 판본 차이가 빨강을 만든다.
+#   ⇒ `tests/lib/nonascii-scan.py` 로 빼고 **뿌리를 인자로** 받는다. 아래 대조군이 그 덕에 선다.
+SCAN="$SCRIPT_DIR/lib/nonascii-scan.py"
+nonascii="$(python3 "$SCAN" "$SCRIPT_DIR/..")"
 if [ -z "$nonascii" ]; then
   ok "변수 뒤에 비ASCII 가 바로 붙는 자리가 없다(\${VAR} 로 감쌀 것)"
 else
   bad "변수 뒤 비ASCII 없음" "$nonascii"
 fi
+
+# 🔑 **0 을 봤으면 대조군을 본다** — 위 0 이 «없다»인지 «검사기가 안 돈다»인지 이 값이 가른다.
+#   네 갈래를 한 뿌리에 같이 두어 «잡아야 할 것»과 «안 잡아야 할 것»을 한 번에 잰다.
+PROBE="$(mktemp -d "${TMPDIR:-/tmp}/hygiene-probe.XXXXXX")"
+trap 'rm -rf "$PROBE"' EXIT
+printf 'x="$MSG\xe2\x9a\xa0"\n'                        > "$PROBE/real.sh"
+printf 'x="\\$MSG\xe2\x9a\xa0 는 설명일 뿐"\n'          > "$PROBE/esc.sh"
+printf '# x="$MSG\xe2\x9a\xa0" 라고 쓰면 안 된다\n'     > "$PROBE/comment.sh"
+printf 'x="$MSG\xe2\x9a\xa0"  # hygiene:allow-nonascii\n' > "$PROBE/allowed.sh"
+# 🔴 표식이 **줄 단위**인지 — 파일 어딘가의 표식이 아랫줄까지 끄면 규칙이 통째로 사라진다.
+printf 'a=1  # hygiene:allow-nonascii\nx="$MSG\xe2\x9a\xa0"\n' > "$PROBE/scoped.sh"
+probe_hits="$(python3 "$SCAN" "$PROBE")"
+case "$probe_hits" in
+  *real.sh:1*) ok "  🧪 [양성 대조군] 진짜 형태는 잡는다" ;;
+  *) bad "대조군 실패 — 검사기가 진짜 형태를 못 잡는다" "want: real.sh:1 포함 · got: «${probe_hits}»" ;;
+esac
+case "$probe_hits" in
+  *esc.sh*) bad "오탐 — 이스케이프된 \\\$VAR 는 확장되지 않는다" "want: esc.sh 없음 · got: «${probe_hits}»" ;;
+  *) ok "  🧪 [음성 대조군] 이스케이프된 것은 안 잡는다" ;;
+esac
+case "$probe_hits" in
+  *comment.sh*) bad "오탐 — 주석은 형태를 «말하는 줄»이다" "want: comment.sh 없음 · got: «${probe_hits}»" ;;
+  *) ok "  🧪 [음성 대조군] 주석은 안 잡는다" ;;
+esac
+case "$probe_hits" in
+  *allowed.sh*) bad "면제 표식이 안 먹는다" "want: allowed.sh 없음 · got: «${probe_hits}»" ;;
+  *) ok "  🧪 면제 표식은 그 줄을 뺀다" ;;
+esac
+case "$probe_hits" in
+  *scoped.sh:2*) ok "  🔑 면제 표식은 **줄 단위** — 윗줄 표식이 아랫줄을 끄지 않는다" ;;
+  *) bad "면제가 줄을 넘어 샌다 — 파일 하나를 통째로 끌 수 있다" "want: scoped.sh:2 포함 · got: «${probe_hits}»" ;;
+esac
 
 echo
 echo "  통과 $pass · 실패 $fail"
