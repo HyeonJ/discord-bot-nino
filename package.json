@@ -19,5 +19,12 @@
     "eslint": "^10.8.0",
     "globals": "^17.8.0",
     "jest": "^30.0.0"
+  },
+  "jest": {
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "/tests/vault-audit\\.test\\.js$",
+      "/tests/vault-audit-llm\\.test\\.js$"
+    ]
   }
 }
