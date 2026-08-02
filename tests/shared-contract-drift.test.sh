@@ -48,7 +48,7 @@ out="$(SHARED_CONTRACT_SRC="$W/src.md" SHARED_CONTRACT_BASELINE="$W/base.txt" ba
 [ "$rc" -eq 0 ] && [ -s "$W/base.txt" ] && ok "기준선을 쓴다 (rc=0, 파일 비어있지 않음)" \
   || bad "기준선 생성 실패" "rc=0 + 내용" "rc=$rc «${out}»"
 out="$(run "$W/src.md" "$W/base.txt")"; rc=$?
-[ "$rc" -eq 0 ] && ok "  → 바로 다시 돌리면 무음 (rc=0)" || bad "직후 재실행이 시끄럽다" 0 "$rc«${out}»"
+[ "$rc" -eq 0 ] && ok "  → 바로 다시 돌리면 무음 (rc=0)" || bad "직후 재실행이 시끄럽다" 0 "${rc}«${out}»"
 
 echo
 echo "② 🔴 조항이 «줄면» 잡는다 — 재편이 조용히 빼는 자리"
@@ -226,27 +226,27 @@ echo "⑪ 🔴 🤝 절 «안» 불릿도 조항이다 — 수 보존 교체 미
 #   ⇒ 룬드 판정(08-02): 다듬을 때마다 울리는 건 소음이 아니라 «상대가 봐야 하는 사건»이다.
 printf '## 🤝 절A — 공유 계약\n\n- 조항 하나\n- 조항 둘\n' > "$W/b1.md"
 out="$(SHARED_CONTRACT_SRC="$W/b1.md" SHARED_CONTRACT_BASELINE="$W/b1.base" bash "$CHECK" --write-baseline 2>&1)"; rc=$?
-[ "$rc" -eq 0 ] && ok "절 안 불릿으로 기준선을 쓴다" || bad "기준선 실패" 0 "$rc«${out}»"
+[ "$rc" -eq 0 ] && ok "절 안 불릿으로 기준선을 쓴다" || bad "기준선 실패" 0 "${rc}«${out}»"
 
 # 🔑 핵심 회귀: 개수는 그대로(2 → 2), 내용만 바뀐다
 printf '## 🤝 절A — 공유 계약\n\n- 조항 하나\n- 조항 둘을 «다시 썼다»\n' > "$W/b2.md"
 out="$(run "$W/b2.md" "$W/b1.base")"; rc=$?
 [ "$rc" -eq 1 ] && ok "수 보존 교체가 울린다 (2→2 인데 내용이 다르다)" \
-  || bad "c5a97ff 미탐 재현 — 내용이 바뀌었는데 조용하다" 1 "$rc«${out}»"
+  || bad "c5a97ff 미탐 재현 — 내용이 바뀌었는데 조용하다" 1 "${rc}«${out}»"
 
 # 🔴 대조군 — 안 바꾸면 조용해야 한다. 아니면 매번 울려서 곧 무시된다
 out="$(run "$W/b1.md" "$W/b1.base")"; rc=$?
-[ "$rc" -eq 0 ] && ok "  대조군: 그대로면 조용하다" || bad "안 바꿨는데 울린다" 0 "$rc«${out}»"
+[ "$rc" -eq 0 ] && ok "  대조군: 그대로면 조용하다" || bad "안 바꿨는데 울린다" 0 "${rc}«${out}»"
 
 # 장식만 다른 같은 조항은 같다 — 줄 조항(⑨)과 같은 정규화가 절 안에도 걸려야 한다
 printf '## 🤝 절A — 공유 계약\n\n*  조항 하나\n-   조항 둘\n' > "$W/b3.md"
 out="$(run "$W/b3.md" "$W/b1.base")"; rc=$?
-[ "$rc" -eq 0 ] && ok "  불릿 기호·공백 차이는 같은 조항 (정규화)" || bad "장식 차이를 변경으로 읽는다" 0 "$rc«${out}»"
+[ "$rc" -eq 0 ] && ok "  불릿 기호·공백 차이는 같은 조항 (정규화)" || bad "장식 차이를 변경으로 읽는다" 0 "${rc}«${out}»"
 
 # 개수가 «줄어드는» 자리는 여전히 잡힌다 — 새 축이 옛 축을 먹으면 안 된다
 printf '## 🤝 절A — 공유 계약\n\n- 조항 하나\n' > "$W/b4.md"
 out="$(run "$W/b4.md" "$W/b1.base")"; rc=$?
-[ "$rc" -eq 1 ] && ok "  불릿이 사라지는 것도 여전히 잡는다" || bad "소실을 놓친다" 1 "$rc«${out}»"
+[ "$rc" -eq 1 ] && ok "  불릿이 사라지는 것도 여전히 잡는다" || bad "소실을 놓친다" 1 "${rc}«${out}»"
 
 echo
 echo "⑫ 🔴 맥 bash 3.2 에서 «도구 자체»가 도나 (룬드 실측 — main 이 문법에러로 죽었다)"
@@ -288,7 +288,7 @@ printf 'X="$(python3 - <<%sPY\nprint(1)\nPY\n)"\n' "'" > "$W/hd-probe.sh"
 # 🔴 **이스케이프 층엔 대조군이 없었다**(룬드 질문 ②, 08-02). 지금까지 이 층은 checker 자기
 #   내용으로만 «우연히» 밟혔다 — 픽스처가 없으면 sed 를 망가뜨려도 초록이다.
 #   ⇒ 한 파일에 «진짜 1 + 이스케이프 1»을 같이 두어 **양방향**을 한 번에 잰다.
-{ printf 'real() { echo "«$REAL»"; }\n'; printf 'msg="\\$VAR» 는 설명일 뿐"\n'; } > "$W/esc-probe.sh"
+{ printf 'real() { echo "«$REAL»"; }\n'; printf 'msg="\\$VAR» 는 설명일 뿐"\n'; } > "$W/esc-probe.sh"  # hygiene:allow-nonascii — 이 줄은 «미끼»다. 고치면 양성 대조군이 죽는다
 nE="$(code_only "$W/esc-probe.sh" | LC_ALL=C grep -c '\$[A-Za-z_][A-Za-z0-9_]*»' || true)"
 [ "${nE:-0}" -eq 1 ] && ok "  이스케이프 대조군: 진짜 1 만 세고 이스케이프된 것은 안 센다" \
   || bad "이스케이프 층 오작동" "1건(진짜만)" "${nE}건"
@@ -306,7 +306,7 @@ echo "⑬ 🔴 기준선 갱신 무결성 — «읽고 갱신하라»를 문안�
 mk_src "$W/cas.md" 2 1
 out="$(SHARED_CONTRACT_SRC="$W/cas.md" SHARED_CONTRACT_BASELINE="$W/cas.base" bash "$CHECK" --write-baseline 2>&1)"; rc=$?
 [ "$rc" -eq 0 ] && ok "부트스트랩: 기준선이 없으면 토큰 없이 만든다 (막으면 도구를 못 쓴다)" \
-  || bad "최초 생성이 막힌다" 0 "$rc«${out}»"
+  || bad "최초 생성이 막힌다" 0 "${rc}«${out}»"
 
 mk_src "$W/cas2.md" 3 1                       # 원본이 바뀌었다 → 울린다 + 지문을 준다
 out="$(run "$W/cas2.md" "$W/cas.base")"; rc=$?
@@ -315,20 +315,20 @@ tok="$(printf '%s' "$out" | LC_ALL=C sed -n 's/.*--write-baseline \([0-9a-f]\{12
   || bad "지문을 안 준다" "rc=1 + 12자 지문" "rc=$rc tok=«${tok}»"
 
 out="$(SHARED_CONTRACT_SRC="$W/cas2.md" SHARED_CONTRACT_BASELINE="$W/cas.base" bash "$CHECK" --write-baseline 2>&1)"; rc=$?
-[ "$rc" -eq 2 ] && ok "기준선이 있는데 지문 없이 갱신하면 **거부** (rc=2)" || bad "맨손 갱신이 통과한다" 2 "$rc«${out}»"
+[ "$rc" -eq 2 ] && ok "기준선이 있는데 지문 없이 갱신하면 **거부** (rc=2)" || bad "맨손 갱신이 통과한다" 2 "${rc}«${out}»"
 
 out="$(SHARED_CONTRACT_SRC="$W/cas2.md" SHARED_CONTRACT_BASELINE="$W/cas.base" bash "$CHECK" --write-baseline deadbeef1234 2>&1)"; rc=$?
-[ "$rc" -eq 2 ] && ok "틀린 지문도 거부" || bad "아무 지문이나 통과한다" 2 "$rc«${out}»"
+[ "$rc" -eq 2 ] && ok "틀린 지문도 거부" || bad "아무 지문이나 통과한다" 2 "${rc}«${out}»"
 
 # 🔴 핵심 회귀 — «지문을 받은 뒤 원본이 또 바뀌면» 거부해야 한다. 그게 21초 레이스다
 mk_src "$W/cas3.md" 4 1
 out="$(SHARED_CONTRACT_SRC="$W/cas3.md" SHARED_CONTRACT_BASELINE="$W/cas.base" bash "$CHECK" --write-baseline "$tok" 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] && ok "21초 레이스 회귀: 지문을 받은 «뒤» 원본이 바뀌면 거부" \
-  || bad "레이스가 그대로 통과한다" 2 "$rc«${out}»"
+  || bad "레이스가 그대로 통과한다" 2 "${rc}«${out}»"
 
 # 🔑 대조군 — 맞는 지문이면 반드시 통과해야 한다. 아니면 위 셋은 «항상 거부»의 그림자다
 out="$(SHARED_CONTRACT_SRC="$W/cas2.md" SHARED_CONTRACT_BASELINE="$W/cas.base" bash "$CHECK" --write-baseline "$tok" 2>&1)"; rc=$?
-[ "$rc" -eq 0 ] && ok "  대조군: 맞는 지문이면 갱신된다" || bad "맞는 지문도 거부한다 — 항상 거부다" 0 "$rc«${out}»"
+[ "$rc" -eq 0 ] && ok "  대조군: 맞는 지문이면 갱신된다" || bad "맞는 지문도 거부한다 — 항상 거부다" 0 "${rc}«${out}»"
 
 echo
 echo "⑭ ➖ 커밋 안 된 기준선을 짚는다 (08-02 자기 실측 — 대조가 브랜치 전환에 증발했다)"
