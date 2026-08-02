@@ -285,7 +285,8 @@ grep -q 'trap .*EXIT' "$CHECK" && ok "trap …EXIT 로 로그를 보장한다" \
   || bad "로그 보장 구조" "trap …EXIT" "없음 — 조기 종료 갈래가 조용해진다"
 
 echo "── ⑩ 이식성 — 원시 GNU 명령을 안 쓴다 (룬드 맥 기준선) ──"
-viol="$(python3 - "$CHECK" <<'PYEOF'
+_hf_viol="$(mktemp)"   # 🔴 3.2: $( … << ) 형태를 피한다 (heredoc-form-guard)
+python3 - "$CHECK" <<'PYEOF' > "${_hf_viol}"
 import sys
 RAW = {'touch' + ' -d': 'python os.utime', 'stat' + ' -c': 'python getmtime',
        'date' + ' -d': 'python datetime'}
@@ -298,7 +299,7 @@ for i, ln in enumerate(open(sys.argv[1]), 1):
             bad.append("%d행: `%s` → %s" % (i, raw, fix))
 print('\n'.join(bad))
 PYEOF
-)"
+viol="$(cat "${_hf_viol}")"; rm -f "${_hf_viol}"
 [ -z "$viol" ] && ok "GNU 전용 명령 0건" || bad "이식성 위반" "0건" "$viol"
 
 # ─────────────────────────────────────────────────────────────────────────────

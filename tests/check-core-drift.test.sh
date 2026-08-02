@@ -148,7 +148,8 @@ echo "⑥ 🔑 **모든 판정 불가 갈래가 2로 나간다** — 갈래마�
 # ⇒ 갈래마다 케이스를 만드는 대신 **출력 문구와 종료코드의 짝**을 정적으로 본다.
 #    ⚠️ `printf|echo` 같은 **통로를 열거하지 않는다** — 그건 자기 printer 를 정의하는 순간
 #       뚫린다(assistant#24 P2). 여기선 *어떤 말을 하면서 어떤 코드로 나가는가* 만 본다.
-viol="$(python3 - "$SCRIPT" <<'PYEOF'
+_hf_viol="$(mktemp)"   # 🔴 3.2: $( … << ) 형태를 피한다 (heredoc-form-guard)
+python3 - "$SCRIPT" <<'PYEOF' > "${_hf_viol}"
 import re, sys
 lines = open(sys.argv[1]).read().split('\n')
 bad = []
@@ -169,7 +170,7 @@ for i, ln in enumerate(lines):
         bad.append(f"{i+1}행: 위반(STALE/DRIFT)인데 exit {code} (1이어야 한다)")
 print('\n'.join(bad))
 PYEOF
-)"
+viol="$(cat "${_hf_viol}")"; rm -f "${_hf_viol}"
 [ -z "$viol" ] && ok "판정 불가는 전부 2, 위반은 전부 1" || bad "계약 위반 갈래" "$viol"
 # 음성 검사 — 이 시험이 실제로 물 수 있는지(항상 초록인 시험이 아닌지)
 probe="$(mktemp)"; sed 's/echo "  ⚠️ 영향 판정 불가 — 워크트리 생성 실패"; exit 2/echo "  ⚠️ 영향 판정 불가 — 워크트리 생성 실패"; exit 1/' "$SCRIPT" > "$probe"
