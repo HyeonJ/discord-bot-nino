@@ -11,6 +11,11 @@
 # 격리: 실제 lint·실제 discord-send 를 쓰지 않는다(둘 다 주입). 실제 logs/ 도 안 건드린다.
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# 🔴 코어 정본이 없으면 이 파일 «전체»가 판정 불가다 — 없으면 나머지 단언이 전부
+#   *틀린 이유로* 빨개진다(원래 빨간 판 위의 빨강은 아무도 못 본다). 이유·경위는 헬퍼에.
+REPO="${REPO:-$(cd "$SCRIPT_DIR/.." && pwd)}"
+. "$REPO/tests/lib/require-core.sh"
 BOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 SCRIPT="$BOT/scripts/memory-lint-cron.sh"
 
