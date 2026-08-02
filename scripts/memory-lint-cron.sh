@@ -62,13 +62,24 @@ CLI_GUARD_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$CLI_GUARD_LIB_DIR/lib/cli-guard-boot.sh"
 cli_guard_boot "$@"
 
+# 🔑 **키는 검사기가 준다** — 여기서 문자열을 정규화하지 않는다 (코어 #141, 2026-08-02).
+#   `LINT_KEY_FILE` 은 **append** 라 계약상 «매번 새 파일»을 줘야 한다. 재사용하면 지난 실행의
+#   키가 섞여 「새 항목」이 영영 안 나온다 — 조용한 쪽으로 틀린다.
+KEYFILE="$(mktemp "${TMPDIR:-/tmp}/memory-lint-keys.XXXXXX")"
+trap 'rm -f "$KEYFILE"' EXIT
+export LINT_KEY_FILE="$KEYFILE"
+
 # ⚠️ 파이프를 끼우지 않는다 — `cmd | tail` 뒤의 $? 는 tail 의 코드다(오늘 네 번 걸린 자리).
 OUT="$("$LINT" 2>&1)"; RC=$?
 STAMP="$(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M:%S')"
 
 # 항목 추출: 검사가 내는 "  ⚠️  <내용>" 줄만. 요약줄·섹션 헤더는 상태로 쓰지 않는다.
-CURRENT="$(printf '%s\n' "$OUT" | sed -n 's/^  ⚠️  //p' | sort -u)"
+# 🔴 **정렬하지 않는다.** 키 파일은 `issue()` 호출 순서로 쌓이므로 사람 줄과 **행 단위로 짝**이다.
+#   여기서 `sort -u` 를 하면 그 짝이 어긋나 **엉뚱한 항목이 엉뚱한 키로 판정된다**(옛 판엔 있었다).
+CURRENT="$(printf '%s\n' "$OUT" | sed -n 's/^  ⚠️  //p')"
 COUNT="$(printf '%s' "$CURRENT" | grep -c . || true)"
+KEYS="$(cat "$KEYFILE" 2>/dev/null)"
+KEYCOUNT="$(printf '%s' "$KEYS" | grep -c . || true)"
 
 printf '%s rc=%s 항목=%s\n' "$STAMP" "$RC" "$COUNT" >> "$LOG"
 printf '%s rc=%s 항목=%s\n' "$STAMP" "$RC" "$COUNT" > "$HEARTBEAT"
@@ -94,17 +105,89 @@ $(printf '%s' "$OUT" | tail -15)
   exit "$RC"
 fi
 
+# 🔴 «같은 항목인가»는 항목 문자열 그대로가 아니라 **정규화한 키**로 본다 (2026-08-02).
+#   실사고: `🚨 1000줄 초과: inbox-…md (6627줄)` 의 **줄 수가 항목 이름 안에** 있었다.
+#   그 파일에 한 줄 쓸 때마다 6627→6667 로 문자열이 바뀌어 **같은 문제가 매시 「새 항목」**이 됐다.
+#   Darren 이 「이거 왜 계속 보내?」로 잡았다.
+#
+# 🔑 아래 집합 비교는 «맞게» 돌고 있었다 — 틀린 건 한 층 아래, **원소의 식별자**다.
+#   증거의 형태: 로그의 `항목=13` 이 8시간 내내 고정인데 알림은 왔다.
+#   **개수가 안 변하는데 소리가 나면 그건 원소 「이름」이 바뀐 것이다.**
+#
+# 🔴 **문자열 정규화는 구조적으로 불가능했다**(폐기한 옛 처방). 「괄호 안」을 접으면 괄호 «밖»에
+#   측정값을 둔 것들(목차 불일치·코드펜스 홀수·`N일 미수정`)이 남고, 「숫자+단위」를 전부 접으면
+#   `500줄 초과`/`1000줄 초과` 가 같은 키가 되어 **한도를 넘어서는 순간이 조용해진다.**
+#   ⇒ 배치를 쫓지 말고 **내는 쪽이 키를 준다** (코어 `#141`, 최종 전수 26곳 중 키 14).
+#
+# 🔴 **분모 가드 — 「전부인가」층.** 사람 줄과 키가 **행 단위로 짝**이라는 게 이 비교의 전제다.
+#   그 짝이 깨졌는데 그냥 돌면 **엉뚱한 항목을 엉뚱한 키로 판정**하고, 결과는 「조용」쪽으로 기운다
+#   (모르는 키가 없어 보이니까). 검사기가 옛 판이면 키가 0건인데 **그것도 「새 항목 없음」과
+#   같은 모양**이다. ⇒ 여기서 갈라 **판정 불가로 시끄럽게** 낸다.
+if [ "$KEYCOUNT" -ne "$COUNT" ]; then
+  notify "⚠️ 기억 검사 **판정 불가** — 항목 ${COUNT}건인데 키가 ${KEYCOUNT}건이다
+검사기가 안정 키 채널(\`LINT_KEY_FILE\`)을 안 내고 있다 — 정본 클론이 낡았을 수 있다.
+\`\`\`
+$(printf '%s' "$OUT" | tail -8)
+\`\`\`"
+  echo "$STAMP 판정 불가 — 항목=$COUNT 키=$KEYCOUNT (키 채널 부재/불일치)" >> "$LOG"
+  exit 2
+fi
+
 # 이전 집합과 비교. 상태 파일이 없으면 첫 실행이므로 현재 전부가 '새 항목'이다(1회 통보).
-PREV=""
-[ -f "$STATE" ] && PREV="$(cat "$STATE")"
-NEW="$(comm -13 <(printf '%s\n' "$PREV" | sort -u) <(printf '%s\n' "$CURRENT" | sort -u) | grep -c . || true)"
-NEW_LINES="$(comm -13 <(printf '%s\n' "$PREV" | sort -u) <(printf '%s\n' "$CURRENT" | sort -u) | sed '/^$/d')"
+# 🔸 상태 파일에는 이제 **키**가 산다(사람 줄이 아니라). 첫 줄의 표지로 옛 형식과 가른다 —
+#   옛 상태를 키로 읽으면 **13건이 통째로 「새 항목」**이 되어, 이 수리가 마지막으로 한 번
+#   크게 우는 것으로 끝난다. Darren 이 잡은 그 소음을 고치면서 같은 소음을 내지 않는다.
+STATE_MARK='#keys-v1'
+PREV_KEYS=""
+MIGRATED=0
+if [ -f "$STATE" ]; then
+  if [ "$(head -1 "$STATE")" = "$STATE_MARK" ]; then
+    PREV_KEYS="$(tail -n +2 "$STATE")"
+  else
+    MIGRATED=1        # 옛 형식(사람 줄) — 지금 것을 기준선으로 삼는다
+  fi
+fi
+
+# 🔸 출력은 **현재 항목 원문**이다(측정값 포함) — 키는 판정용이고 사람이 읽는 건 실제 값이다.
+#   순서도 lint 출력 순서를 그대로 둔다(옛 `comm` 은 정렬을 강제했다).
+NEW_LINES=""
+if [ "$MIGRATED" -eq 0 ]; then
+  _i=0
+  NEW_LINES="$(printf '%s\n' "$CURRENT" | while IFS= read -r _l; do
+      [ -n "$_l" ] || continue
+      _i=$((_i + 1))
+      _k="$(printf '%s\n' "$KEYS" | sed -n "${_i}p")"
+      printf '%s\n' "$PREV_KEYS" | grep -qxF -- "$_k" || printf '%s\n' "$_l"
+  done)"
+fi
+NEW="$(printf '%s\n' "$NEW_LINES" | grep -c . || true)"
+
+write_state() { { printf '%s\n' "$STATE_MARK"; printf '%s\n' "$KEYS"; } > "$STATE"; }
+
+# 🔴 **전환은 «한 줄로» 알린다** (룬드 실증, 2026-08-02).
+#   처음엔 여기서 조용히 넘겼다. 그런데 삼키는 건 「이미 알린 것」만이 아니다 —
+#   **전환 시점에 처음 나타난 항목도 같이 기준선에 들어가서, 해소됐다 다시 생기기 전엔
+#   영영 안 알린다.** 「1회 소음 방지」가 아니라 **그 시점의 미발견 문제를 영구 매장**이다.
+#   실증(룬드): 전환 회차 0건 · **다음 회차도 0건**(새 키가 기준선에 삼켜져 있다).
+# 🔑 이 스크립트의 나머지는 전부 **시끄러운 쪽으로 실패**하는데(판정 불가 → 알림 + rc=2)
+#   여기만 반대였다. 피하려던 건 「전 항목 통째 나열」이고, **한 줄은 그게 아니다.**
+# 🔸 그리고 전환이 **보인다** — 로그에만 남기면 아무도 안 본다.
+if [ "$MIGRATED" -eq 1 ]; then
+  if notify "🔸 기억 검사 — 항목 식별 방식을 바꿨다(사람 줄 → **안정 키**). 현재 ${COUNT}건을 기준선으로 삼는다. 새 항목 알림은 다음 회차부터."; then
+    write_state
+    echo "$STAMP 상태 형식 전환(사람 줄 → 키) — ${COUNT}건을 기준선으로, 1줄 통보" >> "$LOG"
+    exit 0
+  fi
+  # 통보가 실패했으면 상태를 갱신하지 않는다 — 아무도 모르는 채로 기준선이 잡히면 안 된다(⑧과 같은 규율).
+  echo "$STAMP 전환 통보 실패 — 상태를 갱신하지 않는다(다음 회차에 다시 시도)" >> "$LOG"
+  exit 3
+fi
 
 # 상태는 **비교 후 항상** 갱신한다. 알림 실패와 무관하게 갱신하면 다음 회차에 조용해지므로,
 # 알림을 보내는 경우에만 갱신한다 — "조치했다"가 "해소했다"를 대신하지 않게.
 if [ "$NEW" -eq 0 ]; then
   # 새 항목 없음 = 조용. 상태만 최신화(해소된 항목 반영)
-  printf '%s\n' "$CURRENT" > "$STATE"
+  write_state
   exit 0
 fi
 
@@ -113,7 +196,7 @@ MSG="🔸 기억 검사 — **새 항목 ${NEW}건** (전체 ${COUNT}건)
 $NEW_LINES
 \`\`\`"
 if notify "$MSG"; then
-  printf '%s\n' "$CURRENT" > "$STATE"
+  write_state
 else
   echo "$STAMP 알림 전송 실패 — 상태를 갱신하지 않는다(다음 회차에 다시 알린다)" >> "$LOG"
   exit 3
