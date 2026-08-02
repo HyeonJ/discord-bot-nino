@@ -167,10 +167,9 @@ describe('health-checker — 경보 발송 실패를 삼키지 않는다', () =>
   const fs = require('fs');
   const os = require('os');
   const path = require('path');
-  const KEY = require.resolve('../relay-addons/health-checker');
 
   function freshLoad(envVal) {
-    delete require.cache[KEY];
+    jest.resetModules();          // 🔴 jest 는 자체 레지스트리라 require.cache 조작이 무효다
     if (envVal === undefined) delete process.env.DISCORD_SEND_BIN;
     else process.env.DISCORD_SEND_BIN = envVal;
     return require('../relay-addons/health-checker');
@@ -224,22 +223,36 @@ describe('health-checker — 실패한 발송을 "보냈다"로 만들지 않는
   const fs = require('fs');
   const os = require('os');
   const path = require('path');
-  const KEY = require.resolve('../relay-addons/health-checker');
 
+  // 🔴 스텁이 **불렸다는 사실 자체**를 남긴다 — 안 남기면 아래 「실패 집계 0」이 항진명제가 된다.
+  //   실제로 그랬다(2026-08-02): 모듈 재적재가 무효라 경보 경로에 아예 안 들어갔는데도
+  //   `alertSendFailures() === 0` 은 그대로 참이라 **이 대조군만 초록이었다.**
+  //   🔑 「0 이다」는 «안 실패했다»와 «안 돌았다»를 못 가른다. 분모를 같이 잰다.
   function loadWith(binBody) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hcwire-'));
     const bin = path.join(dir, 'send');
-    fs.writeFileSync(bin, binBody, { mode: 0o755 });
-    delete require.cache[KEY];
+    const calls = path.join(dir, 'calls.txt');
+    const logged = binBody.replace(
+      /^#!.*\n/,
+      // 🔑 «호출당 한 줄» 고정 표지 — 인자를 그대로 적으면 알림이 여러 줄이라 1건이 3줄이 된다
+      //   (오늘 아침 `grep -c` 에서 밟은 「줄을 센다 ≠ 건을 센다」와 같은 축)
+      (m) => `${m}printf 'CALL\\n' >> ${JSON.stringify(calls)}\n`
+    );
+    fs.writeFileSync(bin, logged, { mode: 0o755 });
+    jest.resetModules();          // 🔴 jest 는 자체 레지스트리라 require.cache 조작이 무효다
     process.env.DISCORD_SEND_BIN = bin;
     // 닿지 않는 주소 → fetchHealth 실패 → issues 발생 → 경보 경로로 들어간다
     process.env.HEALTH_TARGETS = '하루:http://127.0.0.1:1/health';
-    return { hc: require('../relay-addons/health-checker'), dir };
+    const sendCount = () =>
+      (fs.existsSync(calls) ? fs.readFileSync(calls, 'utf8').trim().split('\n').filter(Boolean).length : 0);
+    return { hc: require('../relay-addons/health-checker'), dir, sendCount };
   }
 
   test('🧪 [양성 대조군] 발송이 성공하면 실패 집계가 0 이다', async () => {
-    const { hc, dir } = loadWith('#!/bin/bash\nexit 0\n');
+    const { hc, dir, sendCount } = loadWith('#!/bin/bash\nexit 0\n');
     await hc.checkAll();
+    // 🔑 먼저 «돌았나»를 잰다 — 이게 0 이면 아래 집계 0 은 아무 뜻이 없다
+    expect(sendCount()).toBe(1);
     expect(hc.alertSendFailures()).toBe(0);
     fs.rmSync(dir, { recursive: true, force: true });
   });
