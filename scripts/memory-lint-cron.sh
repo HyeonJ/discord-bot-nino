@@ -26,7 +26,14 @@ LINT="${LINT:-$BOT_DIR/scripts/lint-nino-memory.sh}"
 STATE="${STATE:-$BOT_DIR/logs/memory-lint.state}"
 HEARTBEAT="${HEARTBEAT:-$BOT_DIR/logs/memory-lint.heartbeat}"
 LOG="${LOG:-$BOT_DIR/logs/memory-lint.log}"
-NOTIFY_TARGET="${NOTIFY_TARGET:-봇-놀이터}"
+# 🔴 대상은 «내 채널»이다 (2026-08-02, 룬드 요청 M:47la)
+#   이 검사는 lint-nino-memory.sh 를 통해 **내 메모리만** 훑는다(MEMORY_AUTO_DIR).
+#   그런데 기본 대상이 봇-놀이터(룬드와 공용)라, 단일 소유자 보고가 남에게도 갔다.
+#   룬드는 같은 경보를 세 번 받고 매번 `wc -l` 로 자기 것을 되재서 「내 것 아니네」로 닫았다
+#   — **행동이 안 바뀌는 정보**다. 파일명이 양쪽 레포에 같아서(inbox-YYYY-MM-DD.md) 더 나빴다.
+# 🔑 상호 리뷰 목적이면 **양쪽이 대칭으로** 보내야 하고, 그 전에 **양쪽 메모리 규칙부터** 맞아야 한다
+#   (지금은 날짜별 vs 기간별로 달라서, 서로의 경보가 「저쪽 기준 위반」으로만 뜬다). 8/5 안건.
+NOTIFY_TARGET="${NOTIFY_TARGET:-현인-업무}"
 DISCORD_SEND="${DISCORD_SEND:-$BOT_DIR/src/discord-send}"
 
 [ -f "$BOT_DIR/.env" ] && { set -a; . "$BOT_DIR/.env"; set +a; }
