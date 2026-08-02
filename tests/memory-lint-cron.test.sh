@@ -202,14 +202,35 @@ echo "⑤-e 🔴 **옛 상태 파일(사람 줄)은 조용히 기준선으로 �
 printf '%s\n' "🚨 1000줄 초과: inbox.md (6627줄) — 통째로 읽힌다" > "$ROOT/logs/state"   # 옛 형식
 kitems "docsize:🚨 1000줄 초과:inbox.md|🚨 1000줄 초과: inbox.md (6772줄) — 통째로 읽힌다"; rc_is 1
 out="$(run)"; rc=$?
-[ "$(sent_count)" -eq 0 ] && ok "전환 회차는 조용하다" || bad "전환하면서 또 알렸다" "$(cat "$ROOT/sent.txt")"
+[ "$(sent_count)" -eq 1 ] && ok "전환을 «한 줄»로 알린다" \
+  || bad "전환 통보가 1건이 아니다 (0=조용히 삼킴 · 2+=통째 나열)" "$(cat "$ROOT/sent.txt")"
+grep -q '기준선' "$ROOT/sent.txt" && ok "무엇을 기준선으로 삼았는지 말한다" \
+  || bad "전환이라고만 하고 기준선을 안 말한다" "$(cat "$ROOT/sent.txt")"
+grep -q '통째로 읽힌다' "$ROOT/sent.txt" && bad "전환 통보에 항목을 통째로 나열했다 (피하려던 그 소음)" "$(cat "$ROOT/sent.txt")" \
+  || ok "항목을 나열하지 않는다"
 [ "$(head -1 "$ROOT/logs/state")" = "#keys-v1" ] && ok "상태가 키 형식으로 바뀐다" \
   || bad "상태 형식이 안 바뀌었다" "$(cat "$ROOT/logs/state")"
 : > "$ROOT/sent.txt"
 kitems "docsize:🚨 1000줄 초과:inbox.md|🚨 1000줄 초과: inbox.md (6999줄) — 통째로 읽힌다"; rc_is 1
 run >/dev/null
-[ "$(sent_count)" -eq 0 ] && ok "전환 다음 회차도 조용하다 (기준선이 실제로 잡혔다)" \
+[ "$(sent_count)" -eq 0 ] && ok "전환 다음 회차는 조용하다 (기준선이 실제로 잡혔다)" \
   || bad "전환 후 첫 비교에서 울었다" "$(cat "$ROOT/sent.txt")"
+
+echo "⑤-f 🔴 [룬드 실증] **전환 통보가 실패하면 기준선을 잡지 않는다** — 아무도 모르는 채로 삼키지 않게"
+# 🔑 ⑤-e 가 「한 줄 온다」를 잠근다면 여기는 「그 한 줄이 «실제로 닿았을 때만» 기준선이 된다」를 잠근다.
+#   전환은 **되돌릴 수 없는 자리**다(옛 상태를 덮어쓴다). 통보가 유실되면 그 시점의 미발견 항목이
+#   **아무 흔적 없이** 영구 매장된다 — ⑧ 과 같은 규율을 여기에도 건다.
+rm -f "$ROOT/logs/state"
+printf '%s\n' "옛 형식 한 줄" > "$ROOT/logs/state"
+kitems "keyX|X 항목"; rc_is 1
+out="$(run 1)"; rc=$?                                  # 전송 실패 주입
+[ "$rc" -ne 0 ] && ok "전환 통보 실패를 rc 로 드러낸다 (rc=$rc)" || bad "통보가 실패했는데 rc=0" "$out"
+[ "$(head -1 "$ROOT/logs/state")" != "#keys-v1" ] && ok "상태를 갱신하지 않는다 — 다음 회차에 다시 시도" \
+  || bad "통보 실패인데 기준선을 잡았다 (그 시점 항목이 영구 매장된다)" "$(cat "$ROOT/logs/state")"
+: > "$ROOT/sent.txt"
+out="$(run 0)"                                         # 다음 회차: 전송 정상
+[ "$(sent_count)" -eq 1 ] && ok "다음 회차에 전환 통보를 실제로 다시 보낸다" \
+  || bad "재통보 안 됨" "$(cat "$ROOT/sent.txt")"
 
 echo "⑥ 판정 불가(rc≠0,1)는 **알린다** — 검사가 죽은 것을 '문제 없음'과 같게 두지 않는다"
 items "무엇이든"; rc_is 4
