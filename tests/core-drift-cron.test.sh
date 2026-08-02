@@ -11,6 +11,11 @@
 #      그걸 정상으로 접으면 죽은 검사가 초록으로 보인다. ⑧이 그 자리를 잠근다.
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# 🔴 코어 정본이 없으면 이 파일 «전체»가 판정 불가다 — 없으면 나머지 단언이 전부
+#   *틀린 이유로* 빨개진다(원래 빨간 판 위의 빨강은 아무도 못 본다). 이유·경위는 헬퍼에.
+REPO="${REPO:-$(cd "$SCRIPT_DIR/.." && pwd)}"
+. "$REPO/tests/lib/require-core.sh"
 BOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 SCRIPT="$BOT/scripts/core-drift-cron.sh"
 
