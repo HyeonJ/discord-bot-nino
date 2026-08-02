@@ -49,7 +49,16 @@
 set -uo pipefail
 
 SRC="${SHARED_CONTRACT_SRC:-}"
-BASE="${SHARED_CONTRACT_BASELINE:-$HOME/discord-bot-nino/config/shared-contracts.baseline}"
+# 🔴 기준선 경로는 **자기 위치**에서 유도한다 — `$HOME` 으로 잡으면 워크트리에서 돌릴 때
+#   **main 트리의 기준선을 덮어쓴다**(2026-08-02 실측: 실제로 밟았다).
+#   워크트리의 `git status` 는 그 파일을 안 보여주니 **그 트리만 보면 아무 일도 안 난 것처럼 보인다.**
+#   그대로 main 에서 브랜치를 옮기면 기준선이 증발한다 — 같은 날 아침 이미 한 번 난 사고다.
+#   🔑 「어디에 쓰는가」를 `$HOME` 으로 잡은 도구는 **사본이 여럿인 순간 남의 사본을 쓴다.**
+#     우리는 「worktree 로 main 중단 없이 작업」을 규칙으로 쓰므로 상시 발동 조건이다.
+#   ⚠️ `$0` 가 아니라 `${BASH_SOURCE[0]}` 다 — source 되어도 자기 파일을 가리킨다.
+_CSC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_CSC_REPO="$(cd "$_CSC_DIR/.." && pwd)"
+BASE="${SHARED_CONTRACT_BASELINE:-$_CSC_REPO/config/shared-contracts.baseline}"
 WRITE=0
 WRITE_TOKEN=""
 [ "${1:-}" = "--write-baseline" ] && { WRITE=1; WRITE_TOKEN="${2:-}"; }

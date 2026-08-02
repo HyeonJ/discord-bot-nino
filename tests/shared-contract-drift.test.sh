@@ -348,5 +348,40 @@ out="$(SHARED_CONTRACT_SRC="$G/src2.md" SHARED_CONTRACT_BASELINE="$G/config/b.ba
 case "$out" in *"커밋되지 않았다"*) bad "대조군 실패 — 커밋했는데도 경고한다" "무음" "«${out}»" ;; *) ok "  대조군: 커밋하면 조용하다" ;; esac
 
 echo
+echo "── ⑮ 기준선 경로는 «자기 위치»에서 유도한다 (워크트리 오염 방지) ──"
+# 🔴 2026-08-02 실측: `BASE` 가 `$HOME/discord-bot-nino/config/...` 로 **하드코딩**돼 있어서
+#   워크트리에서 `--write-baseline` 을 돌리면 **main 트리의 기준선이 바뀌었다.**
+#   워크트리의 `git status` 는 그 파일을 안 보여주니 **그 트리만 보면 아무 일도 안 난 것처럼 보인다.**
+#   그대로 main 에서 브랜치를 옮기면 기준선이 증발한다 — 오늘 아침 이미 한 번 난 사고다.
+#   🔑 「어디에 쓰는가」를 `$HOME` 으로 잡은 도구는 **사본이 여럿인 순간 남의 사본을 쓴다.**
+#     우리는 「worktree 로 main 중단 없이 작업」을 규칙으로 쓰므로 **상시 발동 조건**이다.
+#   경위 [[inbox-2026-07-31]] #158
+W15="$(mktemp -d "${TMPDIR:-/tmp}/scpath.XXXXXX")"
+mkdir -p "$W15/tree/scripts" "$W15/tree/config" "$W15/fakehome/discord-bot-nino/config"
+cp "$CHECK" "$W15/tree/scripts/"
+printf '# 계약\n\n## 🤝 절\n\n- 🤝 조항 하나\n' > "$W15/src.md"
+
+# 기준선 경로를 «주지 않고» 돌린다 — 도구가 스스로 어디에 쓸지 정하는 갈래다.
+_o15="$(env -u SHARED_CONTRACT_BASELINE HOME="$W15/fakehome" \
+        SHARED_CONTRACT_SRC="$W15/src.md" bash "$W15/tree/scripts/check-shared-contracts.sh" 2>&1)"
+_tok15="$(printf '%s' "$_o15" | LC_ALL=C sed -n 's/.*--write-baseline \([0-9a-f]*\).*/\1/p' | head -1)"
+env -u SHARED_CONTRACT_BASELINE HOME="$W15/fakehome" SHARED_CONTRACT_SRC="$W15/src.md" \
+    bash "$W15/tree/scripts/check-shared-contracts.sh" --write-baseline "${_tok15:-x}" >/dev/null 2>&1
+
+if [ -s "$W15/tree/config/shared-contracts.baseline" ]; then
+  ok "사본 트리에서 돌리면 «그 트리»의 config/ 에 쓴다"
+else
+  bad "자기 트리에 기록" "$W15/tree/config/shared-contracts.baseline 존재" "없음 — 경로를 자기 위치에서 안 잡는다"
+fi
+
+# 🧪 [대조군] 그리고 «남의 트리»($HOME 쪽)에는 **안 써야** 한다. 위 검사만으론 둘 다 쓰는 경우를 못 가른다.
+if [ -e "$W15/fakehome/discord-bot-nino/config/shared-contracts.baseline" ]; then
+  bad "🧪 남의 트리 오염" "격리 HOME 쪽에 안 씀" "$W15/fakehome/discord-bot-nino/config/ 에 썼다 — 워크트리 오염 재현"
+else
+  ok "  🧪 [대조군] \$HOME/discord-bot-nino/config/ 에는 안 쓴다"
+fi
+rm -rf "$W15"
+
+echo
 echo "  통과 $pass · 실패 $fail"
 [ "$fail" -eq 0 ] || exit 1
