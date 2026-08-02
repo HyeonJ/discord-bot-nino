@@ -19,6 +19,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$SCRIPT_DIR/.." && pwd)"
 CHECK="$REPO/scripts/check-usage-alert.sh"
 
+. "$SCRIPT_DIR/lib/capture-rc.sh"
+
 pass=0; fail=0; skip=0
 ok()  { echo "  ✅ $1"; pass=$((pass + 1)); }
 bad() { echo "  ❌ $1"; [ -n "${2:-}" ] && echo "     want: $2"; [ -n "${3:-}" ] && echo "     got:  $3"; fail=$((fail + 1)); }
@@ -299,8 +301,13 @@ for i, ln in enumerate(open(sys.argv[1]), 1):
             bad.append("%d행: `%s` → %s" % (i, raw, fix))
 print('\n'.join(bad))
 PYEOF
+_hf_rc_viol=$?   # 🔴 PYEOF 바로 다음 줄 — 한 줄만 밀려도 딴 명령의 rc 다
 viol="$(cat "${_hf_viol}")"; rm -f "${_hf_viol}"
-[ -z "$viol" ] && ok "GNU 전용 명령 0건" || bad "이식성 위반" "0건" "$viol"
+if _hf_msg="$(hf_verdict "$_hf_rc_viol" "이식성")"; then
+    [ -z "$viol" ] && ok "GNU 전용 명령 0건" || bad "이식성 위반" "0건" "$viol"
+else
+    bad "$_hf_msg" "rc=0" "«${viol}»"
+fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 echo "── ⑪ 🔴 인자 계약 (코어 cli-guard) — 09:50 사고의 **형태**를 막는다 ──"

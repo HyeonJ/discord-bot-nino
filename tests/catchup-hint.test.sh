@@ -49,6 +49,8 @@ REPO="$(cd "$SCRIPT_DIR/.." && pwd)"
 HINT="$REPO/scripts/catchup-hint.sh"
 REAL_CLI="$HOME/.local/bin/yaksu-history"
 
+. "$SCRIPT_DIR/lib/capture-rc.sh"
+
 pass=0; fail=0; skip=0; skip_assert=0
 ok()   { echo "  ✅ $1"; pass=$((pass + 1)); }
 bad()  { echo "  ❌ $1"; echo "     want: $2"; echo "     got:  $3"; fail=$((fail + 1)); }
@@ -379,9 +381,14 @@ n = sum(1 for g in d.get("hooks", {}).get("Stop", [])
           for h in g.get("hooks", []) if "session-heartbeat" in h.get("command", ""))
 print(n)
 PYEOF
+_hf_rc_hooked=$?   # 🔴 PYEOF 바로 다음 줄 — 한 줄만 밀려도 딴 명령의 rc 다
 hooked="$(cat "${_hf_hooked}")"; rm -f "${_hf_hooked}"
-[[ "$hooked" -ge 1 ]] && ok "settings.json Stop 훅에 session-heartbeat가 걸려 있다" \
-  || bad "settings.json Stop 훅에 session-heartbeat가 걸려 있다" "1건 이상" "${hooked}건"
+if _hf_msg="$(hf_verdict "$_hf_rc_hooked" "Stop 훅 조회")"; then
+    [[ "$hooked" -ge 1 ]] && ok "settings.json Stop 훅에 session-heartbeat가 걸려 있다" \
+      || bad "settings.json Stop 훅에 session-heartbeat가 걸려 있다" "1건 이상" "${hooked}건"
+else
+    bad "$_hf_msg" "rc=0" "«${hooked}»"
+fi
 
 echo ""
 echo "🟡 배선 — 호출부가 인자를 넘기는지 (테스트가 스크립트만 직접 부르면 배선은 검사 밖):"
@@ -469,9 +476,14 @@ elif re.search(r'2>&1', m.group(0)) or re.search(r'2>\s*/dev/null', m.group(0)):
 
 print(" | ".join(problems) if problems else "OK")
 PYEOF
+_hf_rc_portab=$?   # 🔴 PYEOF 바로 다음 줄 — 한 줄만 밀려도 딴 명령의 rc 다
 portab="$(cat "${_hf_portab}")"; rm -f "${_hf_portab}"
-[[ "$portab" == "OK" ]] && ok "GNU date -d · 빈 배열 확장 둘 다 없다(bash 3.2 · BSD 안전)" \
-  || bad "GNU date -d · 빈 배열 확장 둘 다 없다" "OK" "$portab"
+if _hf_msg="$(hf_verdict "$_hf_rc_portab" "이식성")"; then
+    [[ "$portab" == "OK" ]] && ok "GNU date -d · 빈 배열 확장 둘 다 없다(bash 3.2 · BSD 안전)" \
+      || bad "GNU date -d · 빈 배열 확장 둘 다 없다" "OK" "$portab"
+else
+    bad "$_hf_msg" "rc=0" "«${portab}»"
+fi
 
 echo ""
 echo "🔴 러너 계약 — 시험이 증거를 버리지도, 섞지도 않는다:"
