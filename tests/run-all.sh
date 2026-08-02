@@ -32,4 +32,5 @@ exec bash "$RUNNER" \
     --root "$ROOT" \
     "$@" \
     --shell-glob 'tests/*.test.sh' \
-    --cmd-allow-stderr 'npx jest --runInBand'
+    --cmd-allow-stderr 'npx jest --runInBand' \
+    --cmd-allow-stderr 'bun test tests/vault-audit.test.js tests/vault-audit-llm.test.js'
