@@ -17,6 +17,19 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$SCRIPT_DIR/.." && pwd)"
 WD="$REPO/scripts/nino-watchdog.sh"
 
+# 🔴 코어(cli-guard) 부재를 이 파일에서 «두 방향으로» 잘못 세고 있었다 (2026-08-02 실측).
+#   nino-watchdog.sh 는 부팅에서 cli-guard 를 찾고, 못 찾으면 일부러 exit 한다. 그러면
+#   run_wd 가 **빈 문자열**을 돌려주는데 — 이 파일의 단언은 그것을 두 갈래로 읽는다:
+#       ❌ 2시간 침묵 → 알림 전송      want: 침묵 알림  got: <없음>   ← 거짓 «빨강»
+#       ✅ 1분 전 턴 종료 → 조용         (오탐 없음)                  ← 거짓 «초록»
+#   🔑 **같은 부재가 한 파일 안에서 거짓 빨강 67건과 거짓 초록을 동시에 만든다.**
+#      「알림이 없어야 한다」는 단언은 **시체를 보고도 통과**하므로, 빨간 쪽만 고치면
+#      초록 쪽이 남아 다음에 또 속인다. ⇒ 파일 전체를 판정 불가로 내려놓는 것이 맞다.
+#   ⚠️ 그래서 여기서 걸러진 「통과 71」을 커버리지 손실로 세지 말 것 — 그중 일부는
+#      애초에 «못 잰 것»이었다. 코어가 닿는 환경에선 144건이 그대로 다시 돈다.
+#   경위: #130(같은 뿌리, 시험 쪽 입구만 막았다) · [[inbox-2026-07-31]]
+. "$REPO/tests/lib/require-core.sh"
+
 pass=0; fail=0; skip=0; skip_assert=0
 ok()  { echo "  ✅ $1"; pass=$((pass + 1)); }
 bad() { echo "  ❌ $1"; echo "     want: $2"; echo "     got:  $3"; fail=$((fail + 1)); }
@@ -156,6 +169,14 @@ run_wd() {   # 환경 초기화 후 워치독 1회 실행 (cron 한 tick)
     NINO_HISTORY_CLI="$WORK/bin/yaksu-history" \
     NINO_SESSION_LOG_DIR="$WORK/sessions" \
     bash "$WORK/scripts/nino-watchdog.sh" >/dev/null 2>"$WORK/stderr.txt"
+  # 🔴 위 주석은 「stderr 를 삼키지 않는다」고 적어놨는데 **파일에 넣기만 하고 아무도 안 봤다**
+  #   (2026-08-02 실측). 그 사이 워치독은 코어 부재로 부팅에서 죽고 있었고, 화면에 뜬 것은
+  #   `got: <없음>` 뿐이라 **이틀 동안 원인이 안 보였다** — 사본에 한 줄 얹고서야 보였다.
+  #   🔑 **주석이 코드가 갖지 않은 성질을 주장하면, 그 축은 감시되는 것처럼 보이면서 비어 있다.**
+  #   ⇒ 비어 있지 않으면 화면에 올린다. 러너는 stderr 를 「선언됨」으로 집계하므로 초록을 안 깬다.
+  if [ -s "$WORK/stderr.txt" ]; then
+    sed 's/^/     ⚠️ wd-stderr: /' "$WORK/stderr.txt" >&2
+  fi
   cat "$WORK/sent.txt" 2>/dev/null
 }
 set_hb()  { iso_off "-$1" > "$HB"; }        # $1 = 분 전
