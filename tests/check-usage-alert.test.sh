@@ -471,6 +471,92 @@ _fp="$STATE/fp.sh"
   || bad "🧪 오탐" "0건" "herestring 이나 이스케이프를 heredoc 으로 셌다"
 
 echo
+# ═════════════════════════════════════════════════════════════════════════════
+# 판정 «변화» 알림 — 401 이 구조적으로 `unreachable` 이던 것
+#
+# 🔴 결함(2026-08-03 실측): `exit 2` 네 갈래(no_token · network · http_error · parse-*)가
+#   전부 알림 블록(294행)의 **앞**에 있다. EXIT trap 은 있는데 안에 로그·뒤처리만 있어서
+#   **알림이 한 번도 도달할 수 없다.** 인증이 만료되면 401 이 30분마다 나는데 아무도 모른다.
+#   🔑 **그릇은 있고 내용물이 반쪽**이었다 — trap 이 있다는 것이 알린다는 뜻이 아니다.
+#
+# 🔑 「알림은 사실이 아니라 «변화»에」 — 401 이 지속되는 동안 매 회차 울리면 그건 소음이고,
+#   소음은 곧 무시된다. 그래서 «전이»에만 운다: ok→http_error 와 http_error→ok 둘 다.
+#   복구 알림을 빼면 「울리다 멈춘 것」과 「고쳐진 것」이 같은 모양이 된다.
+# ─────────────────────────────────────────────────────────────────────────────
+VDIR="$STATE/verdict"; mkdir -p "$VDIR"
+VSENT="$VDIR/sent.tsv"; VLOG="$VDIR/usage.log"; VSTATE="$VDIR/verdict.state"
+VARGS=""
+vrun() {   # vrun <env…> — 상태·로그를 «유지»한다(전이를 보려면 회차가 이어져야 한다)
+  : > "$VSENT"
+  env PATH="$WORK/bin:$PATH" SENT_LOG="$VSENT" \
+      CHECK_USAGE_CREDENTIALS="$CREDS" CHECK_USAGE_LOG="$VLOG" \
+      CHECK_USAGE_STATE="$VSTATE" DISCORD_SEND="$WORK/bin/discord-send" \
+      "$@" bash "$CHECK" $VARGS >/dev/null 2>&1
+  VRC=$?
+  return 0
+}
+vreset() { rm -f "$VSTATE" "$VLOG"; VARGS=""; }
+# 🔑 판정 변화 알림만 센다 — 사용량 경고와 같은 통로로 나가므로 문면으로 가른다.
+#   본문을 비알림(`{}`)으로 두면 사용량 경고는 0건이라 이 셈이 깨끗해진다.
+vsent() { LC_ALL=C grep -c '판정' "$VSENT" 2>/dev/null || true; }
+
+echo "── 판정 변화 알림 ──"
+
+# ① 핵심 결함: 401 이면 알림이 «나가야» 한다 (지금은 구조적으로 0건)
+vreset; vrun FAKE_CODE=401 FAKE_BODY='{}'
+[ "$(vsent)" -eq 1 ] \
+  && ok "401(http_error) 에서 판정 변화 알림 1건 — 조기 종료가 trap 에 닿는다" \
+  || bad "401 알림" "1건" "$(vsent)건 — exit 2 가 알림 앞에서 끊고 있다"
+
+# ② 같은 판정이 이어지면 두 번째 회차는 조용하다
+vrun FAKE_CODE=401 FAKE_BODY='{}'
+[ "$(vsent)" -eq 0 ] \
+  && ok "  같은 판정 반복은 0건 — 30분마다 우는 소음이 아니다" \
+  || bad "반복 회차" "0건" "$(vsent)건 — 변화가 아니라 상태에 울고 있다"
+
+# ③ 복구도 «변화»다 — 이게 없으면 「멈췄다」와 「고쳐졌다」가 같은 모양이다
+vrun FAKE_CODE=200 FAKE_BODY='{}'
+[ "$(vsent)" -eq 1 ] \
+  && ok "  http_error→ok 복구 알림 1건" \
+  || bad "복구 알림" "1건" "$(vsent)건"
+
+# ④ 🧪 [대조군] 정상이 이어지면 0건. 이게 없으면 ①③ 의 1건이
+#    «전이를 잡은 것»인지 «아무 때나 우는 것»인지 안 갈린다.
+vrun FAKE_CODE=200 FAKE_BODY='{}'
+[ "$(vsent)" -eq 0 ] \
+  && ok "  🧪 [대조군] ok→ok 는 0건 — 위 1건이 전이를 잡은 값이다" \
+  || bad "🧪 대조군" "0건" "$(vsent)건 — 판정과 무관하게 울고 있다"
+
+# ⑤ 토큰을 못 읽는 갈래도 닿는다 — trap 이므로 «모든» 조기 종료가 알림을 지난다
+vreset; vrun CHECK_USAGE_CREDENTIALS="$VDIR/nonexistent.json"
+[ "$(vsent)" -eq 1 ] \
+  && ok "no_token 갈래도 알림 1건 — 갈래마다 따로 붙이지 않았다" \
+  || bad "no_token 알림" "1건" "$(vsent)건"
+
+# ⑥ 🔴 발송이 실패하면 상태를 갱신하지 «않는다» — 다음 회차가 다시 시도한다.
+#    갱신해버리면 **못 보낸 전이가 영구히 묻힌다**(`#147` 에서 같은 자리를 밟았다).
+vreset; vrun FAKE_CODE=401 FAKE_BODY='{}' FAKE_SEND_RC=1
+vrun FAKE_CODE=401 FAKE_BODY='{}'
+[ "$(vsent)" -eq 1 ] \
+  && ok "발송 실패는 전이를 소비하지 않는다 — 다음 회차가 재시도" \
+  || bad "발송 실패 후 재시도" "1건" "$(vsent)건 — 못 보낸 전이가 묻혔다"
+
+# ⑦ 🔴 dry-run 도 전이를 소비하지 않는다. 진단 한 번이 **진짜 알림을 먹는** 자리다.
+vreset; VARGS="--dry-run"; vrun FAKE_CODE=401 FAKE_BODY='{}'
+VARGS=""; vrun FAKE_CODE=401 FAKE_BODY='{}'
+[ "$(vsent)" -eq 1 ] \
+  && ok "dry-run 은 전이를 소비하지 않는다 — 진단이 알림을 먹지 않는다" \
+  || bad "dry-run 후 실제 회차" "1건" "$(vsent)건 — 진단 한 번이 알림을 먹었다"
+
+# ⑧ 칸을 «시각 둘»로 둔다 — 하나면 「전이가 언제 났나」와 「언제 알렸나」가 안 갈린다.
+#    그 둘의 «간격»이 곧 `unreachable` 의 관측값이다(룬드 실측: 복구 32초 vs 복구 알림 30분 5초).
+vreset; vrun FAKE_CODE=401 FAKE_BODY='{}'
+_vl="$(LC_ALL=C grep -c 'verdict_changed_at=.*notified_at=' "$VLOG" 2>/dev/null || true)"
+[ "${_vl:-0}" -ge 1 ] \
+  && ok "로그에 verdict_changed_at·notified_at 두 칸 — 간격이 도달 지연의 관측값" \
+  || bad "로그 칸" "verdict_changed_at 과 notified_at 둘 다" "없거나 하나뿐"
+
+echo
 # 🔸 판정 불가를 요약줄에 **항상** 싣는다(0이어도). 조건부로 붙이면 0과 '이 칸이 없음'이
 #   같은 모양이 되고, 상대 봇이 요약줄만 보고 세는데 그 둘은 다른 사실이다.
 echo "  통과 $pass · 실패 $fail · 판정 불가 $skip   (코어 정본: $CORE_FIXTURE)"
