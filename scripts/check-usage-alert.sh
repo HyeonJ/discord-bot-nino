@@ -34,6 +34,8 @@ DISCORD_CHANNEL="현인-다용도"
 
 CREDENTIALS="${CHECK_USAGE_CREDENTIALS:-$HOME/.claude/.credentials.json}"
 LOG="${CHECK_USAGE_LOG:-$BOT_DIR/logs/check-usage-alert.log}"
+# 🔑 마지막으로 **알린** 판정. 「마지막 판정」이 아니다 — 못 보낸 회차는 여기 안 들어온다.
+STATE="${CHECK_USAGE_STATE:-$BOT_DIR/logs/check-usage-verdict.state}"
 DISCORD_SEND="${DISCORD_SEND:-$BOT_DIR/src/discord-send}"
 API_URL="${USAGE_API_URL:-https://api.anthropic.com/api/oauth/usage}"
 
@@ -47,6 +49,11 @@ CODE=na              # HTTP 상태코드
 #     단위를 넣을 마지막 기회는 **읽는 쪽이 생기기 전**이다.
 RETRY_AFTER=na       # 429 일 때 서버가 준 값(초) — 공유 백오프 설계의 근거가 된다
 ALERT=none           # none · sent · send_failed · dry_run
+# 🔑 **칸을 시각 둘로 둔다.** 하나면 「전이가 언제 났나」와 「언제 알렸나」가 안 갈리는데,
+#   그 둘의 «간격»이 정확히 도달 지연의 관측값이다 — 룬드 실측: 복구는 32초, 복구 «알림»은 30분 5초.
+#   ⚠️ 알림 줄로 구간 길이를 재면 **cron 주기만큼 부풀려진다.** 두 칸이 그 부풀림을 드러낸다.
+VERDICT_CHANGED_AT=na   # 판정이 직전 «알린» 값과 달라진 시각
+NOTIFIED_AT=na          # 그 변화를 실제로 알린 시각 · dry_run · send_failed
 NOTE=""
 
 mkdir -p "$(dirname "$LOG")" 2>/dev/null
@@ -55,13 +62,52 @@ mkdir -p "$(dirname "$LOG")" 2>/dev/null
 #    check-auth.sh 가 같은 형태로 *"죽은 걸 아무도 모른다"* 를 막았다(2026-07-25 사고).
 emit_log() {
     local rc=$?
-    printf '%s verdict=%s code=%s retry_after_s=%s alert=%s rc=%s%s\n' \
+    # 🔴 **알림을 여기 둔다.** 아래 판정 갈래는 전부 `exit 2` 라 스크립트 끝의 알림 블록에
+    #   **한 번도 닿지 못했다** — 401 이 30분마다 나도 조용했다(2026-08-03 실측).
+    #   갈래마다 알림을 붙이면 «새 갈래가 생길 때 또 빠진다» ⇒ 모든 경로가 지나는 자리는 여기뿐이다.
+    #   🔑 trap 이 있다는 것이 «알린다»는 뜻이 아니었다 — 그릇은 있고 내용물이 반쪽이었다.
+    verdict_transition
+    printf '%s verdict=%s code=%s retry_after_s=%s alert=%s rc=%s verdict_changed_at=%s notified_at=%s%s\n' \
         "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$VERDICT" "$CODE" "$RETRY_AFTER" "$ALERT" "$rc" \
+        "$VERDICT_CHANGED_AT" "$NOTIFIED_AT" \
         "${NOTE:+ note=$NOTE}" >> "$LOG" 2>/dev/null || true
     # 🔑 임시파일 뒤처리도 여기에 둔다 — **조기 종료가 뒤처리를 건너뛰는** 자리를 없앤다.
     #    ⚠️ `trap 'rm …' EXIT` 를 따로 걸면 안 된다: bash 는 EXIT trap 을 **덮어쓴다**(실측).
     #    위의 emit_log 가 조용히 사라진다. 뒤처리가 여럿이면 **한 trap 안에** 모은다.
     rm -f ${HDR:+"$HDR"} ${PARSE_ERR:+"$PARSE_ERR"} ${TMP_PY:+"$TMP_PY"}
+    return 0
+}
+# 🔑 **알림은 사실이 아니라 «변화»에 운다.** 401 이 이어지는 동안 매 회차 울면 그건 소음이고,
+#   소음은 곧 무시된다 — 지금 30분마다 오는 사용량 경고가 그 형태다(같은 값 아홉 번).
+#   ⇒ 전이에만 운다. **복구도 전이다** — 빼면 「울다 멈춘 것」과 「고쳐진 것」이 같은 모양이 된다.
+verdict_transition() {
+    # 🔴 `notify` 는 아래에서 정의된다. 인자 가드가 부트에서 끊으면 **아직 없다** —
+    #   없는 함수를 부르면 trap 안에서 죽어 **로그 한 줄까지 같이 사라진다**(고치려던 것이 재발).
+    declare -f notify >/dev/null 2>&1 || return 0
+    local prev nrc msg
+    prev="$(cat "$STATE" 2>/dev/null)"
+    # 🔑 상태가 없으면 **ok 로 본다.** 「모른다」로 두면 첫 회차가 비정상이어도 조용하다 —
+    #   배포 직후가 정확히 그 자리다. ok 를 가정하면 **엄격한 쪽으로 틀린다**(비정상이면 운다).
+    [ -n "$prev" ] || prev=ok
+    [ "$prev" = "$VERDICT" ] && return 0
+    VERDICT_CHANGED_AT="$(date '+%Y-%m-%dT%H:%M:%S%z')"
+    if [ "$VERDICT" = ok ]; then
+        # 🔑 변수 뒤에 비ASCII 가 붙으면 **중괄호로 닫는다**(repo-hygiene 계약). 여기선 `」` 가 바로 뒤라
+        #   bash 는 우연히 옳게 읽지만, 그 「우연히」에 기대는 것이 이 계약이 막으려는 것이다.
+        msg="✅ **사용량 감시 복구** — 판정이 「${prev}」 → 「ok」 로 돌아왔어."
+    else
+        msg="🔴 **사용량 감시 이상** — 판정이 「${prev}」 → 「${VERDICT}」. 사용량을 못 재고 있어."
+        [ "$CODE" != na ] && msg="$msg (HTTP $CODE)"
+    fi
+    notify "$msg"; nrc=$?
+    case "$nrc" in
+        0) NOTIFIED_AT="$(date '+%Y-%m-%dT%H:%M:%S%z')" ;;
+        3) NOTIFIED_AT=dry_run ;;
+        *) NOTIFIED_AT=send_failed ;;
+    esac
+    # 🔴 **보낸 것만 기준선이 된다.** 실패·dry-run 에도 갱신하면 그 전이는 «영구히» 묻힌다 —
+    #   `#147` 에서 밟은 자리 그대로다. 특히 dry-run: 진단 한 번이 진짜 알림을 먹는다.
+    [ "$nrc" -eq 0 ] && printf '%s\n' "$VERDICT" > "$STATE" 2>/dev/null
     return 0
 }
 trap emit_log EXIT
