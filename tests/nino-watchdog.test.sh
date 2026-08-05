@@ -41,13 +41,13 @@ skipt(){ echo "  ⛔ $1 (단언 ${3:-1}개분)"; echo "     사유: $2"
 # 총계 줄에 붙일 꼬리. 0 이면 아무것도 안 붙인다(없는 걸 시끄럽게 만들지 않는다).
 skip_note(){ [ "$skip" -gt 0 ] && printf ' (단언 %s개분)' "$skip_assert"; return 0; }
 
-# 🔴 시각 조작은 **정본 하나**를 지난다 — `tests/lib/timeshift.sh`.
+# 🔴 시각 조작은 **정본 하나**를 지난다 — `tests/../scripts/lib/timeshift.sh`.
 #   그 파일 머리말이 이 규칙을 이미 적어놨는데(*"사본 금지 · 시각 조작은 전부 여기를 지난다"*)
 #   이 시험은 정작 **source 를 안 하고** `touch -d '@N'`·`stat -c %Y` 를 직접 썼다.
 #   ⇒ 룬드 맥에서 `touch: out of range or illegal time specification` 으로 죽고,
 #     그 죽음이 **무관한 단언 4개를 빨갛게** 만들었다(2026-07-31 `#93` 리뷰 실측).
 #   🔑 정본을 세워두고 안 쓰면 정본이 아니다.
-. "$SCRIPT_DIR/lib/timeshift.sh"
+. "$SCRIPT_DIR/../scripts/lib/timeshift.sh"
 
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK/logs" "$WORK/scripts" "$WORK/src" "$WORK/bin"
