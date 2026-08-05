@@ -38,25 +38,34 @@ bad() { echo "  ❌ $1"; [ -n "${2:-}" ] && echo "     want: $2"; [ -n "${3:-}" 
 unk() { echo "  ⛔ $1"; [ -n "${2:-}" ] && echo "     $2"; unknown=$((unknown + 1)); }
 
 # 🔸 의도적 제외 — 시험처럼 생겼지만 러너가 돌 «대상이 아닌» 것
-EXCLUDE_RE='^(__init__\.py|conftest\.py|.*\.obsolete)$'
+# ⚠️ 경로는 **레포 상대경로**(`tests/…`)다 — basename 이 아니다(룬드 리뷰 ②·③).
+EXCLUDE_RE='(^|/)(__init__\.py|conftest\.py)$|\.obsolete$'
 
 # 🔸 유예 — 「고칠 것」이지 「안 고칠 것」이 아니다. **이름 + 사유**로 적고 사유가 풀리면 뺀다.
 #   ⚠️ 여기 적힌 파일이 «분모 안이 되면» 이 시험이 「목록에서 빼라」로 빨개진다
 #      (종료 조건을 아무도 기억하지 않아도 되게 — 룬드 baseline 과 같은 형태).
-DEFERRED_NAMES='test_of_drm.py
-test_of_extractor.py
-test_of_markdown.py
-test_of_migrate.py
-test_of_page.py
-test_of_state.py
-test_of_text.py'
+DEFERRED_NAMES='tests/test_of_drm.py
+tests/test_of_extractor.py
+tests/test_of_markdown.py
+tests/test_of_migrate.py
+tests/test_of_page.py
+tests/test_of_state.py
+tests/test_of_text.py'
 # 🔴 사유는 «빚이 보이게» 하는 것이 목적이지 «경로를 공개»하는 게 아니다 (룬드 리뷰 ④).
 #   이 레포는 public 이다 — 파일 자체는 추적 밖이라 유출은 아니지만, *「저기에 무엇이 있다」* 는
 #   **포인터가 공개된다.** 상세는 비공개 쪽(`memory/current-tasks.md` · inbox)에 둔다.
 DEFERRED_WHY='Darren 처분 대기 — 미추적 자산 관련(상세는 비공개 기록)'
 
-looks_like()     { ls -1 "$1/tests" 2>/dev/null | grep -E '(^test_.*\.(py|ts)$|\.test\.(sh|js|ts|py)$|\.obsolete$|^conftest\.py$|^__init__\.py$)' || true; }
-git_tracked()    { git -C "$1" ls-files 'tests/*' 2>/dev/null | sed 's|^tests/||' || true; }
+# 🔴 **재귀로 본다** (룬드 리뷰 ②). 초판은 `ls -1 tests` 라 **비재귀**였고, `tests/unit/orphan.test.sh`
+#   같은 한 층 아래 고아를 **「글롭 밖 0개 — 다 돈다」로 승인**했다. `git_tracked` 는 재귀로 잡는데
+#   `looks_like` 목록에 없으니 ⓑ 도 조용해서 **두 축이 같이 못 봤다.**
+#   🔑 **부재가 아니라 «거짓 초록»이라 등급이 다르다** — 이 가드의 존재 목적이 「러너가 안 도는 시험
+#     찾기」인데, 한 층 아래면 오히려 「다 돈다」고 말한다. `tests/unit/` 은 평범한 다음 수순이다.
+looks_like() {
+    find "$1/tests" -type f 2>/dev/null | sed "s|^$1/||" \
+        | grep -E '(^|/)(test_.*\.(py|ts)|.*\.test\.(sh|js|ts|py))$|\.obsolete$|(^|/)(conftest|__init__)\.py$' || true
+}
+git_tracked()    { git -C "$1" ls-files 'tests/*' 2>/dev/null || true; }
 # 🔴 「git 이 모른다」와 「여기 git 이 없다」는 다르다 — 뒤엣것은 **판정 불가**지 추적 밖이 아니다.
 #    안 가르면 비-git 디렉터리에서 **전부 추적 밖**으로 읽혀 오탐이 난다(대조군이 잡아준 자리).
 is_git_repo()    { git -C "$1" rev-parse --git-dir >/dev/null 2>&1; }
@@ -83,30 +92,62 @@ else
         "run-all.sh 의 --shell-glob 를 확인할 것. 「글롭 밖 0개」로 접지 않는다"
 fi
 
-# ② bun — `bun test <파일…>`. 파일이 **명시**돼 있어 그대로 읽힌다.
+# ② bun — `bun test <파일…>`. 파일이 **명시**돼 있어 그대로 읽힌다(레포 상대경로 그대로).
 BUN_FILES="$(grep -oE "bun test [^']*" "$RUN_ALL" 2>/dev/null | sed 's/^bun test //' \
-             | tr ' ' '\n' | sed 's|^tests/||' | sed '/^$/d' || true)"
+             | tr ' ' '\n' | sed '/^$/d' || true)"
 
-# ③ jest — 🔴 **선언에서 못 읽는다.** `npx jest` 는 무엇을 도는지 말하지 않고,
-#   `package.json` 의 jest 키에도 `testMatch` 가 없어 **기본값에 기댄다**(실측 2026-08-05).
-#   🔑 기본값을 이 시험이 «안다고 가정»하면 jest 가 바뀔 때 조용히 낡는다 — **이 시험이
-#     막으려는 병 그 자체**다. ⇒ 아는 척하지 않고 **판정 불가**로 내보낸다.
+# ③ jest — `npx jest` 자체는 무엇을 도는지 **말하지 않는다.** `package.json` 의 `testMatch` 가
+#   있으면 그것이 선언이고, **없으면 기본값에 기댄다**(실측 2026-08-05: 이 레포엔 없다).
+#   🔑 기본값을 이 시험이 «안다고 가정»하면 jest 가 바뀔 때 조용히 낡는다 — **막으려는 병 그 자체**.
+#     ⇒ 선언이 없으면 아는 척하지 않고 **판정 불가**로 내보낸다.
+#   🔴 **선언이 «있으면» 반드시 매칭에 써야 한다**(룬드 리뷰 ①). 초판은 읽기만 하고 안 써서,
+#     `testMatch` 를 선언하면 `.test.js` 가 어디에도 안 걸려 **실패**가 됐다 — 동결의 «출구»라던
+#     수리가 오히려 **문을 잠갔다.** 읽은 값을 안 쓰면 읽은 것이 아니다.
 JEST_DECL="$(grep -oE "npx jest[^']*" "$RUN_ALL" 2>/dev/null || true)"
-JEST_MATCH="$(python3 -c "
-import json,sys
-try: print(json.load(open('$GUARD_ROOT/package.json')).get('jest',{}).get('testMatch') or '')
-except Exception: print('')
-" 2>/dev/null)"
+# 🔸 도구 부재와 «선언 부재»를 가른다(룬드 리뷰 ③) — 방향은 안전해도 **판정 불가의 «사유»가
+#   거짓**이 되면, 이 파일의 주제가 정확히 그 구별이라 스스로를 배반한다.
+#   🔑 주입구를 두되 **아래 대조군이 실제로 쓴다** — 안 쓰면 없는 것과 같다(이 파일 헤더의 규칙).
+if [ "${GUARD_NO_PYTHON:-0}" = 1 ]; then PY_OK=0
+elif command -v python3 >/dev/null 2>&1; then PY_OK=1
+else PY_OK=0; fi
+JEST_MATCH=""
+if [ "$PY_OK" -eq 1 ]; then
+    # 🔸 `$GUARD_ROOT` 를 **보간하지 않는다** — 경로에 `'` 가 있으면 깨진다(룬드). `sys.argv` 로.
+    JEST_MATCH="$(python3 -c '
+import json, sys
+try:
+    m = json.load(open(sys.argv[1] + "/package.json")).get("jest", {}).get("testMatch") or []
+except Exception:
+    m = []
+print("\n".join(m))
+' "$GUARD_ROOT" 2>/dev/null || true)"
+fi
 
-# 🔑 covered 판정이 **선언에서** 나온다. 하드코딩 패턴은 없앴다.
-shell_covered() {
-    [ -n "$SHELL_GLOB" ] || return 1
-    case "$1" in ${SHELL_GLOB##*/}) return 0 ;; esac
-    return 1
-}
-bun_covered() { [ -n "$BUN_FILES" ] && printf '%s\n' "$BUN_FILES" | grep -qxF "$1"; }
-# jest 가 «돌 수도 있는» 모양인가 — 도는지 «아닌지»를 여기서 정하지 않는다. 판정 불가로 보낼 뿐.
-jest_shaped() { [ -n "$JEST_DECL" ] && [ -z "$JEST_MATCH" ] && case "$1" in *.test.js) return 0 ;; esac; return 1; }
+# 🔑 **글롭을 «해석»하지 않고 «확장»한다.** 초판은 `${SHELL_GLOB##*/}` 로 basename 패턴을 떼서
+#   `case` 에 물렸는데, `case` 의 `*` 는 **`/` 를 넘어가서** `tests/*.test.sh` 가
+#   `tests/unit/x.test.sh` 에도 맞는다. 반대로 글롭이 `tests/unit/*.test.sh` 로 바뀌면
+#   `*.test.sh` 로 눌려 **루트 파일을 covered 로 오판**한다 — **같은 병의 양방향**이다(룬드 ②).
+#   ⇒ 셸에게 확장을 시킨다. **러너가 하는 것과 «같은 연산»**이라 대리값 거리가 그만큼 줄어든다.
+_expand() { ( cd "$GUARD_ROOT" 2>/dev/null || exit 0; shopt -s nullglob; for p in $1; do printf '%s\n' "$p"; done ); }
+SHELL_COVERED=""
+[ -n "$SHELL_GLOB" ] && SHELL_COVERED="$(_expand "$SHELL_GLOB")"
+# jest 는 `**` 를 쓰므로 `globstar` 가 필요하다. 선언이 있을 때만 확장한다.
+JEST_COVERED=""
+if [ -n "$JEST_MATCH" ]; then
+    JEST_COVERED="$( ( cd "$GUARD_ROOT" 2>/dev/null || exit 0
+        shopt -s nullglob globstar
+        while IFS= read -r pat; do
+            [ -n "$pat" ] || continue
+            for p in $pat; do printf '%s\n' "$p"; done
+        done <<< "$JEST_MATCH" ) | sort -u)"
+fi
+
+_in_list() { [ -n "$2" ] && printf '%s\n' "$2" | grep -qxF "$1"; }
+shell_covered() { _in_list "$1" "$SHELL_COVERED"; }
+bun_covered()   { _in_list "$1" "$BUN_FILES"; }
+jest_covered()  { _in_list "$1" "$JEST_COVERED"; }
+# 🔴 jest 선언이 **없을 때만** 판정 불가로 보낸다. 선언이 있으면 위에서 확장돼 covered 로 잡힌다.
+jest_unknown() { [ -n "$JEST_DECL" ] && [ -z "$JEST_MATCH" ] && case "$1" in *.test.js) return 0 ;; esac; return 1; }
 
 LOOKS="$(looks_like "$GUARD_ROOT")"
 if is_git_repo "$GUARD_ROOT"; then
@@ -123,12 +164,13 @@ while IFS= read -r f; do
     printf '%s\n' "$f" | grep -qE "$EXCLUDE_RE" && continue
     # 🔴 러너가 **선언에서 못 읽히는** 몫이면 「글롭 밖」이 아니라 «판정 불가»다.
     #    「안 걸렸다」로 두면 그 자리가 초록이 되고, 그게 정확히 이 시험이 막으려는 것이다.
-    if jest_shaped "$f" && ! bun_covered "$f"; then
+    if jest_unknown "$f" && ! bun_covered "$f"; then
         UNKNOWN_GLOB="${UNKNOWN_GLOB}${f}"$'\n'; continue
     fi
     _og=1
     shell_covered "$f" && _og=0
-    [ "$_og" -eq 1 ] && bun_covered "$f" && _og=0
+    [ "$_og" -eq 1 ] && bun_covered  "$f" && _og=0
+    [ "$_og" -eq 1 ] && jest_covered "$f" && _og=0
     # 못 재는 자리에서는 «안 걸린다» 로 두지 않는다 — 아래에서 판정 불가로 따로 말한다
     if [ "$TRACK_MEASURABLE" -eq 1 ]; then
         _ot=1; printf '%s\n' "$TRACKED" | grep -qxF "$f" && _ot=0
@@ -159,8 +201,16 @@ fi
 
 NU="$(_count "$UNKNOWN_GLOB")"
 if [ "$NU" -gt 0 ]; then
-    unk "ⓐ 판정 불가 ${NU}개 — 러너 선언이 없어 «도는지 모른다»" \
-        "«$(_join "$UNKNOWN_GLOB")» — jest 에 testMatch 를 선언하면 이 칸이 비워진다"
+    # 🔴 **사유를 가른다** (룬드 리뷰 ③). 방향은 둘 다 안전하지만(판불로 접힘), 「선언이 없다」와
+    #   「읽을 도구가 없다」를 같은 문장으로 내면 **판정 불가의 «사유»가 거짓**이 된다 —
+    #   이 파일의 주제가 정확히 그 구별이라, 그러면 스스로를 배반한다.
+    if [ "$PY_OK" -eq 0 ]; then
+        unk "ⓐ 판정 불가 ${NU}개 — jest 선언을 «읽을 도구»가 없다(python3 부재). 선언 부재가 아니다" \
+            "«$(_join "$UNKNOWN_GLOB")» — python3 를 두면 이 칸의 사유부터 갈린다"
+    else
+        unk "ⓐ 판정 불가 ${NU}개 — 러너 선언이 없어 «도는지 모른다»" \
+            "«$(_join "$UNKNOWN_GLOB")» — jest 에 testMatch 를 선언하면 이 칸이 비워진다"
+    fi
 fi
 
 if [ "$TRACK_MEASURABLE" -eq 0 ]; then
@@ -216,6 +266,8 @@ if [ "${GUARD_SELFTEST:-1}" = "1" ]; then
     #   `2` 를 덮어쓴다. 실패 0 인 트리여야 「빨강 아닌데 0 도 아니다」가 보인다.
     #   🔑 새 축을 만들고 대조군을 안 붙이면, 그 축의 초록이 「0건」인지 「안 셌다」인지 안 갈린다.
     _t2="$(mktemp -d)"
+    # 🔸 `trap` 을 «갱신»한다 — 초판은 `_tmp` 만 걸려 있어 `_t2` 가 중간 실패 시 남았다(룬드 ④).
+    trap 'rm -rf "$_tmp" "${_t2:-}"' EXIT
     mkdir -p "$_t2/tests"
     printf "%s\n" "--shell-glob 'tests/*.test.sh'" "npx jest --runInBand" > "$_t2/tests/run-all.sh"
     : > "$_t2/tests/alpha.test.sh"
@@ -223,12 +275,55 @@ if [ "${GUARD_SELFTEST:-1}" = "1" ]; then
     git -C "$_t2" init -q -b main >/dev/null 2>&1
     git -C "$_t2" add tests/ >/dev/null 2>&1
     _o2="$(GUARD_ROOT="$_t2" GUARD_SELFTEST=0 bash "${BASH_SOURCE[0]}" 2>&1)"; _rc2=$?
-    rm -rf "$_t2"
+    # 🔴 여기서 `rm -rf "$_t2"` 를 하지 않는다 — 아래 「출구」 대조군이 **같은 트리를 다시 쓴다.**
+    #   초판은 지웠고, 그러자 다음 대조군이 «빈 트리»를 재서 빨개졌다. 정리는 `trap` 몫이다.
+    #   🔑 그때 빨강의 뜻은 「처방이 안 통한다」가 아니라 **「대조군이 안 섰다」**였다 —
+    #     둘을 안 가르면 멀쩡한 수리를 되돌린다. `bad` 의 `got` 에 실측값을 붙여둬서 갈렸다.
     if [ "$_rc2" -eq 2 ] && printf '%s\n' "$_o2" | grep -q 'ghost.test.js'; then
         ok "[대조군] 실패 0 · 판정 불가 1 → **rc=2** (초록으로 접지 않는다)"
     else
         bad "[대조군] 판정 불가가 rc 로 안 나온다" "rc=2 + ghost.test.js" \
             "rc=${_rc2} — «$(printf '%s' "$_o2" | grep -E '통과 |⛔' | tr '\n' ' ')»"
+    fi
+
+    # 🧪 [대조군] **동결의 «출구»가 실제로 열리나** — jest 에 testMatch 를 «선언하면» 초록이어야 한다.
+    #   🔴 초판은 여기서 **rc=1(실패 1)** 이 나왔다. 읽기만 하고 매칭에 안 썼기 때문이다(룬드 ①).
+    #     그 상태로 넣었으면 동결 통과식에 대입해 **어떤 PR 도 못 들어간다** — 「출구」가 문을 잠갔다.
+    #   🔑 처방을 시험하지 않으면 **처방이 있다는 것만 참**이 된다.
+    printf '%s\n' '{"jest":{"testMatch":["**/tests/**/*.test.js"]}}' > "$_t2/package.json"
+    _o3="$(GUARD_ROOT="$_t2" GUARD_SELFTEST=0 bash "${BASH_SOURCE[0]}" 2>&1)"; _rc3=$?
+    if [ "$_rc3" -eq 0 ]; then
+        ok "[대조군] jest testMatch 를 선언하면 **rc=0** — 동결의 출구가 실제로 열린다"
+    else
+        bad "[대조군] 출구가 안 열린다 — 이 수리로는 동결이 안 풀린다" "rc=0" \
+            "rc=${_rc3} — «$(printf '%s' "$_o3" | grep -E '통과 |❌|⛔' | tr '\n' ' ')»"
+    fi
+
+    # 🧪 [대조군] **하위 디렉터리 고아를 잡나** (룬드 ②/③ — 초판은 여기서 「다 돈다」고 승인했다)
+    _t3="$(mktemp -d)"
+    trap 'rm -rf "$_tmp" "${_t2:-}" "${_t3:-}"' EXIT
+    mkdir -p "$_t3/tests/unit"
+    printf "%s\n" "--shell-glob 'tests/*.test.sh'" > "$_t3/tests/run-all.sh"
+    : > "$_t3/tests/alpha.test.sh"
+    : > "$_t3/tests/unit/orphan.test.sh"      # 한 층 아래 — 러너 글롭이 안 닿는다
+    git -C "$_t3" init -q -b main >/dev/null 2>&1
+    git -C "$_t3" add tests/ >/dev/null 2>&1
+    _o4="$(GUARD_ROOT="$_t3" GUARD_SELFTEST=0 bash "${BASH_SOURCE[0]}" 2>&1)"; _rc4=$?
+    if [ "$_rc4" -ne 0 ] && printf '%s\n' "$_o4" | grep -q 'tests/unit/orphan.test.sh'; then
+        ok "[대조군] 하위 디렉터리 고아를 잡는다 (rc=${_rc4}) — 「다 돈다」로 승인하지 않는다"
+    else
+        bad "[대조군] 한 층 아래를 못 본다 — 거짓 초록" "rc≠0 + tests/unit/orphan.test.sh" \
+            "rc=${_rc4} — «$(printf '%s' "$_o4" | grep -E 'ⓐ|통과 ' | tr '\n' ' ')»"
+    fi
+
+    # 🧪 [대조군] **판정 불가의 «사유»가 갈리나** — 도구 부재를 「선언 부재」로 말하면 거짓이다.
+    #   🔑 여기서 재는 건 rc 가 아니라 **문장**이다. 방향(판불)은 어차피 같아서 rc 로는 안 갈린다.
+    _o5="$(GUARD_ROOT="$_t2" GUARD_SELFTEST=0 GUARD_NO_PYTHON=1 bash "${BASH_SOURCE[0]}" 2>&1)"
+    if printf '%s\n' "$_o5" | grep -q 'python3 부재'; then
+        ok "[대조군] python3 가 없으면 사유가 «도구 부재»로 갈린다 (선언 부재와 안 섞인다)"
+    else
+        bad "[대조군] 도구 부재가 「선언 부재」로 읽힌다 — 판정 불가의 사유가 거짓" \
+            "'python3 부재' 가 사유에" "«$(printf '%s' "$_o5" | grep '⛔' | tr '\n' ' ')»"
     fi
 fi
 
