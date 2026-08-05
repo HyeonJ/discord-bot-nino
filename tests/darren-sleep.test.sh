@@ -7,6 +7,9 @@
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SH="$SCRIPT_DIR/../scripts/darren-sleep.sh"
+# 🔴 시각 변환은 정본을 지난다 — `date -d '<사람 시각>'` 은 GNU 전용이라 룬드 맥에서 이 파일이
+#   통째로 빨개진다. 정본을 «안 쓰는 것이 조용한» 것을 tests/portability.test.sh 가 막는다.
+. "$SCRIPT_DIR/lib/timeshift.sh"
 
 pass=0; fail=0
 ok()  { echo "  ✅ $1"; pass=$((pass + 1)); }
@@ -18,9 +21,16 @@ trap 'rm -f "${DARREN_SLEEP_FLAG:-}"' EXIT
 
 # 주입한 now 기준으로 만료 시각을 'YYYY-MM-DD HH:MM' 으로 돌려준다.
 until_at() {
-  DARREN_SLEEP_NOW="$(date -d "$1" +%s)" bash "$SH" on >/dev/null 2>&1
-  date -d "@$(head -1 "$DARREN_SLEEP_FLAG")" '+%Y-%m-%d %H:%M'
+  DARREN_SLEEP_NOW="$(ts_epoch "$1")" bash "$SH" on >/dev/null 2>&1
+  ts_fmt "$(head -1 "$DARREN_SLEEP_FLAG")" '+%Y-%m-%d %H:%M'
 }
+
+# 🧪 [양성 대조군] 변환기가 «일을 하는가». 이게 조용히 빈 값을 내면 모든 시각 단언이
+#   같은 잘못된 now 를 공유해서 «전부 초록»이 된다 — 분모가 통째로 날아가는 형태다.
+#   🔑 고정 epoch 을 기대값으로 박지 «않는다» — 그 수는 TZ 에 매여 러너(UTC)에서 거짓 빨강이 된다.
+#      왕복(문자열→epoch→문자열)은 어느 TZ 에서도 같은 명제라 여기서 재는 것과 맞다.
+eq "🧪 [대조군] ts_epoch 왕복이 값을 보존한다" \
+   "2026-08-05 23:30" "$(ts_fmt "$(ts_epoch '2026-08-05 23:30')" '+%Y-%m-%d %H:%M')"
 
 echo "만료 시각이 «다음 기상»인가:"
 # 2026-08-05 는 수요일 → 평일 07:00
@@ -36,10 +46,10 @@ eq "🧪 [경계] 평일 07:00 정각 → 다음날"  "2026-08-06 07:00" "$(unti
 
 echo ""
 echo "on/off/status 계약:"
-DARREN_SLEEP_NOW="$(date -d '2026-08-05 23:30' +%s)" bash "$SH" on >/dev/null 2>&1
-st=$(DARREN_SLEEP_NOW="$(date -d '2026-08-06 01:00' +%s)" bash "$SH" status)
+DARREN_SLEEP_NOW="$(ts_epoch '2026-08-05 23:30')" bash "$SH" on >/dev/null 2>&1
+st=$(DARREN_SLEEP_NOW="$(ts_epoch '2026-08-06 01:00')" bash "$SH" status)
 [[ "$st" == 🌙* ]] && ok "켜고 만료 전 → 자는 중" || bad "켜고 만료 전 → 자는 중" "🌙*" "$st"
-st=$(DARREN_SLEEP_NOW="$(date -d '2026-08-06 08:00' +%s)" bash "$SH" status)
+st=$(DARREN_SLEEP_NOW="$(ts_epoch '2026-08-06 08:00')" bash "$SH" status)
 [[ "$st" == ☀️* ]] && ok "만료 후 → 안 자는 중" || bad "만료 후 → 안 자는 중" "☀️*" "$st"
 bash "$SH" off >/dev/null 2>&1
 [[ ! -f "$DARREN_SLEEP_FLAG" ]] && ok "off → 플래그 삭제" || bad "off → 플래그 삭제" "없음" "있음"

@@ -24,6 +24,20 @@ ts_fmt() {
     return 2
 }
 
+# <"YYYY-MM-DD HH:MM(:SS)"> → epoch. `ts_fmt` 의 **역방향**이다.
+#   🔑 `date -d "<사람이 읽는 시각>"` 은 GNU 전용이고 BSD 는 `date -j -f <포맷>` 이다.
+#   `ts_fmt` 와 같은 병이라 여기(정본)에 둔다 — 시험이 «어제 밤 23:30» 같은 시각을 고정할 때 쓴다.
+#   ⚠️ BSD 가지는 이 기계(GNU)에서 안 돈다. **룬드 맥 실행이 그 가지의 유일한 관측이다** —
+#      ts_fmt 의 `date -r` 가지와 같은 처지이고, 이 파일이 존재하는 이유가 그것이다.
+ts_epoch() {
+    local s="$1" out
+    out="$(date -d "$s" +%s 2>/dev/null)" && { printf '%s' "$out"; return 0; }
+    out="$(date -j -f '%Y-%m-%d %H:%M:%S' "$s" +%s 2>/dev/null)" && { printf '%s' "$out"; return 0; }
+    out="$(date -j -f '%Y-%m-%d %H:%M' "$s" +%s 2>/dev/null)" && { printf '%s' "$out"; return 0; }
+    echo "ts_epoch: date 가 -d 도 -j -f 도 안 받는다 — '$s' 를 epoch 으로 못 바꾼다" >&2
+    return 2
+}
+
 # <초 전> <+포맷> → 문자열 (파일 내용에 과거 시각을 심을 때)
 fmt_ago() {
     local ago="$1" fmt="$2"
