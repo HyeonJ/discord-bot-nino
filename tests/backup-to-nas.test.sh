@@ -10,7 +10,7 @@
 # 설계: 스크립트가 경로·시각을 env로 받는다(기본값은 프로덕션). 그래야 부작용 없이 검증 가능.
 #   [[feedback_vault_script_test_isolation]] — 실제 봇 트리·NAS를 건드리면 격리가 깨진다.
 set -uo pipefail
-source "$(cd "$(dirname "$0")" && pwd)/lib/timeshift.sh"
+source "$(cd "$(dirname "$0")" && pwd)/../scripts/lib/timeshift.sh"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 SCRIPT="$BOT_DIR/scripts/backup-to-nas.sh"
@@ -383,7 +383,7 @@ teardown
 setup
 make_db "$ROOT/msgs.db"
 mkdir -p "$ROOT/nas/yaksu-history"
-# 시각 조작은 tests/lib/timeshift.sh 를 지난다(GNU/BSD 공용) — 여기 있던 `touch -d` 가
+# 시각 조작은 tests/../scripts/lib/timeshift.sh 를 지난다(GNU/BSD 공용) — 여기 있던 `touch -d` 가
 # 룬드 맥에서 죽어서 이 단언이 빨개졌다. 상대 시각을 초로 계산해 POSIX `touch -t` 로 찍는다.
 touch_ago $(( 30 * DAY )) "$ROOT/nas/yaksu-history/messages-20260101.db"
 touch_ago $((  3 * DAY )) "$ROOT/nas/yaksu-history/messages-20260724.db"
