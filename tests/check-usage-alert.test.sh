@@ -19,6 +19,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$SCRIPT_DIR/.." && pwd)"
 CHECK="$REPO/scripts/check-usage-alert.sh"
 
+. "$SCRIPT_DIR/lib/capture-rc.sh"
+
 pass=0; fail=0; skip=0
 ok()  { echo "  ✅ $1"; pass=$((pass + 1)); }
 bad() { echo "  ❌ $1"; [ -n "${2:-}" ] && echo "     want: $2"; [ -n "${3:-}" ] && echo "     got:  $3"; fail=$((fail + 1)); }
@@ -285,7 +287,8 @@ grep -q 'trap .*EXIT' "$CHECK" && ok "trap …EXIT 로 로그를 보장한다" \
   || bad "로그 보장 구조" "trap …EXIT" "없음 — 조기 종료 갈래가 조용해진다"
 
 echo "── ⑩ 이식성 — 원시 GNU 명령을 안 쓴다 (룬드 맥 기준선) ──"
-viol="$(python3 - "$CHECK" <<'PYEOF'
+_hf_viol="$(mktemp)"   # 🔴 3.2: $( … << ) 형태를 피한다 (heredoc-form-guard)
+python3 - "$CHECK" <<'PYEOF' > "${_hf_viol}"
 import sys
 RAW = {'touch' + ' -d': 'python os.utime', 'stat' + ' -c': 'python getmtime',
        'date' + ' -d': 'python datetime'}
@@ -298,8 +301,13 @@ for i, ln in enumerate(open(sys.argv[1]), 1):
             bad.append("%d행: `%s` → %s" % (i, raw, fix))
 print('\n'.join(bad))
 PYEOF
-)"
-[ -z "$viol" ] && ok "GNU 전용 명령 0건" || bad "이식성 위반" "0건" "$viol"
+_hf_rc_viol=$?   # 🔴 PYEOF 바로 다음 줄 — 한 줄만 밀려도 딴 명령의 rc 다
+viol="$(cat "${_hf_viol}")"; rm -f "${_hf_viol}"
+if _hf_msg="$(hf_verdict "$_hf_rc_viol" "이식성")"; then
+    [ -z "$viol" ] && ok "GNU 전용 명령 0건" || bad "이식성 위반" "0건" "$viol"
+else
+    bad "$_hf_msg" "rc=0" "«${viol}»"
+fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 echo "── ⑪ 🔴 인자 계약 (코어 cli-guard) — 09:50 사고의 **형태**를 막는다 ──"
@@ -461,6 +469,113 @@ _fp="$STATE/fp.sh"
 [ "$(form_only "$_fp" | LC_ALL=C grep -c '\$(.*<<' || true)" -eq 0 ] \
   && ok "  🧪 [오탐 대조군] herestring·이스케이프는 안 센다" \
   || bad "🧪 오탐" "0건" "herestring 이나 이스케이프를 heredoc 으로 셌다"
+
+echo
+# ═════════════════════════════════════════════════════════════════════════════
+# 판정 «변화» 알림 — 401 이 구조적으로 `unreachable` 이던 것
+#
+# 🔴 결함(2026-08-03 실측): `exit 2` 네 갈래(no_token · network · http_error · parse-*)가
+#   전부 알림 블록(294행)의 **앞**에 있다. EXIT trap 은 있는데 안에 로그·뒤처리만 있어서
+#   **알림이 한 번도 도달할 수 없다.** 인증이 만료되면 401 이 30분마다 나는데 아무도 모른다.
+#   🔑 **그릇은 있고 내용물이 반쪽**이었다 — trap 이 있다는 것이 알린다는 뜻이 아니다.
+#
+# 🔑 「알림은 사실이 아니라 «변화»에」 — 401 이 지속되는 동안 매 회차 울리면 그건 소음이고,
+#   소음은 곧 무시된다. 그래서 «전이»에만 운다: ok→http_error 와 http_error→ok 둘 다.
+#   복구 알림을 빼면 「울리다 멈춘 것」과 「고쳐진 것」이 같은 모양이 된다.
+# ─────────────────────────────────────────────────────────────────────────────
+VDIR="$STATE/verdict"; mkdir -p "$VDIR"
+VSENT="$VDIR/sent.tsv"; VLOG="$VDIR/usage.log"; VSTATE="$VDIR/verdict.state"
+VARGS=""
+vrun() {   # vrun <env…> — 상태·로그를 «유지»한다(전이를 보려면 회차가 이어져야 한다)
+  : > "$VSENT"
+  env PATH="$WORK/bin:$PATH" SENT_LOG="$VSENT" \
+      CHECK_USAGE_CREDENTIALS="$CREDS" CHECK_USAGE_LOG="$VLOG" \
+      CHECK_USAGE_STATE="$VSTATE" DISCORD_SEND="$WORK/bin/discord-send" \
+      "$@" bash "$CHECK" $VARGS >/dev/null 2>&1
+  VRC=$?
+  return 0
+}
+vreset() { rm -f "$VSTATE" "$VLOG"; VARGS=""; }
+# 🔑 판정 변화 알림만 센다 — 사용량 경고와 같은 통로로 나가므로 문면으로 가른다.
+#   본문을 비알림(`{}`)으로 두면 사용량 경고는 0건이라 이 셈이 깨끗해진다.
+# 🔴 **«건수»만 세면 방향이 안 보인다**(룬드 `#148` 리뷰) — 복구 시험이 「이상」 문면으로 나가도
+#   1건이라 통과한다. 축이 「몇 건」이 아니라 **«무엇이» 나갔나**여서 셋으로 가른다.
+#   🔑 [[#273]] 「표면이 실질을 위장한다」가 **내 시험 안에서** 난 것이다 — 건수가 방향을 위장했다.
+# 🔴 **`{}` 는 `verdict=ok` 가 아니다** — JSON 은 통과하지만 버킷이 없어 `parse-no-known-buckets` 다.
+#   처음엔 이걸 「정상」 픽스처로 썼고, 그래서 ③ 이 «복구»가 아니라 **다른 전이**를 재고 있었다.
+#   방향을 안 보던 동안에는 건수 1 이 맞아떨어져 초록이었다(룬드 `#148` 리뷰가 이걸 꺼냈다).
+#   🔑 **픽스처가 내가 말한 상태를 실제로 만드는지 확인하지 않으면, 그 위 초록은 다른 것의 초록이다.**
+VOK_BODY='{"five_hour":{"utilization":1,"resets_at":"2099-01-01T00:00:00+00:00"}}'
+vbad() { LC_ALL=C grep -c '감시 이상' "$VSENT" 2>/dev/null || true; }    # 이상 알림
+vok()  { LC_ALL=C grep -c '감시 복구' "$VSENT" 2>/dev/null || true; }    # 복구 알림
+vany() { LC_ALL=C grep -c '사용량 감시' "$VSENT" 2>/dev/null || true; }  # 판정 변화 알림 전체
+
+echo "── 판정 변화 알림 ──"
+
+# ① 핵심 결함: 401 이면 알림이 «나가야» 한다 (지금은 구조적으로 0건)
+vreset; vrun FAKE_CODE=401 FAKE_BODY='{}'
+[ "$(vbad)" -eq 1 ] \
+  && ok "401(http_error) 에서 «이상» 알림 1건 — 조기 종료가 trap 에 닿는다" \
+  || bad "401 알림" "1건" "$(vbad)건 — exit 2 가 알림 앞에서 끊고 있다"
+
+# ② 같은 판정이 이어지면 두 번째 회차는 조용하다
+vrun FAKE_CODE=401 FAKE_BODY='{}'
+[ "$(vany)" -eq 0 ] \
+  && ok "  같은 판정 반복은 0건 — 30분마다 우는 소음이 아니다" \
+  || bad "반복 회차" "0건" "$(vbad)건 — 변화가 아니라 상태에 울고 있다"
+
+# ③ 복구도 «변화»다 — 이게 없으면 「멈췄다」와 「고쳐졌다」가 같은 모양이다
+vrun FAKE_CODE=200 FAKE_BODY="$VOK_BODY"
+# 🔑 «복구» 문면이 1건이고 «이상» 문면이 0건이어야 한다 — 건수만 보면 방향이 뒤집혀도 통과한다
+[ "$(vok)" -eq 1 ] && [ "$(vbad)" -eq 0 ] \
+  && ok "  http_error→ok 는 «복구» 문면 1건 · 「이상」 0건" \
+  || bad "복구 알림 방향" "복구 1건 · 이상 0건" "복구 $(vok)건 · 이상 $(vbad)건"
+
+# ④ 🧪 [대조군] 정상이 이어지면 0건. 이게 없으면 ①③ 의 1건이
+#    «전이를 잡은 것»인지 «아무 때나 우는 것»인지 안 갈린다.
+vrun FAKE_CODE=200 FAKE_BODY="$VOK_BODY"
+[ "$(vany)" -eq 0 ] \
+  && ok "  🧪 [대조군] ok→ok 는 0건 — 위 1건이 전이를 잡은 값이다" \
+  || bad "🧪 대조군" "0건" "$(vbad)건 — 판정과 무관하게 울고 있다"
+
+# ⑤ 토큰을 못 읽는 갈래도 닿는다 — trap 이므로 «모든» 조기 종료가 알림을 지난다
+vreset; vrun CHECK_USAGE_CREDENTIALS="$VDIR/nonexistent.json"
+[ "$(vbad)" -eq 1 ] \
+  && ok "no_token 갈래도 알림 1건 — 갈래마다 따로 붙이지 않았다" \
+  || bad "no_token 알림" "1건" "$(vbad)건"
+
+# ⑥ 🔴 발송이 실패하면 상태를 갱신하지 «않는다» — 다음 회차가 다시 시도한다.
+#    갱신해버리면 **못 보낸 전이가 영구히 묻힌다**(`#147` 에서 같은 자리를 밟았다).
+vreset; vrun FAKE_CODE=401 FAKE_BODY='{}' FAKE_SEND_RC=1
+vrun FAKE_CODE=401 FAKE_BODY='{}'
+[ "$(vbad)" -eq 1 ] \
+  && ok "발송 실패는 전이를 소비하지 않는다 — 다음 회차가 재시도" \
+  || bad "발송 실패 후 재시도" "1건" "$(vbad)건 — 못 보낸 전이가 묻혔다"
+
+# ⑦ 🔴 dry-run 도 전이를 소비하지 않는다. 진단 한 번이 **진짜 알림을 먹는** 자리다.
+vreset; VARGS="--dry-run"; vrun FAKE_CODE=401 FAKE_BODY='{}'
+VARGS=""; vrun FAKE_CODE=401 FAKE_BODY='{}'
+[ "$(vbad)" -eq 1 ] \
+  && ok "dry-run 은 전이를 소비하지 않는다 — 진단이 알림을 먹지 않는다" \
+  || bad "dry-run 후 실제 회차" "1건" "$(vbad)건 — 진단 한 번이 알림을 먹었다"
+
+# ⑧ 칸을 «시각 둘»로 둔다 — 하나면 「전이가 언제 났나」와 「언제 알렸나」가 안 갈린다.
+#    그 둘의 «간격»이 곧 `unreachable` 의 관측값이다(룬드 실측: 복구 32초 vs 복구 알림 30분 5초).
+vreset; vrun FAKE_CODE=401 FAKE_BODY='{}'
+# 🔴 **칸이 있는지가 아니라 «값이 들었는지»를 본다**(룬드 `#148` 리뷰). `printf` 가 항상 두 칸을
+#   내므로 `na na` 여도 「칸 있음」은 초록이다 — 주석은 「간격이 관측값」이라 적어놓고
+#   정작 그 값이 시각인지를 안 봤다. 🔑 [[#273]] 이 여기서도 났다: **형태가 내용을 위장한다.**
+_vl="$(LC_ALL=C grep -cE 'verdict_changed_at=[0-9]{4}-[0-9]{2}-[0-9]{2}T.*notified_at=[0-9]{4}-[0-9]{2}-[0-9]{2}T' "$VLOG" 2>/dev/null || true)"
+[ "${_vl:-0}" -ge 1 ] \
+  && ok "두 칸에 «시각이» 들어 있다 — 간격이 도달 지연의 관측값" \
+  || bad "로그 칸 값" "둘 다 ISO 시각" "$(LC_ALL=C grep -o 'verdict_changed_at=[^ ]* notified_at=[^ ]*' "$VLOG" | tail -1)"
+# 🧪 [음성 대조군] 전이가 «없는» 회차는 두 칸이 `na` 로 남아야 한다 — 위 판별식이
+#   아무 줄이나 무는 것이면 여기서도 물어서 갈린다.
+vrun FAKE_CODE=401 FAKE_BODY='{}'
+_vn="$(LC_ALL=C grep -c 'verdict_changed_at=na notified_at=na' "$VLOG" 2>/dev/null || true)"
+[ "${_vn:-0}" -ge 1 ] \
+  && ok "  🧪 [음성 대조군] 전이 없는 회차는 na na — 판별식이 아무 줄이나 물지 않는다" \
+  || bad "🧪 na 줄" "1줄 이상" "${_vn}줄"
 
 echo
 # 🔸 판정 불가를 요약줄에 **항상** 싣는다(0이어도). 조건부로 붙이면 0과 '이 칸이 없음'이

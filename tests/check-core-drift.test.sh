@@ -20,6 +20,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 SCRIPT="$BOT/scripts/check-core-drift.sh"
 
+. "$SCRIPT_DIR/lib/capture-rc.sh"
+
 pass=0; fail=0
 ok()  { echo "  ✅ $1"; pass=$((pass + 1)); }
 bad() { echo "  ❌ $1"; fail=$((fail + 1)); [ -n "${2:-}" ] && printf '%s\n' "$2" | sed 's/^/     /'; }
@@ -148,7 +150,8 @@ echo "⑥ 🔑 **모든 판정 불가 갈래가 2로 나간다** — 갈래마�
 # ⇒ 갈래마다 케이스를 만드는 대신 **출력 문구와 종료코드의 짝**을 정적으로 본다.
 #    ⚠️ `printf|echo` 같은 **통로를 열거하지 않는다** — 그건 자기 printer 를 정의하는 순간
 #       뚫린다(assistant#24 P2). 여기선 *어떤 말을 하면서 어떤 코드로 나가는가* 만 본다.
-viol="$(python3 - "$SCRIPT" <<'PYEOF'
+_hf_viol="$(mktemp)"   # 🔴 3.2: $( … << ) 형태를 피한다 (heredoc-form-guard)
+python3 - "$SCRIPT" <<'PYEOF' > "${_hf_viol}"
 import re, sys
 lines = open(sys.argv[1]).read().split('\n')
 bad = []
@@ -169,8 +172,13 @@ for i, ln in enumerate(lines):
         bad.append(f"{i+1}행: 위반(STALE/DRIFT)인데 exit {code} (1이어야 한다)")
 print('\n'.join(bad))
 PYEOF
-)"
-[ -z "$viol" ] && ok "판정 불가는 전부 2, 위반은 전부 1" || bad "계약 위반 갈래" "$viol"
+_hf_rc_viol=$?   # 🔴 PYEOF 바로 다음 줄 — 한 줄만 밀려도 딴 명령의 rc 다
+viol="$(cat "${_hf_viol}")"; rm -f "${_hf_viol}"
+if _hf_msg="$(hf_verdict "$_hf_rc_viol" "rc 계약")"; then
+    [ -z "$viol" ] && ok "판정 불가는 전부 2, 위반은 전부 1" || bad "계약 위반 갈래" "$viol"
+else
+    bad "$_hf_msg" "rc=0" "«${viol}»"
+fi
 # 음성 검사 — 이 시험이 실제로 물 수 있는지(항상 초록인 시험이 아닌지)
 probe="$(mktemp)"; sed 's/echo "  ⚠️ 영향 판정 불가 — 워크트리 생성 실패"; exit 2/echo "  ⚠️ 영향 판정 불가 — 워크트리 생성 실패"; exit 1/' "$SCRIPT" > "$probe"
 probe_out="$(SCRIPT="$probe" bash -c 'python3 - "$SCRIPT" <<'"'"'PYEOF'"'"'

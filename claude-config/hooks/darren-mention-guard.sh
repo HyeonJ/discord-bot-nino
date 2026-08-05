@@ -28,6 +28,23 @@ command=$(printf '%s' "$input" | python3 -c "import json,sys; print(json.load(sy
 printf '%s' "$command" | grep -q "discord-send" || exit 0
 
 DARREN_TARGETS='현인-다용도|현인-업무|1480593132511826092|1479813609499394171'
+DARREN_DM='DM-Darren'
+
+# 🌙 취침 플래그 — 파일 첫 줄에 «만료 epoch» 하나. 있으면서 아직 안 지났으면 자는 중.
+#   🔑 훅은 «요일·기상시각»을 계산하지 않는다. 그건 켜는 쪽이 하고 여기선 «지났나»만 본다
+#      (판단이 아니라 비교여야 시험이 붙는다).
+#   🔑 읽기 실패·빈 파일·비수치는 전부 «안 자는 중»으로 떨어진다 — 잊거나 깨져도 «시끄러운 쪽»으로.
+#      반대로 폴백하면 파일이 잘못 생긴 순간부터 멘션이 조용히 사라진다.
+SLEEP_FLAG="${DARREN_SLEEP_FLAG:-$HOME/discord-bot-nino/logs/darren-sleeping}"
+is_sleeping() {
+  local until
+  [ -f "$SLEEP_FLAG" ] || { echo 0; return; }
+  until=$(head -1 "$SLEEP_FLAG" 2>/dev/null | tr -d '[:space:]')
+  case "$until" in
+    ''|*[!0-9]*) echo 0; return ;;
+  esac
+  [ "$(date +%s)" -lt "$until" ] && echo 1 || echo 0
+}
 
 # target 인자만 뽑는다. 값을 먹는 옵션(discord-send --help 실측): -r/--reply · -t/--thread · -f/--file · --target · -c
 # -f는 반복 지정이 가능해 target 위치가 밀린다 → "첫 positional"이 아니라 "옵션을 건너뛴 첫 non-flag"여야 한다.
@@ -75,11 +92,16 @@ rc=$?
 
 if [ "$rc" -ne 0 ]; then
     # 파싱 불가 → 예전 방식으로 폴백. 오탐이 나더라도 차단 누락보다 낫다.
-    printf '%s' "$command" | grep -qE "$DARREN_TARGETS" || exit 0
+    printf '%s' "$command" | grep -qE "$DARREN_TARGETS" && hits_channel=1
+    printf '%s' "$command" | grep -qE "$DARREN_DM" && hits_dm=1
 else
     # -x: target 전체가 일치해야 한다. 부분일치를 허용하면 본문 grep 시절의 오탐이 되돌아온다.
-    printf '%s' "$targets" | grep -qxE "$DARREN_TARGETS" || exit 0
+    printf '%s' "$targets" | grep -qxE "$DARREN_TARGETS" && hits_channel=1
+    printf '%s' "$targets" | grep -qxE "$DARREN_DM" && hits_dm=1
 fi
+
+# Darren 을 향하지 않으면 두 모드 다 관심 없다
+[ "${hits_channel:-0}" = 1 ] || [ "${hits_dm:-0}" = 1 ] || exit 0
 
 # 파일 경유 메시지($(cat /tmp/xxx))도 내용에 포함해서 검사 (인라인 오탐 방지)
 content="$command"
@@ -87,10 +109,28 @@ for f in $(printf '%s' "$command" | grep -oE "/tmp/[^ )\"']+" 2>/dev/null); do
   [ -f "$f" ] && content="$content $(cat "$f" 2>/dev/null)"
 done
 
-# 멘션 있으면 통과
-if printf '%s' "$content" | grep -qE "<@353914579929268226>|@Darren"; then
-  exit 0
+has_mention=0
+printf '%s' "$content" | grep -qE "<@353914579929268226>|@Darren" && has_mention=1
+
+if [ "$(is_sleeping)" = 1 ]; then
+    # 🌙 취침 모드 — 계약이 «뒤집힌다». 막는 기준은 「멘션이 없나」가 아니라 «소리가 나나»다.
+    #    DM 은 멘션이 없어도 소리가 나므로 무조건 막고, 채널은 «평문만» 통과시킨다.
+    [ "${hits_dm:-0}" = 1 ] && {
+      echo "🌙 지금은 Darren 취침 모드입니다. DM 은 노트북에서 소리가 나므로 막았습니다 — 급하지 않으면 «현인-다용도 채널에 멘션 없이» 남기세요. (해제: 만료 시각에 자동 — 평일 07:00 · 주말 09:00. 급하면 scripts/darren-sleep.sh off)" >&2
+      exit 2
+    }
+    [ "$has_mention" = 1 ] && {
+      # 🔴 없는 기능을 안내하지 않는다(룬드 리뷰 #149): 전엔 "아침에 「밤사이 N건」으로 전달"
+      #    이라고 적었는데 그 집계는 아직 없다. 훅 메시지는 «지금 되는 것»만 말한다.
+      echo "🌙 지금은 Darren 취침 모드입니다. 멘션은 노트북에서 소리가 나므로 막았습니다 — 멘션을 빼고 채널에 남기면 통과합니다(아침에 Darren 이 채널에서 봅니다). (해제: 만료 시각에 자동 — 평일 07:00 · 주말 09:00. 급하면 scripts/darren-sleep.sh off)" >&2
+      exit 2
+    }
+    exit 0
 fi
+
+# 평소 계약 — DM 은 1:1 이라 이미 푸시되므로 멘션을 강제하지 않는다(2026-07-20 근본 수정)
+[ "${hits_channel:-0}" = 1 ] || exit 0
+[ "$has_mention" = 1 ] && exit 0
 
 # 멘션 없음 → 차단
 echo "🚫 현인(Darren) 채널 메시지에 멘션이 없습니다. 본문에 @Darren 또는 <@353914579929268226>를 넣어 재전송하세요. (Tim 지시: 현인 부를 때 멘션 필수 — feedback_mention_darren)" >&2

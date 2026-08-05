@@ -49,6 +49,8 @@ REPO="$(cd "$SCRIPT_DIR/.." && pwd)"
 HINT="$REPO/scripts/catchup-hint.sh"
 REAL_CLI="$HOME/.local/bin/yaksu-history"
 
+. "$SCRIPT_DIR/lib/capture-rc.sh"
+
 pass=0; fail=0; skip=0; skip_assert=0
 ok()   { echo "  ✅ $1"; pass=$((pass + 1)); }
 bad()  { echo "  ❌ $1"; echo "     want: $2"; echo "     got:  $3"; fail=$((fail + 1)); }
@@ -368,7 +370,8 @@ if [[ -x "$REPO/hooks/session-heartbeat.sh" ]]; then
 else
   bad "훅 파일이 실행 가능하다" "chmod +x" "실행 권한 없음"
 fi
-hooked=$(python3 - "$REPO/.claude/settings.json" <<'PYEOF'
+_hf_hooked="$(mktemp)"   # 🔴 3.2: $( … << ) 형태를 피한다 (heredoc-form-guard)
+python3 - "$REPO/.claude/settings.json" <<'PYEOF' > "${_hf_hooked}"
 import json, sys
 try:
     d = json.load(open(sys.argv[1]))
@@ -378,9 +381,14 @@ n = sum(1 for g in d.get("hooks", {}).get("Stop", [])
           for h in g.get("hooks", []) if "session-heartbeat" in h.get("command", ""))
 print(n)
 PYEOF
-)
-[[ "$hooked" -ge 1 ]] && ok "settings.json Stop 훅에 session-heartbeat가 걸려 있다" \
-  || bad "settings.json Stop 훅에 session-heartbeat가 걸려 있다" "1건 이상" "${hooked}건"
+_hf_rc_hooked=$?   # 🔴 PYEOF 바로 다음 줄 — 한 줄만 밀려도 딴 명령의 rc 다
+hooked="$(cat "${_hf_hooked}")"; rm -f "${_hf_hooked}"
+if _hf_msg="$(hf_verdict "$_hf_rc_hooked" "Stop 훅 조회")"; then
+    [[ "$hooked" -ge 1 ]] && ok "settings.json Stop 훅에 session-heartbeat가 걸려 있다" \
+      || bad "settings.json Stop 훅에 session-heartbeat가 걸려 있다" "1건 이상" "${hooked}건"
+else
+    bad "$_hf_msg" "rc=0" "«${hooked}»"
+fi
 
 echo ""
 echo "🟡 배선 — 호출부가 인자를 넘기는지 (테스트가 스크립트만 직접 부르면 배선은 검사 밖):"
@@ -415,7 +423,8 @@ echo "🔴 이식성 가드 — 상대 봇(macOS·bash 3.2·BSD)이 이 시험�
 # ⚠️ 1차 가드는 grep 이라 **자기 자신을 셌다**(가드 줄에 그 문자열이 있고, 안전형
 #    ${a[@]+"${a[@]}"} 안에 옛 형태가 부분문자열로 들어 있다). 검사기가 검사 대상에 섞이는 형태 —
 #    그래서 파싱을 파이썬으로 옮기고 **범위를 명시**한다.
-portab=$(python3 - "$0" "$REPO/scripts/catchup-hint.sh" <<'PYEOF'
+_hf_portab="$(mktemp)"   # 🔴 3.2: $( … << ) 형태를 피한다 (heredoc-form-guard)
+python3 - "$0" "$REPO/scripts/catchup-hint.sh" <<'PYEOF' > "${_hf_portab}"
 import re, sys
 test_src, script_src = open(sys.argv[1]).read(), open(sys.argv[2]).read()
 # 🔴 **검사기를 검사 대상에서 뺀다.** 이 가드의 패턴 문자열(`mapfile`, `declare -A` …)이
@@ -467,9 +476,14 @@ elif re.search(r'2>&1', m.group(0)) or re.search(r'2>\s*/dev/null', m.group(0)):
 
 print(" | ".join(problems) if problems else "OK")
 PYEOF
-)
-[[ "$portab" == "OK" ]] && ok "GNU date -d · 빈 배열 확장 둘 다 없다(bash 3.2 · BSD 안전)" \
-  || bad "GNU date -d · 빈 배열 확장 둘 다 없다" "OK" "$portab"
+_hf_rc_portab=$?   # 🔴 PYEOF 바로 다음 줄 — 한 줄만 밀려도 딴 명령의 rc 다
+portab="$(cat "${_hf_portab}")"; rm -f "${_hf_portab}"
+if _hf_msg="$(hf_verdict "$_hf_rc_portab" "이식성")"; then
+    [[ "$portab" == "OK" ]] && ok "GNU date -d · 빈 배열 확장 둘 다 없다(bash 3.2 · BSD 안전)" \
+      || bad "GNU date -d · 빈 배열 확장 둘 다 없다" "OK" "$portab"
+else
+    bad "$_hf_msg" "rc=0" "«${portab}»"
+fi
 
 echo ""
 echo "🔴 러너 계약 — 시험이 증거를 버리지도, 섞지도 않는다:"
