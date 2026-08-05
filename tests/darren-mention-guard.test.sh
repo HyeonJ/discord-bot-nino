@@ -81,5 +81,39 @@ echo "알려진 한계 (수정 범위 밖 — 문서화용 고정):"
 check "해시 target은 채널을 알 수 없어 통과"      0 'discord-send ab12 "해시 답장"'
 
 echo ""
+echo "🌙 취침 모드 (Darren 승인 2026-08-05 M:e15c — 자는 동안 «소리나는 것»만 막는다):"
+# 왜 «반대로» 뒤집나: 평소 계약은 「멘션 없으면 차단」이지만, 자는 동안엔 멘션·DM 이
+#   Darren 노트북에서 «소리»를 낸다(본인 실측 M:1sp8). 채널 평문은 무음이라 그것만 통과시킨다.
+#   ⇒ 같은 훅이 플래그 하나로 두 모드를 갖는다. 축은 「멘션이냐」가 아니라 «소리가 나느냐».
+export DARREN_SLEEP_FLAG="$(mktemp /tmp/darren-sleeping.XXXXXX)"
+# ⚠️ `${:-}` 로 받는다 — 아래에서 플래그를 지우고 나면 `set -u` 아래의 trap 이 죽는다.
+trap 'rm -f "$TMPMSG" "$OUTMSG" "${DARREN_SLEEP_FLAG:-}"' EXIT
+
+# 만료 시각(epoch)을 파일에 적는다 — 훅이 «요일 판정»을 하지 않게 하려는 것.
+#   요일·기상시각 계산은 «켜는 쪽»이 하고, 훅은 «지났나»만 본다(판단 아닌 비교).
+printf '%s\n' "$(( $(date +%s) + 3600 ))" > "$DARREN_SLEEP_FLAG"
+
+check "🌙 취침 중 + 멘션 있음 → 차단(깨운다)"        2 "discord-send 현인-업무 \"$MENTION 보고\""
+check "🌙 취침 중 + @Darren 표기도 → 차단"           2 'discord-send 현인-업무 "@Darren 보고"'
+check "🌙 취침 중 + 멘션 없음 → 통과(무음)"          0 'discord-send 현인-업무 "보고"'
+check "🌙 취침 중 + DM 은 멘션 없어도 차단(소리남)"  2 'discord-send DM-Darren "확인 부탁"'
+check "🌙 취침 중이어도 다른 채널은 무관 → 통과"     0 "discord-send 봇-놀이터 \"$MENTION 룬드에게\""
+
+# 🧪 [경계] 만료가 지나면 «평소 계약»으로 돌아온다. 이게 없으면 내가 해제를 잊었을 때
+#   멘션이 영영 조용히 안 간다 — 잊어도 «시끄러운 쪽»으로 떨어지게 하는 장치다.
+printf '%s\n' "$(( $(date +%s) - 60 ))" > "$DARREN_SLEEP_FLAG"
+check "🧪 [경계] 만료 후 → 멘션 없으면 도로 차단"    2 'discord-send 현인-업무 "보고"'
+check "🧪 [경계] 만료 후 → 멘션 있으면 통과"         0 "discord-send 현인-업무 \"$MENTION 보고\""
+
+# 🧪 [미탐 대조군] 플래그가 «깨졌을 때»도 평소 계약이어야 한다. 빈 파일·비수치를
+#   「자는 중」으로 읽으면, 파일이 잘못 생긴 순간부터 멘션이 조용히 사라진다.
+: > "$DARREN_SLEEP_FLAG"
+check "🧪 [폴백] 빈 플래그 → 평소 계약(차단)"        2 'discord-send 현인-업무 "보고"'
+printf 'garbage\n' > "$DARREN_SLEEP_FLAG"
+check "🧪 [폴백] 숫자 아닌 플래그 → 평소 계약(차단)" 2 'discord-send 현인-업무 "보고"'
+rm -f "$DARREN_SLEEP_FLAG"
+check "🧪 [폴백] 플래그 파일 없음 → 평소 계약(차단)" 2 'discord-send 현인-업무 "보고"'
+
+echo ""
 echo "결과: $pass pass, $fail fail"
 [[ $fail -eq 0 ]]
