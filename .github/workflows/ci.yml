@@ -16,9 +16,18 @@ on:
     branches: [main]   # PR 마다 초록이어도 머지 후 main 이 빨강일 수 있다(서로 다른 PR 조합)
 
 # 같은 브랜치에 연속 푸시하면 이전 런을 취소한다 — 안 하면 3커밋 = 3런이 끝까지 다 돈다.
+#
+# 🔴 다만 **main 은 예외다** (2026-08-02, 룬드 실사고에서 옮겨받았다).
+#    main 에서 취소하면 다음 머지가 **직전 머지 커밋의 런을 죽인다.** 그 런이 곧
+#    원장(`memory/current-tasks.md`)이 읽는 관측값이라, 취소되면 그 행에 **다음
+#    커밋의 값을 적게 된다.** 실물: 그의 `aa4a2fe` 첫 런이 그렇게 사라졌고,
+#    `gh run watch` 를 안 했으면 모르고 지나갔다("1줄 차이라 아마 맞았겠지만 그건 운이다").
+#
+# 🔑 조용하다 — 실패가 아니라 `cancelled` 로 남을 뿐이라 아무도 안 본다.
+#    PR 쪽 취소는 그대로 둔다(러너 시간). 끄는 건 main 하나뿐이다.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: read   # checkout 만 필요

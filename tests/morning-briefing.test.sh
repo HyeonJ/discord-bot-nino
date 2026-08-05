@@ -19,7 +19,7 @@ REPO="${REPO:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 #    (룬드 맥 실측 2026-07-28 `폴백 실패` — 스크립트가 아니라 이 시험이 틀린 자리였다).
 REAL_DATE="$(command -v date)"
 export REAL_DATE
-source "$SCRIPT_DIR/lib/timeshift.sh"   # 시각 조작은 정본 하나를 지난다(GNU/BSD 공용)
+source "$SCRIPT_DIR/../scripts/lib/timeshift.sh"   # 시각 조작은 정본 하나를 지난다(GNU/BSD 공용)
 BOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 SCRIPT="$BOT_DIR/scripts/morning-briefing.sh"
 
