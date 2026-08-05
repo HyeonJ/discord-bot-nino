@@ -28,9 +28,14 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 #   (룬드 실물: `alarm-tool`·`watchdog-rund` 가 정확히 그 꼴이었다 — 주입구가 있는데 시험이 안 썼다).
 GUARD_ROOT="${GUARD_ROOT:-$ROOT}"
 
-pass=0; fail=0
+pass=0; fail=0; unknown=0
 ok()  { echo "  ✅ $1"; pass=$((pass + 1)); }
 bad() { echo "  ❌ $1"; [ -n "${2:-}" ] && echo "     want: $2"; [ -n "${3:-}" ] && echo "     got:  $3"; fail=$((fail + 1)); }
+# 🔴 **못 잰 것은 실패도 통과도 아니다** — 코어 계약의 `2`. 초판은 ⓐ 쪽 판정 불가를 `bad`(실패)로,
+#   ⓑ 쪽은 **아무 칸에도** 안 세서 **같은 성질이 두 갈래로 흩어져 있었다**(룬드 리뷰 ②).
+#   ⇒ 칸을 하나 만들어 양쪽이 여기로 온다. 요약이 「빨강 0 · 판정 불가 0」과 「빨강 0 · 판정 불가 8」을
+#     같은 문장으로 내면, 「다 쟀다」와 「거의 못 쟀다」가 구별되지 않는다.
+unk() { echo "  ⛔ $1"; [ -n "${2:-}" ] && echo "     $2"; unknown=$((unknown + 1)); }
 
 # 🔸 의도적 제외 — 시험처럼 생겼지만 러너가 돌 «대상이 아닌» 것
 EXCLUDE_RE='^(__init__\.py|conftest\.py|.*\.obsolete)$'
@@ -45,10 +50,12 @@ test_of_migrate.py
 test_of_page.py
 test_of_state.py
 test_of_text.py'
-DEFERRED_WHY='of/ 처분 Darren 대기 — 레포가 public 이라 of/cdm/(PEM 개인키)·record-drm-* 를 추적 밖에 둔 상태'
+# 🔴 사유는 «빚이 보이게» 하는 것이 목적이지 «경로를 공개»하는 게 아니다 (룬드 리뷰 ④).
+#   이 레포는 public 이다 — 파일 자체는 추적 밖이라 유출은 아니지만, *「저기에 무엇이 있다」* 는
+#   **포인터가 공개된다.** 상세는 비공개 쪽(`memory/current-tasks.md` · inbox)에 둔다.
+DEFERRED_WHY='Darren 처분 대기 — 미추적 자산 관련(상세는 비공개 기록)'
 
 looks_like()     { ls -1 "$1/tests" 2>/dev/null | grep -E '(^test_.*\.(py|ts)$|\.test\.(sh|js|ts|py)$|\.obsolete$|^conftest\.py$|^__init__\.py$)' || true; }
-runner_covered() { ls -1 "$1/tests" 2>/dev/null | grep -E '\.test\.(sh|js)$' | grep -v '\.obsolete$' || true; }
 git_tracked()    { git -C "$1" ls-files 'tests/*' 2>/dev/null | sed 's|^tests/||' || true; }
 # 🔴 「git 이 모른다」와 「여기 git 이 없다」는 다르다 — 뒤엣것은 **판정 불가**지 추적 밖이 아니다.
 #    안 가르면 비-git 디렉터리에서 **전부 추적 밖**으로 읽혀 오탐이 난다(대조군이 잡아준 자리).
@@ -56,16 +63,52 @@ is_git_repo()    { git -C "$1" rev-parse --git-dir >/dev/null 2>&1; }
 
 echo "🔴 러너 분모 — 시험처럼 생긴 파일이 분모 밖에 있나  (root=${GUARD_ROOT})"
 
-# 러너가 무엇을 도는지 **선언에서** 읽는다 (하드코딩하면 러너가 바뀔 때 조용히 낡는다)
-RUNNER_DECL="$(grep -oE "\-\-shell-glob '[^']+'" "$GUARD_ROOT/tests/run-all.sh" 2>/dev/null)"
-if [ -z "$RUNNER_DECL" ]; then
-    bad "판정 불가 — run-all.sh 에서 글롭 선언을 못 읽었다" "--shell-glob '…'" "«없음»"
+# 🔴 러너가 무엇을 도는지 **선언에서 읽고, 그 값으로 «판정한다».**
+#   초판은 선언을 읽어 **출력만** 하고 판정은 하드코딩 패턴으로 했다(룬드 리뷰 ①).
+#   🔑 그러면 **분모가 낡는 것을 잠그는 시험 자신이 같은 방식으로 낡는다** — 헤더의
+#     *「한 번 고치는 것으로는 안 닫힌다」* 가 이 파일에도 걸린다.
+#   ⚠️ 그리고 하드코딩이 선언보다 **넓었다**(`.js` 까지). 셋(shell·jest·bun)의 커버리지를
+#     손으로 합친 값이라 **셋 중 어느 하나가 바뀌어도 안 걸렸다.**
+RUN_ALL="$GUARD_ROOT/tests/run-all.sh"
+
+# ① shell — `--shell-glob '<glob>'`. 선언이 **정확히 하나**여야 뜻이 하나다.
+_sg_all="$(grep -oE "\-\-shell-glob '[^']+'" "$RUN_ALL" 2>/dev/null || true)"
+_sg_n="$(printf '%s' "$_sg_all" | grep -c . || true)"
+SHELL_GLOB=""
+if [ "${_sg_n:-0}" -eq 1 ]; then
+    SHELL_GLOB="$(printf '%s' "$_sg_all" | sed "s/.*'\(.*\)'/\1/")"
+    ok "shell 글롭 선언을 읽었다: '${SHELL_GLOB}'"
 else
-    ok "러너 글롭 선언을 읽었다: ${RUNNER_DECL}"
+    unk "shell 글롭 선언을 못 읽었다 (${_sg_n:-0}건 — 하나여야 한다)" \
+        "run-all.sh 의 --shell-glob 를 확인할 것. 「글롭 밖 0개」로 접지 않는다"
 fi
 
+# ② bun — `bun test <파일…>`. 파일이 **명시**돼 있어 그대로 읽힌다.
+BUN_FILES="$(grep -oE "bun test [^']*" "$RUN_ALL" 2>/dev/null | sed 's/^bun test //' \
+             | tr ' ' '\n' | sed 's|^tests/||' | sed '/^$/d' || true)"
+
+# ③ jest — 🔴 **선언에서 못 읽는다.** `npx jest` 는 무엇을 도는지 말하지 않고,
+#   `package.json` 의 jest 키에도 `testMatch` 가 없어 **기본값에 기댄다**(실측 2026-08-05).
+#   🔑 기본값을 이 시험이 «안다고 가정»하면 jest 가 바뀔 때 조용히 낡는다 — **이 시험이
+#     막으려는 병 그 자체**다. ⇒ 아는 척하지 않고 **판정 불가**로 내보낸다.
+JEST_DECL="$(grep -oE "npx jest[^']*" "$RUN_ALL" 2>/dev/null || true)"
+JEST_MATCH="$(python3 -c "
+import json,sys
+try: print(json.load(open('$GUARD_ROOT/package.json')).get('jest',{}).get('testMatch') or '')
+except Exception: print('')
+" 2>/dev/null)"
+
+# 🔑 covered 판정이 **선언에서** 나온다. 하드코딩 패턴은 없앴다.
+shell_covered() {
+    [ -n "$SHELL_GLOB" ] || return 1
+    case "$1" in ${SHELL_GLOB##*/}) return 0 ;; esac
+    return 1
+}
+bun_covered() { [ -n "$BUN_FILES" ] && printf '%s\n' "$BUN_FILES" | grep -qxF "$1"; }
+# jest 가 «돌 수도 있는» 모양인가 — 도는지 «아닌지»를 여기서 정하지 않는다. 판정 불가로 보낼 뿐.
+jest_shaped() { [ -n "$JEST_DECL" ] && [ -z "$JEST_MATCH" ] && case "$1" in *.test.js) return 0 ;; esac; return 1; }
+
 LOOKS="$(looks_like "$GUARD_ROOT")"
-COVERED="$(runner_covered "$GUARD_ROOT")"
 if is_git_repo "$GUARD_ROOT"; then
     TRACK_MEASURABLE=1; TRACKED="$(git_tracked "$GUARD_ROOT")"
 else
@@ -74,11 +117,18 @@ fi
 
 is_deferred() { printf '%s\n' "$DEFERRED_NAMES" | grep -qxF "$1"; }
 
-ORPHAN_GLOB=""; ORPHAN_TRACK=""; DEFERRED_STALE=""
+ORPHAN_GLOB=""; ORPHAN_TRACK=""; DEFERRED_STALE=""; UNKNOWN_GLOB=""
 while IFS= read -r f; do
     [ -n "$f" ] || continue
     printf '%s\n' "$f" | grep -qE "$EXCLUDE_RE" && continue
-    _og=1; printf '%s\n' "$COVERED" | grep -qxF "$f" && _og=0
+    # 🔴 러너가 **선언에서 못 읽히는** 몫이면 「글롭 밖」이 아니라 «판정 불가»다.
+    #    「안 걸렸다」로 두면 그 자리가 초록이 되고, 그게 정확히 이 시험이 막으려는 것이다.
+    if jest_shaped "$f" && ! bun_covered "$f"; then
+        UNKNOWN_GLOB="${UNKNOWN_GLOB}${f}"$'\n'; continue
+    fi
+    _og=1
+    shell_covered "$f" && _og=0
+    [ "$_og" -eq 1 ] && bun_covered "$f" && _og=0
     # 못 재는 자리에서는 «안 걸린다» 로 두지 않는다 — 아래에서 판정 불가로 따로 말한다
     if [ "$TRACK_MEASURABLE" -eq 1 ]; then
         _ot=1; printf '%s\n' "$TRACKED" | grep -qxF "$f" && _ot=0
@@ -107,9 +157,15 @@ else
         "0개 (러너에 배선하거나 유예에 이름·사유를 적을 것)" "«$(_join "$ORPHAN_GLOB")»"
 fi
 
+NU="$(_count "$UNKNOWN_GLOB")"
+if [ "$NU" -gt 0 ]; then
+    unk "ⓐ 판정 불가 ${NU}개 — 러너 선언이 없어 «도는지 모른다»" \
+        "«$(_join "$UNKNOWN_GLOB")» — jest 에 testMatch 를 선언하면 이 칸이 비워진다"
+fi
+
 if [ "$TRACK_MEASURABLE" -eq 0 ]; then
-    echo "  ⛔ ⓑ 추적 축 **판정 불가** — ${GUARD_ROOT} 는 git 레포가 아니다"
-    echo "     (「추적 밖 0개」로 접지 않는다. 못 잰 것을 잰 척하지 않는다)"
+    unk "ⓑ 추적 축 판정 불가 — ${GUARD_ROOT} 는 git 레포가 아니다" \
+        "(「추적 밖 0개」로 접지 않는다. 못 잰 것을 잰 척하지 않는다)"
 elif [ "$NT" -eq 0 ]; then
     ok "ⓑ 추적 밖 0개 — 로컬 분모와 CI 분모가 같다"
 else
@@ -155,8 +211,32 @@ if [ "${GUARD_SELFTEST:-1}" = "1" ]; then
     else
         bad "[대조군] 축이 갈리지 않는다" "ⓐ 1개 · ⓑ 1개 각각" "«$(printf '%s' "$_o" | grep -E 'ⓐ|ⓑ' | tr '\n' ' ')»"
     fi
+
+    # 🧪 [대조군] **판정 불가 축은 «따로» 태운다** — 위 트리는 실패가 있어 rc=1 이라
+    #   `2` 를 덮어쓴다. 실패 0 인 트리여야 「빨강 아닌데 0 도 아니다」가 보인다.
+    #   🔑 새 축을 만들고 대조군을 안 붙이면, 그 축의 초록이 「0건」인지 「안 셌다」인지 안 갈린다.
+    _t2="$(mktemp -d)"
+    mkdir -p "$_t2/tests"
+    printf "%s\n" "--shell-glob 'tests/*.test.sh'" "npx jest --runInBand" > "$_t2/tests/run-all.sh"
+    : > "$_t2/tests/alpha.test.sh"
+    : > "$_t2/tests/ghost.test.js"      # jest 몫으로 «보이는데» 선언이 없다 → 판정 불가
+    git -C "$_t2" init -q -b main >/dev/null 2>&1
+    git -C "$_t2" add tests/ >/dev/null 2>&1
+    _o2="$(GUARD_ROOT="$_t2" GUARD_SELFTEST=0 bash "${BASH_SOURCE[0]}" 2>&1)"; _rc2=$?
+    rm -rf "$_t2"
+    if [ "$_rc2" -eq 2 ] && printf '%s\n' "$_o2" | grep -q 'ghost.test.js'; then
+        ok "[대조군] 실패 0 · 판정 불가 1 → **rc=2** (초록으로 접지 않는다)"
+    else
+        bad "[대조군] 판정 불가가 rc 로 안 나온다" "rc=2 + ghost.test.js" \
+            "rc=${_rc2} — «$(printf '%s' "$_o2" | grep -E '통과 |⛔' | tr '\n' ' ')»"
+    fi
 fi
 
 echo
-echo "  통과 $pass · 실패 $fail"
-[ "$fail" -eq 0 ]
+echo "  통과 $pass · 실패 $fail · 판정 불가 $unknown"
+# 🔴 rc 계약: 1 = 빨강 · **2 = 못 쟀다(초록 아님)** · 0 = 다 재고 초록.
+#   🔑 실패가 0 이어도 판정 불가가 있으면 **0 을 주지 않는다** — 그 0 은 「다 통과」로 읽히고,
+#     「거의 못 쟀는데 걸린 게 없다」와 구별이 사라진다. `#146` 신규 조항의 코드 판이다.
+[ "$fail" -gt 0 ] && exit 1
+[ "$unknown" -gt 0 ] && exit 2
+exit 0
