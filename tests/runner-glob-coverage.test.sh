@@ -107,8 +107,12 @@ JEST_DECL="$(grep -oE "npx jest[^']*" "$RUN_ALL" 2>/dev/null || true)"
 # 🔸 도구 부재와 «선언 부재»를 가른다(룬드 리뷰 ③) — 방향은 안전해도 **판정 불가의 «사유»가
 #   거짓**이 되면, 이 파일의 주제가 정확히 그 구별이라 스스로를 배반한다.
 #   🔑 주입구를 두되 **아래 대조군이 실제로 쓴다** — 안 쓰면 없는 것과 같다(이 파일 헤더의 규칙).
+#   🔴 **«존재»가 아니라 «동작»을 본다** (룬드 2차 ③): `command -v` 는 pyenv shim·brew 갱신 중·
+#     권한 문제로 **있는데 죽는** python3 를 통과시킨다. 완전 부재만 잡히고 그 셋은 접혔다.
+#     🔑 내가 세운 *「주입구만 만들면 없는 것과 같다」* 의 한 칸 더 — **대조군이 주입구를 재고
+#       «실제 조건»을 안 쟀다.** ⇒ 실행 rc 로 판정한다.
 if [ "${GUARD_NO_PYTHON:-0}" = 1 ]; then PY_OK=0
-elif command -v python3 >/dev/null 2>&1; then PY_OK=1
+elif python3 -c 'pass' >/dev/null 2>&1; then PY_OK=1
 else PY_OK=0; fi
 JEST_MATCH=""
 if [ "$PY_OK" -eq 1 ]; then
@@ -132,10 +136,28 @@ _expand() { ( cd "$GUARD_ROOT" 2>/dev/null || exit 0; shopt -s nullglob; for p i
 SHELL_COVERED=""
 [ -n "$SHELL_GLOB" ] && SHELL_COVERED="$(_expand "$SHELL_GLOB")"
 # jest 는 `**` 를 쓰므로 `globstar` 가 필요하다. 선언이 있을 때만 확장한다.
+# 🔴 **`globstar` 는 bash 3.2(맥 기본)에 «없다»** — 룬드 맥 실측 2026-08-05:
+#   `shopt -s nullglob globstar` 는 nullglob 만 켜고 globstar 에서 죽는다. 그러면 `**` 가
+#   그냥 `*` 라 **`/` 를 못 넘고**, `tests/unit/x.test.sh` 가 「글롭 밖」= **실패**로 나온다.
+#   🔑 **jest 는 실제로 도는데 시험이 「안 돈다」고 빨강을 낸다 — 거짓 «빨강»**이다.
+#   ⚠️ 내 리눅스와 CI 에선 영원히 안 보인다. 그리고 맥에서도 **파일이 1단계면 안 터진다** —
+#     *「우연한 일치가 방법을 승인하지 않는다」*(㊲)의 실물이라, 깊이에 기대지 않는다.
+#   ⇒ 계약대로 **못 펴면 «판정 불가»**다. 못 쟀는데 빨강을 내면 **「고칠 게 있다」는 거짓 정보**가 되고,
+#     실제로 내 대조군이 그 거짓 정보를 냈다(「이 수리로는 동결이 안 풀린다」 ← 리눅스에선 풀린다).
+GLOBSTAR_OK=0
+if [ "${GUARD_NO_GLOBSTAR:-0}" != 1 ]; then
+    ( shopt -s globstar ) >/dev/null 2>&1 && GLOBSTAR_OK=1
+fi
+JEST_UNEXPANDABLE=0
+if [ -n "$JEST_MATCH" ] && [ "$GLOBSTAR_OK" -eq 0 ]; then
+    case "$JEST_MATCH" in *'**'*) JEST_UNEXPANDABLE=1 ;; esac
+fi
+
 JEST_COVERED=""
-if [ -n "$JEST_MATCH" ]; then
+if [ -n "$JEST_MATCH" ] && [ "$JEST_UNEXPANDABLE" -eq 0 ]; then
     JEST_COVERED="$( ( cd "$GUARD_ROOT" 2>/dev/null || exit 0
-        shopt -s nullglob globstar
+        shopt -s nullglob
+        shopt -s globstar 2>/dev/null || true
         while IFS= read -r pat; do
             [ -n "$pat" ] || continue
             for p in $pat; do printf '%s\n' "$p"; done
@@ -147,7 +169,14 @@ shell_covered() { _in_list "$1" "$SHELL_COVERED"; }
 bun_covered()   { _in_list "$1" "$BUN_FILES"; }
 jest_covered()  { _in_list "$1" "$JEST_COVERED"; }
 # 🔴 jest 선언이 **없을 때만** 판정 불가로 보낸다. 선언이 있으면 위에서 확장돼 covered 로 잡힌다.
-jest_unknown() { [ -n "$JEST_DECL" ] && [ -z "$JEST_MATCH" ] && case "$1" in *.test.js) return 0 ;; esac; return 1; }
+jest_unknown() {
+    [ -n "$JEST_DECL" ] || return 1
+    # 선언이 없거나(기본값 의존), 있어도 이 셸이 «못 편다»면 둘 다 「모른다」다.
+    if [ -z "$JEST_MATCH" ] || [ "$JEST_UNEXPANDABLE" -eq 1 ]; then
+        case "$1" in *.test.js) return 0 ;; esac
+    fi
+    return 1
+}
 
 LOOKS="$(looks_like "$GUARD_ROOT")"
 if is_git_repo "$GUARD_ROOT"; then
@@ -207,6 +236,9 @@ if [ "$NU" -gt 0 ]; then
     if [ "$PY_OK" -eq 0 ]; then
         unk "ⓐ 판정 불가 ${NU}개 — jest 선언을 «읽을 도구»가 없다(python3 부재). 선언 부재가 아니다" \
             "«$(_join "$UNKNOWN_GLOB")» — python3 를 두면 이 칸의 사유부터 갈린다"
+    elif [ "$JEST_UNEXPANDABLE" -eq 1 ]; then
+        unk "ⓐ 판정 불가 ${NU}개 — 선언은 «있는데» 이 셸에 globstar 가 없어 «**» 를 못 편다" \
+            "«$(_join "$UNKNOWN_GLOB")» — bash 4+ 에서 재라(맥 기본 3.2 에는 없다). 선언 부재가 아니다"
     else
         unk "ⓐ 판정 불가 ${NU}개 — 러너 선언이 없어 «도는지 모른다»" \
             "«$(_join "$UNKNOWN_GLOB")» — jest 에 testMatch 를 선언하면 이 칸이 비워진다"
@@ -324,6 +356,18 @@ if [ "${GUARD_SELFTEST:-1}" = "1" ]; then
     else
         bad "[대조군] 도구 부재가 「선언 부재」로 읽힌다 — 판정 불가의 사유가 거짓" \
             "'python3 부재' 가 사유에" "«$(printf '%s' "$_o5" | grep '⛔' | tr '\n' ' ')»"
+    fi
+
+    # 🧪 [대조군] **globstar 가 없으면 «판정 불가»여야 한다** — 실패가 아니라.
+    #   🔴 이 대조군은 **주입구(`GUARD_NO_GLOBSTAR`)를 잰다.** 실제 조건(bash 3.2)은 이 기계에서
+    #     못 만든다 — **룬드 맥 실행이 그 축의 유일한 관측**이고, 그가 실측으로 이 결함을 냈다.
+    #     ⚠️ 그래서 이 초록은 「맥에서 돈다」가 아니라 **「이 갈래가 배선돼 있다」**만 말한다.
+    _o6="$(GUARD_ROOT="$_t2" GUARD_SELFTEST=0 GUARD_NO_GLOBSTAR=1 bash "${BASH_SOURCE[0]}" 2>&1)"; _rc6=$?
+    if [ "$_rc6" -eq 2 ] && printf '%s\n' "$_o6" | grep -q 'globstar'; then
+        ok "[대조군] globstar 부재 → **rc=2 · 사유에 globstar** (거짓 빨강을 안 낸다)"
+    else
+        bad "[대조군] globstar 가 없을 때 «못 쟀다»가 아니라 빨강을 낸다" "rc=2 + 사유에 'globstar'" \
+            "rc=${_rc6} — «$(printf '%s' "$_o6" | grep -E '❌|⛔' | tr '\n' ' ')»"
     fi
 fi
 
