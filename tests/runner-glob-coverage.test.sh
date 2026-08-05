@@ -324,7 +324,13 @@ if [ "${GUARD_SELFTEST:-1}" = "1" ]; then
     #   🔑 처방을 시험하지 않으면 **처방이 있다는 것만 참**이 된다.
     printf '%s\n' '{"jest":{"testMatch":["**/tests/**/*.test.js"]}}' > "$_t2/package.json"
     _o3="$(GUARD_ROOT="$_t2" GUARD_SELFTEST=0 bash "${BASH_SOURCE[0]}" 2>&1)"; _rc3=$?
-    if [ "$_rc3" -eq 0 ]; then
+    if [ "$GLOBSTAR_OK" -eq 0 ]; then
+        # 🔴 **같은 처방을 «대조군 자신»에도 건다** (룬드 3차). 프로덕션 갈래엔 「도구 없으면
+        #   판정 불가」를 넣어놓고, 이 대조군은 `rc=0` 만 초록으로 받아서 **맥의 «올바른 답»인
+        #   `rc=2` 를 실패로 셌다.** 🔑 처방이 한 층 위에는 안 걸려 있었다 — 오늘 계속 나온 형태다.
+        unk "[대조군] 출구를 «못 잰다» — 이 셸에 globstar 가 없다" \
+            "bash 4+ 에서 재라. 「출구가 안 열린다」와 「못 쟀다」는 다른 말이다"
+    elif [ "$_rc3" -eq 0 ]; then
         ok "[대조군] jest testMatch 를 선언하면 **rc=0** — 동결의 출구가 실제로 열린다"
     else
         bad "[대조군] 출구가 안 열린다 — 이 수리로는 동결이 안 풀린다" "rc=0" \
