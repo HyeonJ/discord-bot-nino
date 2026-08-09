@@ -84,7 +84,11 @@ if [ "${CASCADE_WIRING_SELFTEST:-1}" = "1" ]; then
         cp "${BASH_SOURCE[0]}" "$d/tests/"
         o="$(CASCADE_WIRING_SELFTEST=0 bash "$d/tests/$(basename "${BASH_SOURCE[0]}")" 2>&1)"; rc=$?
         if [ "$rc" = "$want_rc" ] && printf '%s\n' "$o" | grep -q "$want_msg"; then
-            ok "[대조군 $name] rc=$rc «$want_msg»"
+            # 🔴 «${want_msg}» — 중괄호 필수. bash 3.2(맥 기본)는 `»`(U+00BB = C2 BB)의 «앞 바이트»를
+            #   식별자 문자로 먹어 변수명이 `want_msg\xC2` 가 된다. `set -u` 라 그 자리에서 죽는다.
+            #   ⚠️ 리눅스 bash 5.x 에선 «안 죽는다» — CI 러너도 저자와 같은 편이라 이 축은
+            #      실행으로는 안 잡힌다. 잡는 건 정적 검사뿐이다(`shared-contract-drift` 의 `$VAR»` 판별식).
+            ok "[대조군 $name] rc=$rc «${want_msg}»"
         else
             bad "[대조군 $name] 이 칸을 못 지킨다 — 위 판정은 못 믿는다" \
                 "rc=$want_rc + '$want_msg'" "rc=$rc + $(printf '%s' "$o" | tr '\n' ' ')"
