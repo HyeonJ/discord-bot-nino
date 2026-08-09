@@ -41,6 +41,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+
+      # 🔑 러너가 `bun test` 를 부르는데 CI 에 bun 이 없어서 시험 21개가 **판정 불가**로
+      #    떴다(`#132` 머지 `19329d7` 부터, 판불 9→10). 부재를 통과로 안 센 건 설계대로고,
+      #    막힌 건 «못 쟀다» 쪽이라 여기서 여는 게 근본이다 — 시험을 지우는 게 아니라 돌린다.
+      # 🔴 로컬(WSL·GNU date)에서 먼저 재고 넣는다: `21 pass · 0 fail · rc=0`.
+      #    안 재고 넣으면 실패가 0→N 이 될 수 있고, 그건 동결 통과 조건을 «거꾸로» 깬다.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
       # `npm ci` — lockfile 을 무시하면 "로컬 초록 ↔ CI 초록" 이 서로 다른 의존성 위에서 난다
       - run: npm ci
 
