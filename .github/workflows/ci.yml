@@ -25,9 +25,16 @@ on:
 #
 # 🔑 조용하다 — 실패가 아니라 `cancelled` 로 남을 뿐이라 아무도 안 본다.
 #    PR 쪽 취소는 그대로 둔다(러너 시간). 끄는 건 main 하나뿐이다.
+# 🔴 **취소를 끄는 것만으로는 «절반»이었다** (2026-08-10, 룬드 `#68` 에서 옮겨받음).
+#    한 concurrency 그룹의 **대기 자리는 하나**라, main 커밋이 전부 같은 그룹이면
+#    새 대기가 **앞 대기를 밀어낸다** — `cancel-in-progress` 와 «무관»하게 죽는다.
+#    그의 증거: 취소 시각 = 다음 런의 «생성» 시각(같은 초).
+# 🔑 내 취소 건수는 0 이었는데 **그 0 이 아무것도 안 말했다** — main 런 간격이 2시간이라
+#    한 번도 안 밟혔을 뿐이다(「판정 불가」이지 「수리됨」이 아니다). 발현은 **머지가 몰릴 때**.
+#    ⇒ main 은 **sha 로 그룹을 갈라** 커밋마다 자기 자리를 준다. PR 은 공유 그룹 그대로.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.ref == 'refs/heads/main' && github.sha || 'shared' }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}   # 그대로 둔다
 
 permissions:
   contents: read   # checkout 만 필요

@@ -64,6 +64,50 @@ elif [ "$VAL" = "false" ]; then
     bad "전면 해제했다 — PR 연속 푸시가 전부 끝까지 돈다(월 한도)" "main 만 예외" "false"
 fi
 
+# ────────────────────────────────────────────────────────────────────────────
+# 🔴 «두 번째 축» — group. `cancel-in-progress: false` 만으로는 안 막힌다.
+#
+#   #145 가 고친 것은 **취소 축 하나뿐**이었다. 그런데 한 concurrency 그룹의
+#   **대기 자리는 하나**라, main 커밋이 전부 같은 그룹에 들어가면 새 대기가
+#   **앞 대기를 밀어낸다** — `cancel-in-progress` 와 «무관»하게 죽는다.
+#   룬드 실측 증거: 취소 시각 = 다음 런의 «생성» 시각(같은 초). `523097f` 런이
+#   `57e4f24` 생성과 동시에 cancelled.
+#
+# 🔑 **내 취소 건수 0 은 이 축에 대해 아무 말도 안 했다** — `#145` 이후 main 런 2건,
+#   간격 2시간 8분, 10분 내 연속 0건. 「수리됐다」가 아니라 **「한 번도 안 밟혔다」**다.
+#   *「이 값이 두 상태를 갈라주나?」* 아니오 — 갈라준 건 취소 수가 아니라 **런 간격**이었다.
+#   ⇒ 발현은 **일이 몰릴 때**만 난다. 시험이 없으면 몰리는 날 조용히 밟는다.
+grp() { sed -n '/^concurrency:/,/^[^ #]/p' "$WF" | sed -n 's/^[[:space:]]*group:[[:space:]]*//p' | head -1; }
+
+GVAL="$(grp)"
+if [ -z "$GVAL" ]; then
+    bad "판정 불가 — concurrency 블록에서 group 을 못 읽었다" "값 한 줄" "«없음»"
+elif printf '%s\n' "$GVAL" | grep -q 'github\.sha'; then
+    ok "group 이 sha 로 갈린다 (main 커밋마다 «자기 그룹»)"
+
+    # 🔑 sha 가 «참» 가지에 있어야 한다. 붙여넣기로 옮기면 여기가 조용히 뒤집힌다:
+    #    ①`!=` 로 뒤집기  ②`==` 는 그대로 두고 값만 맞바꾸기 — 둘 다 이 칸이 잡는다.
+    #    문자열 통째 대조가 아니라 «삼항의 참 가지»를 뽑아서 본다(동치 표현을 안 막으려고).
+    COND="$(printf '%s\n' "$GVAL" | sed -n 's/.*{{\([^{}]*\)&&.*/\1/p')"
+    TRUE_ARM="$(printf '%s\n' "$GVAL" | sed -n 's/.*&&\([^|]*\)||.*/\1/p')"
+    if [ -z "$COND" ] || [ -z "$TRUE_ARM" ]; then
+        bad "group 에 sha 는 있는데 «조건부»가 아니다 — PR 까지 sha 로 갈리면 연속 푸시가 안 취소된다" \
+            "COND && github.sha || 'shared'" "«${GVAL}»"
+    elif ! printf '%s\n' "$COND" | grep -q "==" || ! printf '%s\n' "$COND" | grep -q 'refs/heads/main'; then
+        bad "조건이 «main 일 때»가 아니다 — 뒤집히면 PR 이 sha 로 갈리고 main 이 한 그룹이 된다" \
+            "github.ref == 'refs/heads/main'" "«${COND}»"
+    elif ! printf '%s\n' "$TRUE_ARM" | grep -q 'github\.sha'; then
+        bad "sha 가 «거짓» 가지에 있다 — 값이 맞바뀌었다" \
+            "&& 뒤가 github.sha" "«${TRUE_ARM}»"
+    else
+        ok "sha 가 «참»(main) 가지에 있다"
+    fi
+else
+    bad "group 이 ref 로만 갈린다 — main 커밋 전부가 «한 그룹»이고 대기 자리는 하나다" \
+        "group 에 github.sha (main 일 때)" "«${GVAL}»"
+    echo "  ⛔ 판정 불가 — 위가 깨져서 «sha 가 어느 가지인가»는 못 쟀다 (분모는 4 유지)"
+fi
+
 # 🧪 [양성 대조군] 검사기를 실제로 태운다 — 같은 코드에, 위반 파일을 만들어서.
 #   이게 없으면 위 초록이 「통과」인지 「안 봤다」인지 안 갈린다.
 if [ "${CI_CONC_SELFTEST:-1}" = "1" ]; then
