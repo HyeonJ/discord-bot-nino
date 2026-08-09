@@ -36,14 +36,43 @@ DARREN_DM='DM-Darren'
 #   🔑 읽기 실패·빈 파일·비수치는 전부 «안 자는 중»으로 떨어진다 — 잊거나 깨져도 «시끄러운 쪽»으로.
 #      반대로 폴백하면 파일이 잘못 생긴 순간부터 멘션이 조용히 사라진다.
 SLEEP_FLAG="${DARREN_SLEEP_FLAG:-$HOME/discord-bot-nino/logs/darren-sleeping}"
+
+# 🕐 «지금»은 한 곳에서만 읽는다 — 시험이 갈아끼울 수 있어야 시간대 계약에 시험이 붙는다.
+NOW_EPOCH="${DARREN_NOW_EPOCH:-$(date +%s)}"
+
+# 🌙 기본 취침 시간대 — **Darren 값** (2026-08-10 `M:ur8v` 「새벽 1~7시를 기본값으로 하자」).
+#   🔑 내가 정할 수 없던 값이다. CLAUDE.md 에 *「시각을 고려하는 건 물리적 소음만
+#      (Darren 에 대해선 «미정» — 확대 적용 금지)」* 이라 적혀 있었고, 물어서 채웠다.
+#   🔑 왜 cron 이 아니라 훅 안인가: cron 으로 1시에 켜고 7시에 끄면 **기계가 꺼져 있거나
+#      한 번 빠진 밤은 조용히 무방비**가 된다. 여기서 재면 빠질 자리가 없다.
+#   🔑 시(hour)를 `date` 로 «파싱»하지 않고 **에폭 산술**로 낸다 — GNU/BSD 가 갈리는 자리를
+#      안 밟고(룬드 맥에서도 돈다), 시험이 값 하나만 넣으면 임의 시각을 만들 수 있다.
+#      한국은 서머타임이 없어 +9 가 고정이다.
+SLEEP_FROM="${DARREN_SLEEP_FROM:-1}"   # 이 시부터 (포함)
+SLEEP_TO="${DARREN_SLEEP_TO:-7}"       # 이 시까지 (미만)
+in_sleep_window() {
+  local h=$(( ( (NOW_EPOCH + 32400) / 3600 ) % 24 ))
+  if [ "$SLEEP_FROM" -lt "$SLEEP_TO" ]; then
+    [ "$h" -ge "$SLEEP_FROM" ] && [ "$h" -lt "$SLEEP_TO" ]
+  else
+    # 자정을 넘는 창(예: 23~7). 값이 바뀔 때 조용히 뒤집히지 않게 «뜻»으로 적는다.
+    [ "$h" -ge "$SLEEP_FROM" ] || [ "$h" -lt "$SLEEP_TO" ]
+  fi
+}
+
+# 🔑 명시 플래그가 시간대보다 «먼저»다 — 말하면 그게 우선(Darren).
+#   플래그가 «만료»된 경우는 「깨어있다」가 아니라 「그 선언이 끝났다」라 시간대로 떨어진다.
+#   ⚠️ 그래서 «지금 깨어있다»를 찍는 수단은 아직 없다(비대칭 — Darren 께 물어놨다).
 is_sleeping() {
   local until
-  [ -f "$SLEEP_FLAG" ] || { echo 0; return; }
-  until=$(head -1 "$SLEEP_FLAG" 2>/dev/null | tr -d '[:space:]')
-  case "$until" in
-    ''|*[!0-9]*) echo 0; return ;;
-  esac
-  [ "$(date +%s)" -lt "$until" ] && echo 1 || echo 0
+  if [ -f "$SLEEP_FLAG" ]; then
+    until=$(head -1 "$SLEEP_FLAG" 2>/dev/null | tr -d '[:space:]')
+    case "$until" in
+      ''|*[!0-9]*) ;;                                       # 깨진 플래그 → 시간대로
+      *) [ "$NOW_EPOCH" -lt "$until" ] && { echo 1; return; } ;;
+    esac
+  fi
+  in_sleep_window && echo 1 || echo 0
 }
 
 # target 인자만 뽑는다. 값을 먹는 옵션(discord-send --help 실측): -r/--reply · -t/--thread · -f/--file · --target · -c

@@ -89,9 +89,21 @@ export DARREN_SLEEP_FLAG="$(mktemp /tmp/darren-sleeping.XXXXXX)"
 # ⚠️ `${:-}` 로 받는다 — 아래에서 플래그를 지우고 나면 `set -u` 아래의 trap 이 죽는다.
 trap 'rm -f "$TMPMSG" "$OUTMSG" "${DARREN_SLEEP_FLAG:-}"' EXIT
 
+# 🕐 «지금»을 못 박는다 — 아래 계약들은 시간대 기본값(1~7시)이 생기면서
+#   **벽시계에 따라 뒤집히는** 것들이 됐다. 안 박으면 새벽에 돌릴 때 «거짓 빨강»이 난다.
+#   🔑 고정 epoch 을 리터럴로 쓰지 않는다 — 러너 TZ 가 UTC 라 「몇 시인가」가 갈린다.
+#      KST 자정으로 «정규화»한 뒤 시를 더해서, TZ 와 무관하게 원하는 KST 시각을 만든다.
+_B=1786000000
+KST_MIDNIGHT=$(( _B - (_B + 32400) % 86400 ))
+kst()  { echo $(( KST_MIDNIGHT + $1 * 3600 + 1800 )); }   # 그 시 «30분»
+kstx() { echo $(( KST_MIDNIGHT + $1 * 3600 ));        }   # 그 시 «정각» (경계용)
+
+# 아래 블록은 «낮»으로 고정 — 시간대가 아니라 «플래그»가 무엇을 하는지만 잰다
+export DARREN_NOW_EPOCH="$(kst 10)"
+
 # 만료 시각(epoch)을 파일에 적는다 — 훅이 «요일 판정»을 하지 않게 하려는 것.
 #   요일·기상시각 계산은 «켜는 쪽»이 하고, 훅은 «지났나»만 본다(판단 아닌 비교).
-printf '%s\n' "$(( $(date +%s) + 3600 ))" > "$DARREN_SLEEP_FLAG"
+printf '%s\n' "$(( DARREN_NOW_EPOCH + 3600 ))" > "$DARREN_SLEEP_FLAG"
 
 check "🌙 취침 중 + 멘션 있음 → 차단(깨운다)"        2 "discord-send 현인-업무 \"$MENTION 보고\""
 check "🌙 취침 중 + @Darren 표기도 → 차단"           2 'discord-send 현인-업무 "@Darren 보고"'
@@ -101,7 +113,7 @@ check "🌙 취침 중이어도 다른 채널은 무관 → 통과"     0 "disco
 
 # 🧪 [경계] 만료가 지나면 «평소 계약»으로 돌아온다. 이게 없으면 내가 해제를 잊었을 때
 #   멘션이 영영 조용히 안 간다 — 잊어도 «시끄러운 쪽»으로 떨어지게 하는 장치다.
-printf '%s\n' "$(( $(date +%s) - 60 ))" > "$DARREN_SLEEP_FLAG"
+printf '%s\n' "$(( DARREN_NOW_EPOCH - 60 ))" > "$DARREN_SLEEP_FLAG"
 check "🧪 [경계] 만료 후 → 멘션 없으면 도로 차단"    2 'discord-send 현인-업무 "보고"'
 check "🧪 [경계] 만료 후 → 멘션 있으면 통과"         0 "discord-send 현인-업무 \"$MENTION 보고\""
 
@@ -113,6 +125,49 @@ printf 'garbage\n' > "$DARREN_SLEEP_FLAG"
 check "🧪 [폴백] 숫자 아닌 플래그 → 평소 계약(차단)" 2 'discord-send 현인-업무 "보고"'
 rm -f "$DARREN_SLEEP_FLAG"
 check "🧪 [폴백] 플래그 파일 없음 → 평소 계약(차단)" 2 'discord-send 현인-업무 "보고"'
+
+echo ""
+echo "🌙 기본 취침 «시간대» — Darren 값 1~7시 (2026-08-10 M:ur8v). 플래그 없이도 든다:"
+# 왜 생겼나: 플래그는 **Darren 이 「잔다」고 말해야** 켜진다. 본인 말 —
+#   *「내가 잔다고 말 안하고 그냥 잘때도 있어」*. 설계가 사람에게 일을 시키고 있었다.
+# 🔑 이 블록은 «플래그 없음»에서 잰다 — 위 폴백 블록과 «같은 입력»인데 시각만 다르다.
+#   그래서 갈라주는 것이 시간대라는 게 대조로 선다(둘 다 차단이면 아무것도 안 갈린다).
+
+export DARREN_NOW_EPOCH="$(kst 3)"
+check "🌙 [시간대] 03시 + 플래그 없음 + 멘션 → 차단"   2 "discord-send 현인-업무 \"$MENTION 보고\""
+check "🌙 [시간대] 03시 + 멘션 없음 → 통과(무음)"      0 'discord-send 현인-업무 "보고"'
+check "🌙 [시간대] 03시 + DM → 차단(소리남)"           2 'discord-send DM-Darren "확인"'
+check "🌙 [시간대] 03시라도 다른 채널은 무관 → 통과"   0 "discord-send 봇-놀이터 \"$MENTION 룬드에게\""
+
+export DARREN_NOW_EPOCH="$(kst 10)"
+check "🌙 [대조군] 10시 + 같은 입력 → 평소 계약(통과)" 0 "discord-send 현인-업무 \"$MENTION 보고\""
+
+# 🧪 경계 — `>= from` 과 `< to`. 정각 둘 다 못 박는다(한쪽만 재면 열림/닫힘이 안 갈린다).
+export DARREN_NOW_EPOCH="$(kstx 1)"
+check "🧪 [경계] 01:00 정각 → 든다(포함)"              2 "discord-send 현인-업무 \"$MENTION 보고\""
+export DARREN_NOW_EPOCH="$(kstx 7)"
+check "🧪 [경계] 07:00 정각 → 안 든다(미만)"           0 "discord-send 현인-업무 \"$MENTION 보고\""
+export DARREN_NOW_EPOCH="$(kstx 0)"
+check "🧪 [경계] 00:00 → 아직 안 든다"                 0 "discord-send 현인-업무 \"$MENTION 보고\""
+
+# 🧪 명시 플래그가 «시간대보다 우선»인가 — 낮인데 「잔다」고 찍은 경우
+export DARREN_NOW_EPOCH="$(kst 14)"
+export DARREN_SLEEP_FLAG="$(mktemp /tmp/darren-sleeping.XXXXXX)"
+printf '%s\n' "$(( DARREN_NOW_EPOCH + 3600 ))" > "$DARREN_SLEEP_FLAG"
+check "🌙 [우선] 낮 14시라도 명시 플래그가 있으면 차단" 2 "discord-send 현인-업무 \"$MENTION 보고\""
+rm -f "$DARREN_SLEEP_FLAG"
+
+# 🧪 창이 «자정을 넘을 때»도 도나 — 값이 바뀌어도 뒤집히지 않게 뜻으로 적었는지 잰다.
+#   ⚠️ 지금 값(1~7)으로는 «절대 안 밟히는» 가지다. 안 재면 나중에 값을 바꾸는 순간 조용히 틀린다.
+export DARREN_SLEEP_FROM=23 DARREN_SLEEP_TO=7
+export DARREN_NOW_EPOCH="$(kst 23)"
+check "🧪 [자정넘김] 23시 (from 쪽) → 든다"            2 "discord-send 현인-업무 \"$MENTION 보고\""
+export DARREN_NOW_EPOCH="$(kst 2)"
+check "🧪 [자정넘김] 02시 (to 쪽) → 든다"              2 "discord-send 현인-업무 \"$MENTION 보고\""
+export DARREN_NOW_EPOCH="$(kst 12)"
+check "🧪 [자정넘김] 12시 → 안 든다"                   0 "discord-send 현인-업무 \"$MENTION 보고\""
+unset DARREN_SLEEP_FROM DARREN_SLEEP_TO
+unset DARREN_NOW_EPOCH
 
 echo ""
 echo "결과: $pass pass, $fail fail"
