@@ -45,7 +45,7 @@ bash ~/discord-bot-nino/scripts/start-nino.sh
 GitHub 레포 (public)
 ├── src/           ← 코어 봇 코드 (relay, send, health)
 ├── scripts/       ← 운영 스크립트 (start, watchdog, backup)
-├── config/        ← 설정 파일 (bots.json, channel-map)
+├── config/        ← 설정 파일 (channel-map)
 ├── tools/         ← 유틸리티 (calendar, podcast, onedrive)
 ├── media/         ← 미디어 제어 (TV, YouTube Music, ATV)
 ├── of/            ← OF 다운로드 도구

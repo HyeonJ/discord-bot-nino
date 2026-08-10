@@ -88,9 +88,9 @@
 ## 프로젝트 구조
 ```
 discord-bot-nino/
-├── src/        # 코어 (relay, send, health, auto-pull, bot, botctl)
+├── src/        # 코어 (relay, send, health, auto-pull)
 ├── scripts/    # 실행/관리 (start, restart, watchdog, backup, cron 등)
-├── config/     # 설정 (bots.json, channel-map.json, mention-map.json)
+├── config/     # 설정 (channel-map.json, mention-map.json)
 ├── tools/      # 도구 (calendar, notebooklm, onedrive, voice 등)
 ├── media/      # TV/음악/스피커 (click-shuffle, tv-*, ytm, jbl, cdp 등)
 ├── of/         # OF 다운로드 (of_*.py, record-drm-*, cdm/)
