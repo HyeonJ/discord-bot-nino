@@ -21,7 +21,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$SCRIPT_DIR/.." && pwd)"
 GUARD="${RC_PIPE_GUARD:-$REPO/claude-config/hooks/rc-pipe-guard.sh}"
 
-pass=0; fail=0
+pass=0; fail=0; skip=0
 ok()  { echo "  ✅ $1"; pass=$((pass + 1)); }
 bad() { echo "  ❌ $1"; [ -n "${2:-}" ] && echo "     want rc=$2  got rc=$3"; fail=$((fail + 1)); }
 
@@ -34,7 +34,30 @@ bad() { echo "  ❌ $1"; [ -n "${2:-}" ] && echo "     want rc=$2  got rc=$3"; f
 #      실제로 ⑥ 절이 `bash "$GUARD"` 를 직접 불러 «운영 로그에 한 줄을 남겼다»(이 절을 쓰다 발견).
 _T="$(mktemp -d)"; trap 'rm -rf "$_T"' EXIT
 export RC_PIPE_GUARD_LOG="$_T/scratch.log"
-OPLOG="${HOME}/discord-bot-nino/logs/rc-pipe-guard.log"
+
+# 🔴 **운영 로그 경로를 여기 «다시 적지» 않는다 — 가드에서 «뽑아»온다** (룬드 🟡, `#159` 리뷰).
+#   사본이 둘이면 가드의 기본값이 바뀌었을 때 이쪽은 **엉뚱한 파일을 재게 되고**, 그 파일은
+#   보통 없으므로 「0줄 → 0줄」로 **영원히 초록**이다. 오염을 막으려고 만든 검사가 조용히 죽는다.
+#   🔑 「사본이 N벌이면 하나만 고쳐진다」의 실물이고, 처방은 **한쪽을 유도된 값으로** 만드는 것.
+# 🔸 `eval` 을 안 쓴다 — 확장 «시점»이 갈려서 거짓 음성을 낸 적이 있다(코어 `#62`).
+#   `$HOME` 만 문자열 치환으로 편다. 가드가 다른 변수를 쓰기 시작하면 아래 검사가 잡는다.
+_derive_oplog() {
+    local raw
+    # 🔴 «주석»이 아니라 «코드»에서 뽑는다 (룬드 🟡) — 가드에 그 변수를 설명하는 주석이 붙으면
+    #   `head -1` 이 그 주석을 집는다. **`#166` ⑤ 에서 내가 고친 그 병이고 처방도 같다**:
+    #   주석 줄을 먼저 빼고 유도한다. 지금은 가드에 한 줄뿐이라 «아직» 안 물렸을 뿐이다.
+    raw="$(LC_ALL=C grep -vE '^[[:space:]]*#' "$1" \
+           | LC_ALL=C sed -n 's/.*RC_PIPE_GUARD_LOG:-\([^}]*\)}.*/\1/p' | head -1)"
+    printf '%s' "${raw//\$HOME/$HOME}"
+}
+OPLOG="$(_derive_oplog "$GUARD")"
+# 🔴 **「못 뽑았다」를 「깨끗하다」로 접지 않는다** — 빈 값이면 아래 대조가 0줄→0줄로 통과한다.
+OPLOG_OK=1
+case "$OPLOG" in
+    /*.log) : ;;
+    *) OPLOG_OK=0 ;;
+esac
+case "$OPLOG" in *'$'*) OPLOG_OK=0 ;; esac
 OPLOG_BEFORE="$([ -f "$OPLOG" ] && wc -l < "$OPLOG" || echo 0)"
 
 # PreToolUse 페이로드를 만들어 먹인다 (기존 가드들과 같은 계약: stdin JSON, exit 2 = 차단)
@@ -180,11 +203,47 @@ rc="$(run_in /proc/nonexistent-dir/x.log 'git commit -F m.txt a.sh | tail -2 && 
 # 🔴 좌변을 «운영 로그»에 둔다 — 위 격리가 실제로 도는지는 그 파일이 안 늘었을 때만 안다.
 #   시험 안에서만 확인하면 「격리했다고 적었다」와 「격리됐다」가 구별이 안 된다.
 OPLOG_AFTER="$([ -f "$OPLOG" ] && wc -l < "$OPLOG" || echo 0)"
-[ "$OPLOG_AFTER" = "$OPLOG_BEFORE" ] \
-  && ok "이 시험이 «운영» 로그를 안 건드렸다 (${OPLOG_BEFORE}줄 그대로 — 건수가 시험 횟수로 안 오염된다)" \
-  || bad "시험이 운영 로그를 늘렸다 — 「오늘 몇 번 막혔나」가 «시험 횟수»가 된다" \
+if [ "$OPLOG_OK" != "1" ]; then
+    # 🔴 여기서 「통과」를 주면 안 된다 — 좌변이 없는데 초록이 켜진다.
+    bad "운영 로그 경로를 «가드에서 못 뽑았다» — 이 대조가 무엇을 재는지 모른다 (뽑힌 값: '$OPLOG')" \
+        "절대경로 .log" "$OPLOG"
+elif [ "$OPLOG_AFTER" = "$OPLOG_BEFORE" ]; then
+    ok "이 시험이 «운영» 로그를 안 건드렸다 (${OPLOG_BEFORE}줄 그대로 — 건수가 시험 횟수로 안 오염된다)"
+else
+    bad "시험이 운영 로그를 늘렸다 — 「오늘 몇 번 막혔나」가 «시험 횟수»가 된다" \
         "${OPLOG_BEFORE}줄" "${OPLOG_AFTER}줄"
+fi
+
+# 🧪 **뽑아오는 계량기가 실제로 «가드를 읽나»** — 상수를 반환해도 위 대조는 초록이다.
+#   가드 사본의 기본 경로를 바꿔서 «뽑힌 값이 따라 바뀌는지» 본다. 안 바뀌면 유도가 죽은 것이다.
+_MUT="$_T/guard-mut.sh"
+LC_ALL=C sed 's#RC_PIPE_GUARD_LOG:-[^}]*}#RC_PIPE_GUARD_LOG:-/tmp/nino-derive-probe.log}#' "$GUARD" > "$_MUT"
+if cmp -s "$GUARD" "$_MUT"; then
+    echo "  🔸 판정 불가: 변이를 못 심었다 — 가드의 기본값 표기가 바뀌었다(유도식도 같이 봐야 한다)"
+    skip=$((skip + 1))
+else
+    _got="$(_derive_oplog "$_MUT")"
+    [ "$_got" = "/tmp/nino-derive-probe.log" ] \
+      && ok "🧪 유도가 «가드를 읽는다» — 기본값을 바꾸니 뽑힌 값도 바뀐다(상수 반환이 아니다)" \
+      || bad "유도가 가드를 안 읽는다 — 사본이 둘일 때와 같은 상태다" "/tmp/nino-derive-probe.log" "$_got"
+fi
+
+# 🧪 **주석 미끼** — 가드에 그 변수를 «설명하는» 주석이 붙어도 «코드»를 뽑나 (룬드 🟡).
+#   지금 가드엔 한 줄뿐이라 이 함정이 «아직» 안 물렸다. 그런 자리는 대조군이 없으면
+#   **주석 한 줄이 늘어난 날 조용히 틀린다** — 그날 이 시험은 여전히 초록이다.
+_BAIT="$_T/guard-bait.sh"
+{ head -1 "$GUARD"
+  printf '%s\n' '# 기본값은 ${RC_PIPE_GUARD_LOG:-/tmp/미끼-주석.log} 이다 — 설명 주석'
+  tail -n +2 "$GUARD"; } > "$_BAIT"
+_bait_got="$(_derive_oplog "$_BAIT")"
+case "$_bait_got" in
+    */미끼-주석.log) bad "유도가 «주석»을 집었다 — 코드가 아니라 설명을 읽는다" "코드의 기본값" "$_bait_got" ;;
+    "$OPLOG")       ok "🧪 설명 주석을 앞에 붙여도 «코드»의 기본값을 뽑는다" ;;
+    *)              bad "주석 미끼 뒤 유도가 엉뚱한 값을 냈다" "$OPLOG" "$_bait_got" ;;
+esac
 
 echo
-echo "  통과 $pass · 실패 $fail"
+# 🔸 `${skip:+ …}` 는 `skip=0` 도 «비어 있지 않음»이라 조건이 «항상 참»이었다(룬드 🟡).
+#   그런데 **항상 내는 쪽이 옳다** — 판정 불가 0 도 「쟀는데 0」이라는 값이다. 조건만 뺀다.
+echo "  통과 $pass · 실패 $fail · 판정 불가 $skip"
 [ "$fail" -eq 0 ] || exit 1
