@@ -291,25 +291,51 @@ LC_ALL=C grep -q -- ":-$NINO_HOME}" "$SHIM" \
   && ok "안 걸었을 때의 기본값이 하드코딩 경로다 (정적)" \
   || bad "기본값" ":-$NINO_HOME}" "$(LC_ALL=C grep -n 'BOT_DIR=' "$SHIM")"
 
-# 🔸 위는 «문자열» 좌변이라 재서술에 죽는다. 실제로 그 경로로 «가는지»는 셔틀을 돌려서만 재는데,
-#   그러려면 그 기계에 진짜 `.env` 가 있어야 한다 ⇒ CI 에선 못 잰다. **판정 불가로 적고 축을 밝힌다.**
-if [ -r "$NINO_HOME/.env" ]; then
-    : > "$WORK/argv"; : > "$WORK/env"
-    cat > "$WORK/fake-bun-env" <<EOF
+# 🔸 위는 «문자열» 좌변이라 재서술에 죽는다. 실제로 그 경로로 «가는지»는 셔틀을 돌려야 재진다.
+#
+# 🔴 **여기 있던 판정 불가가 «원장에 안 보이는» 판정 불가였다** (룬드 `#170` 리뷰).
+#   초안은 *「`.env` 가 있어야 재니까 CI 에선 못 잰다」*로 적고 `skip++` 했는데, 러너는
+#   **파일 rc 로만** 분류하므로(`scripts/run-tests.sh:307`) 파일이 rc=0 이면 원장엔 **통과**로만
+#   실린다 ⇒ **CI 에선 이 축이 «항상» 판정 불가인데 그 사실이 어디에도 안 남는다.**
+#   하필 `#170` 이 자기 이음매의 근거로 든 시험이 이것이었다.
+# 🔑 **고친 방향은 「판불을 보이게」가 아니라 「부재로 잰다」다** — `.env` 가 없으면 셔틀은
+#   `source "$BOT_DIR/.env"` 에서 **그 경로를 짚으며** 죽는다(`set -e`). ⇒ 「어느 BOT_DIR 로
+#   갔나」를 **stderr 가 말해준다.** 부재는 이 축을 못 재게 하는 조건이 아니라 «다른 관측»이다.
+: > "$WORK/argv"; : > "$WORK/env"
+cat > "$WORK/fake-bun-env" <<EOF
 #!/bin/sh
 printf '%s\n' "\$CHANNEL_MAP" > "$WORK/env"
 exit 0
 EOF
-    chmod +x "$WORK/fake-bun-env"
+chmod +x "$WORK/fake-bun-env"
+
+# 🧪 **대조군 — 탐지기 자신을 «모든 기계»에서 잰다.** 아래 본 검사는 기계에 따라 갈래가 갈리므로,
+#   「죽을 때 stderr 가 BOT_DIR 를 말해준다」가 참인지는 여기서 따로 세운다. 이게 없으면
+#   본 검사의 음성(=문구 없음)이 「경로가 다르다」인지 「원래 안 말해준다」인지 못 가른다.
+_probe="$(env DISCORD_SEND_BOT_DIR="$WORK/nope" DISCORD_SEND_BUN="$WORK/fake-bun-env" \
+              DISCORD_SEND_CORE_CLI="$WORK/fake-core.js" \
+              bash "$SHIM" 봇-놀이터 x 2>&1 >/dev/null)"; _prc=$?
+if [ "$_prc" -ne 0 ] && printf '%s\n' "$_probe" | LC_ALL=C grep -qF "$WORK/nope/.env"; then
+    ok "🧪 대조군: env 파일이 없으면 셔틀이 «그 BOT_DIR 를 짚으며» 죽는다 (탐지기가 선다)"
+else
+    bad "🧪 대조군 — 탐지기가 안 선다" "rc≠0 + '$WORK/nope/.env' 언급" "rc=$_prc · $_probe"
+fi
+
+if [ -r "$NINO_HOME/.env" ]; then
     env DISCORD_SEND_BUN="$WORK/fake-bun-env" DISCORD_SEND_CORE_CLI="$WORK/fake-core.js" \
         bash "$SHIM" 봇-놀이터 "기본값 확인" >/dev/null 2>&1
     [ "$(cat "$WORK/env" 2>/dev/null)" = "$NINO_HOME/config/channel-map.json" ] \
-      && ok "  → 실제로 그 경로의 config 를 코어에 넘긴다 (실측)" \
+      && ok "  → 실제로 그 경로의 config 를 코어에 넘긴다 (실측 · env 파일 있는 기계)" \
       || bad "기본 BOT_DIR" "$NINO_HOME/config/channel-map.json" "$(cat "$WORK/env" 2>/dev/null)"
 else
-    echo "  🔸 판정 불가: «기본 BOT_DIR 로 실제로 가는지» 축 — 이 기계엔 $NINO_HOME/.env 가 없다"
-    echo "     (정적 좌변은 위에서 쟀다. 못 잰 것은 「기본값이 실행에서도 그 값인가」 하나다)"
-    skip=$((skip + 1))
+    # 🔑 CI 가 도는 갈래. 「실행에서도 기본값이 그 값인가」를 **부재로** 잰다.
+    _err="$(env DISCORD_SEND_BUN="$WORK/fake-bun-env" DISCORD_SEND_CORE_CLI="$WORK/fake-core.js" \
+                bash "$SHIM" 봇-놀이터 "기본값 확인" 2>&1 >/dev/null)"; _erc=$?
+    if [ "$_erc" -ne 0 ] && printf '%s\n' "$_err" | LC_ALL=C grep -qF "$NINO_HOME/.env"; then
+        ok "  → 이음매 없이 돌리면 «$NINO_HOME/.env» 를 짚는다 (실측 · env 파일 없는 기계)"
+    else
+        bad "기본 BOT_DIR(부재 축)" "rc≠0 + '$NINO_HOME/.env' 언급" "rc=$_erc · $_err"
+    fi
 fi
 
 echo
