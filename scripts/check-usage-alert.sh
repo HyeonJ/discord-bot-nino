@@ -36,6 +36,15 @@ CREDENTIALS="${CHECK_USAGE_CREDENTIALS:-$HOME/.claude/.credentials.json}"
 LOG="${CHECK_USAGE_LOG:-$BOT_DIR/logs/check-usage-alert.log}"
 # 🔑 마지막으로 **알린** 판정. 「마지막 판정」이 아니다 — 못 보낸 회차는 여기 안 들어온다.
 STATE="${CHECK_USAGE_STATE:-$BOT_DIR/logs/check-usage-verdict.state}"
+# 🔑 **축이 둘이라 상태 파일도 둘이다.** verdict 는 «감시가 살아 있나»(상태 축), band 는
+#   «값이 높나»(수준 축)다. 한 파일에 담으면 한쪽 전이가 다른 쪽 기준선을 지운다.
+#   유래: 룬드 계약 — *「게이트는 도구마다가 아니라 «축»마다 정한다」*(2026-08-10).
+BAND_STATE="${CHECK_USAGE_BAND_STATE:-$BOT_DIR/logs/check-usage-band.state}"
+# 🔴 **높은 구간이 «지속되는 동안»에도 운다.** 전이에만 울면 200% 가 세 시간 이어져도 조용한데,
+#   Darren 값이 *「조용히 안 오는 쪽이 시끄럽게 틀리는 쪽보다 나쁘다」*라 그 반대다.
+#   ⇒ 전이 + 지속 반복. 주기 120분은 **Darren 이 정했다**(2026-08-10 M:juia 「b로하고 두시간」).
+#   ⚠️ 이 값을 코드 판단으로 바꾸지 말 것 — 사람 값이다.
+BAND_REPEAT_MIN="${CHECK_USAGE_BAND_REPEAT_MIN:-120}"
 DISCORD_SEND="${DISCORD_SEND:-$BOT_DIR/src/discord-send}"
 API_URL="${USAGE_API_URL:-https://api.anthropic.com/api/oauth/usage}"
 
@@ -48,7 +57,12 @@ CODE=na              # HTTP 상태코드
 #   🔸 지금 이 로그를 읽는 프로그램이 0곳이라 이름을 바꾸는 게 **공짜다.**
 #     단위를 넣을 마지막 기회는 **읽는 쪽이 생기기 전**이다.
 RETRY_AFTER=na       # 429 일 때 서버가 준 값(초) — 공유 백오프 설계의 근거가 된다
-ALERT=none           # none · sent · send_failed · dry_run
+ALERT=none           # none · sent · send_failed · dry_run · suppressed
+BAND=na              # ok · 100-149 · 150-199 · 200+ (경계는 사람 값)
+MAX_PROJ=na          # 두 창 중 가장 높은 예상치
+# 🔑 **억제도 로그에 남긴다.** 「안 보냈다」가 「안 걸렸다」인지 「걸렸는데 참았다」인지
+#   구별이 안 되면, 억제기가 고장 났을 때 그게 «조용한 정상»과 같은 얼굴이 된다.
+BAND_REASON=na
 # 🔑 **칸을 시각 둘로 둔다.** 하나면 「전이가 언제 났나」와 「언제 알렸나」가 안 갈리는데,
 #   그 둘의 «간격»이 정확히 도달 지연의 관측값이다 — 룬드 실측: 복구는 32초, 복구 «알림»은 30분 5초.
 #   ⚠️ 알림 줄로 구간 길이를 재면 **cron 주기만큼 부풀려진다.** 두 칸이 그 부풀림을 드러낸다.
@@ -67,9 +81,9 @@ emit_log() {
     #   갈래마다 알림을 붙이면 «새 갈래가 생길 때 또 빠진다» ⇒ 모든 경로가 지나는 자리는 여기뿐이다.
     #   🔑 trap 이 있다는 것이 «알린다»는 뜻이 아니었다 — 그릇은 있고 내용물이 반쪽이었다.
     verdict_transition
-    printf '%s verdict=%s code=%s retry_after_s=%s alert=%s rc=%s verdict_changed_at=%s notified_at=%s%s\n' \
+    printf '%s verdict=%s code=%s retry_after_s=%s alert=%s rc=%s verdict_changed_at=%s notified_at=%s band=%s max_projected=%s band_reason=%s%s\n' \
         "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$VERDICT" "$CODE" "$RETRY_AFTER" "$ALERT" "$rc" \
-        "$VERDICT_CHANGED_AT" "$NOTIFIED_AT" \
+        "$VERDICT_CHANGED_AT" "$NOTIFIED_AT" "$BAND" "$MAX_PROJ" "$BAND_REASON" \
         "${NOTE:+ note=$NOTE}" >> "$LOG" 2>/dev/null || true
     # 🔑 임시파일 뒤처리도 여기에 둔다 — **조기 종료가 뒤처리를 건너뛰는** 자리를 없앤다.
     #    ⚠️ `trap 'rm …' EXIT` 를 따로 걸면 안 된다: bash 는 EXIT trap 을 **덮어쓴다**(실측).
@@ -255,6 +269,9 @@ if not isinstance(data, dict):
 #     의미 있다고 읽는다(계약이 두 벌로 보인다).
 now = datetime.now(timezone.utc)
 alerts = []
+# 🔴 0 으로 시작한다 — 「못 잰 창」과 「0% 인 창」을 여기서 안 가른다.
+#   못 잰 것은 위 `no-known-buckets` 가 이미 rc=3 으로 끊고, 여기 도달했으면 «잰 것»이다.
+max_projected = 0.0
 
 # 윈도우 크기 (시간)
 windows = {
@@ -296,6 +313,9 @@ for key, (label, window_hours) in windows.items():
 
     # 현재 속도로 윈도우 끝까지 사용하면 예상 사용률
     projected = util / elapsed_hours * window_hours
+    # 🔑 구간은 «창 하나»가 아니라 «가장 높은 창»으로 정한다 — 한쪽이 풀려도 다른 쪽이
+    #   남아 있으면 구간이 내려가면 안 된다. (룬드 구현과 같은 문면: max_projected)
+    max_projected = max(max_projected, projected)
 
     if projected >= 100:
         reset_h = int(hours_until_reset)
@@ -306,6 +326,20 @@ for key, (label, window_hours) in windows.items():
             f"이 속도면 **{projected:.0f}%** 도달 예상"
         )
 
+# 🔑 **구간(band) 을 첫 줄로 «따로» 낸다.** 셸이 메시지 본문을 파싱해서 구간을 «되짚으면»
+#   문구를 고칠 때마다 억제기가 조용히 깨진다 — 값은 값으로 넘긴다.
+#   경계는 Tim 이 정하고 Darren 이 「룬드 것 그대로」로 승인한 값이다(2026-08-10 M:juia).
+#   ⚠️ 여기 숫자를 바꾸는 것은 **사람 값을 바꾸는 것**이다. 코드 판단으로 고치지 말 것.
+def band_of(p):
+    if p >= 200:
+        return "200+"
+    if p >= 150:
+        return "150-199"
+    if p >= 100:
+        return "100-149"
+    return "ok"
+
+print("BAND\t%s\t%.0f" % (band_of(max_projected), max_projected))
 if alerts:
     print("⚠️ **니노 사용량 경고**\n" + "\n".join(alerts))
 PYEOF
@@ -336,8 +370,53 @@ fi
 
 VERDICT=ok
 
-# ── 4. 경고 메시지가 있으면 Discord로 전송 ───────────────────────────────────
-if [ -n "$ALERT_MSG" ]; then
+# ── 3.5 구간을 첫 줄에서 «값으로» 떼어낸다 ───────────────────────────────────
+# 🔴 파이썬이 못 낸 경우를 정상으로 접지 않는다 — 첫 줄이 BAND 가 아니면 계약이 깨진 것이다.
+BAND_LINE="$(printf '%s\n' "$ALERT_MSG" | head -n 1)"
+case "$BAND_LINE" in
+    BAND$'\t'*)
+        BAND="$(printf '%s' "$BAND_LINE" | cut -f2)"
+        MAX_PROJ="$(printf '%s' "$BAND_LINE" | cut -f3)"
+        ALERT_MSG="$(printf '%s\n' "$ALERT_MSG" | tail -n +2)"
+        ;;
+    *)
+        VERDICT=parse-no-band
+        NOTE="${NOTE:+$NOTE,}band-line-missing"
+        exit 2
+        ;;
+esac
+
+# ── 4. 구간 게이트 — «전이» 또는 «높은 구간 지속 N분» 일 때만 보낸다 ─────────
+# 🔑 이 함수가 답하는 것은 「값이 높나」가 아니라 **「지금 울 차례인가」**다.
+#   두 질문을 한 곳에 두면 문구를 고칠 때 억제 규칙이 같이 흔들린다.
+# 🔴 기준선은 **보낸 것만** 갱신한다 — 실패·dry-run 에 갱신하면 그 회차가 영구히 묻힌다
+#   (`#147` 과 같은 자리. verdict 쪽 :110 과 같은 계약).
+band_should_notify() {   # 0 = 보낸다 · 1 = 억제
+    local prev_band prev_at now_epoch age_min
+    # 🔑 상태가 없으면 **ok 로 본다.** 「모른다」로 두면 배포 직후 첫 회차가 높아도 조용하다 —
+    #   ok 를 가정하면 «엄격한 쪽»으로 틀린다(높으면 운다).
+    prev_band="$(cut -f1 "$BAND_STATE" 2>/dev/null)"; [ -n "$prev_band" ] || prev_band=ok
+    prev_at="$(cut -f2 "$BAND_STATE" 2>/dev/null)"
+    [ "$BAND" != "$prev_band" ] && { BAND_REASON="전이 ${prev_band}→${BAND}"; return 0; }
+    # 같은 구간이 이어질 때: ok 는 조용히, 높은 구간은 주기마다 한 번 더.
+    [ "$BAND" = ok ] && { BAND_REASON=suppressed_ok; return 1; }
+    case "$prev_at" in ''|*[!0-9]*) BAND_REASON="지속(직전 시각 없음)"; return 0 ;; esac
+    now_epoch="$(date +%s)"
+    age_min=$(( (now_epoch - prev_at) / 60 ))
+    if [ "$age_min" -ge "$BAND_REPEAT_MIN" ]; then
+        BAND_REASON="지속 ${age_min}분 ≥ ${BAND_REPEAT_MIN}"
+        return 0
+    fi
+    BAND_REASON="suppressed_repeat(${age_min}/${BAND_REPEAT_MIN}분)"
+    return 1
+}
+
+if band_should_notify; then
+    # 🔑 구간이 ok 로 «내려간» 것도 전이다 — 빼면 「울다 멈춘 것」과 「내려간 것」이 같은 모양이 된다.
+    #   창 리셋(util 0 → projected 0 → ok)도 이 경로로 나간다.
+    [ -n "$ALERT_MSG" ] || ALERT_MSG="✅ **니노 사용량 정상** — 예상치가 **${MAX_PROJ}%** 로 내려왔어."
+    ALERT_MSG="$ALERT_MSG
+🔸 구간 「${BAND}」 · ${BAND_REASON}"
     notify "$ALERT_MSG"; nrc=$?
     # 🔸 `if notify` 두 갈래로는 **세 상태를 못 담는다.** dry-run 을 실패로 접으면
     #   `send_failed` 가 되고, 성공으로 접으면 `sent` 가 된다 — 둘 다 거짓이다.
@@ -346,6 +425,10 @@ if [ -n "$ALERT_MSG" ]; then
         3) ALERT=dry_run ;;
         *) ALERT=send_failed ;;
     esac
+    # 🔴 **보낸 것만 기준선이 된다.** dry-run 으로 진단 한 번 돌린 것이 진짜 알림을 먹으면 안 된다.
+    [ "$nrc" -eq 0 ] && printf '%s\t%s\n' "$BAND" "$(date +%s)" > "$BAND_STATE" 2>/dev/null
+else
+    ALERT=suppressed
 fi
 
 exit 0

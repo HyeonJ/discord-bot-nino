@@ -105,16 +105,41 @@ print(json.dumps({"five_hour": {"utilization": 40,
 PYEOF
 }
 
-run() {   # run <설명없음> — 환경변수는 앞에 붙여 넘긴다
+# 🔴 **상태 파일을 격리한다.** 안 하면 시험이 `$BOT_DIR/logs/…state` 를 쓴다 —
+#   운영 기준선을 시험이 덮어써서 **다음 진짜 전이가 묻힌다**(부작용). 그리고 반대로
+#   운영 상태가 시험 결과를 바꿔서 **같은 시험이 기계마다 다른 답**을 낸다.
+#   [[feedback_vault_script_test_isolation]] 와 같은 계약.
+run() {   # run <설명없음> — 환경변수는 앞에 붙여 넘긴다. 매 호출이 «새 상태»다
   STATE="$WORK/run$RANDOM"; mkdir -p "$STATE"
+  run_in "$STATE" "$@"
+}
+
+# 🔑 구간 억제는 «회차 사이»에 사는 규칙이라 상태를 이어야 잴 수 있다.
+#   run() 은 매번 새 상태라 전이를 «영원히 첫 회차»로 만든다 — 그걸로는 억제를 못 잰다.
+run_in() {   # run_in <상태디렉터리> [환경…]
+  STATE="$1"; shift; mkdir -p "$STATE"
   SENT_LOG="$STATE/sent.tsv"; : > "$SENT_LOG"
   LOGF="$STATE/usage.log"
   env PATH="$WORK/bin:$PATH" SENT_LOG="$SENT_LOG" \
       CHECK_USAGE_CREDENTIALS="$CREDS" CHECK_USAGE_LOG="$LOGF" \
+      CHECK_USAGE_STATE="$STATE/verdict.state" \
+      CHECK_USAGE_BAND_STATE="$STATE/band.state" \
       DISCORD_SEND="$WORK/bin/discord-send" \
       "$@" bash "$CHECK" >/dev/null 2>&1
   RC=$?
   return 0
+}
+
+# 예상치를 «지정해서» 만드는 본문. 5시간 창·1시간 경과라 util 을 5로 나눈 값이 예상치가 된다.
+#   ⇒ projected = util / 1h * 5h = util * 5
+body_projected() {   # body_projected <원하는 예상치>
+  WANT="$1" python3 - <<'PYEOF'
+import json, os, datetime
+now = datetime.datetime.now(datetime.timezone.utc)
+want = float(os.environ["WANT"])
+print(json.dumps({"five_hour": {"utilization": want / 5.0,
+    "resets_at": (now + datetime.timedelta(hours=4)).isoformat()}}))
+PYEOF
 }
 
 # 🔴 정본을 못 찾으면 **이 파일 전체가 판정 불가**다 — 스크립트가 무조건 rc=2 로 죽으므로
@@ -576,6 +601,88 @@ _vn="$(LC_ALL=C grep -c 'verdict_changed_at=na notified_at=na' "$VLOG" 2>/dev/nu
 [ "${_vn:-0}" -ge 1 ] \
   && ok "  🧪 [음성 대조군] 전이 없는 회차는 na na — 판별식이 아무 줄이나 물지 않는다" \
   || bad "🧪 na 줄" "1줄 이상" "${_vn}줄"
+
+# ── ⑨ 구간(band) 게이트 ─────────────────────────────────────────────────────
+# 🔴 왜 생겼나: 사용량 경고 «본체»는 조건이 맞는 동안 **매 회차** 나갔다(cron */30 ⇒ 같은 값 반복).
+#   전이 쪽만 STATE 로 고쳐놓고 본체를 안 고쳤고, **그 결함이 스크립트 :81 주석에 이미 적혀 있었다.**
+#   Darren 지시 2026-08-10 `M:5elk`·`M:juia`: 「구간이 변할 때만 + 지속되면 2시간마다, 룬드 것 그대로」
+#
+# 🔑 이 시험이 «잠그는 것»과 «못 잠그는 것»:
+#   ✅ 잠근다   — 같은 구간이 이어지면 조용한가 · 구간이 바뀌면 우는가 · 지속 주기가 도는가
+#   ⛔ 못 잠근다 — 경계값(100/150/200) 이 «옳은가». 그건 사람 값이라 시험이 판정할 것이 아니다
+#                 ⇒ 대신 «경계가 코드와 시험 두 곳에 갈려 사는 것»을 막는다: 시험은 경계를
+#                   재선언하지 않고 «양쪽 바깥 값»으로만 민다(99/101 이 아니라 20/500).
+echo
+echo "⑨ 구간 게이트 — 전이에만 울고, 높은 구간은 주기마다 한 번 더"
+BS="$WORK/bandseq"; rm -rf "$BS"
+
+nsent() { nlines "$SENT_LOG"; }
+
+# ⑨-1 첫 회차가 높으면 운다 (상태 없음 → ok 로 가정 → 전이)
+run_in "$BS" FAKE_BODY="$(body_projected 500)"
+[ "$(nsent)" = 1 ] && ok "첫 회차 높은 구간 → 운다 (상태 없음을 «ok» 로 본다)" \
+  || bad "첫 회차" "1건" "$(nsent)건"
+LC_ALL=C grep -q 'band=200+' "$LOGF" && ok "  로그에 band=200+ 가 남는다" \
+  || bad "로그 band 칸" "band=200+" "$(tail -1 "$LOGF")"
+
+# ⑨-2 같은 구간이 이어지면 «조용하다» — 이게 이 PR 의 본체다
+run_in "$BS" FAKE_BODY="$(body_projected 500)"
+[ "$(nsent)" = 0 ] && ok "같은 구간 반복 → 조용하다 (30분마다 같은 값이 안 나간다)" \
+  || bad "같은 구간 반복" "0건" "$(nsent)건 — 억제가 안 걸렸다"
+LC_ALL=C grep -q 'alert=suppressed' "$LOGF" && ok "  🔑 «억제»가 로그에 남는다 — 「안 걸림」과 안 헷갈린다" \
+  || bad "억제 기록" "alert=suppressed" "$(tail -1 "$LOGF")"
+
+# ⑨-3 구간이 «올라가면» 운다
+run_in "$BS" FAKE_BODY="$(body_projected 120)"
+[ "$(nsent)" = 1 ] && ok "구간 하강(200+ → 100-149) → 운다" || bad "하강 전이" "1건" "$(nsent)건"
+run_in "$BS" FAKE_BODY="$(body_projected 500)"
+[ "$(nsent)" = 1 ] && ok "구간 상승(100-149 → 200+) → 운다" || bad "상승 전이" "1건" "$(nsent)건"
+
+# ⑨-4 정상으로 «내려가는 것»도 전이다 — 창 리셋이 이 경로로 나간다
+run_in "$BS" FAKE_BODY="$(body_projected 20)"
+[ "$(nsent)" = 1 ] && ok "정상 복귀(200+ → ok) → 운다 (창 리셋이 이 경로다)" \
+  || bad "복귀 전이" "1건" "$(nsent)건"
+# 🧪 [음성 대조군] ok 가 «이어지면» 조용해야 한다. 없으면 위 초록이 「항상 운다」와 구별이 안 된다.
+run_in "$BS" FAKE_BODY="$(body_projected 20)"
+[ "$(nsent)" = 0 ] && ok "  🧪 [음성 대조군] ok 지속 → 조용하다 (「항상 운다」가 아니다)" \
+  || bad "ok 지속" "0건" "$(nsent)건"
+
+# ⑨-5 높은 구간이 «지속되면» 주기마다 한 번 더 — Darren 값(2시간)
+#   🔑 시각을 «흐르게» 못 하니 주기를 0 으로 눌러 「주기가 지났다」를 만든다.
+#     ⚠️ 이건 「2시간이 맞나」를 안 잰다 — 그건 사람 값이다. 재는 것은 «주기 경로가 도는가»다.
+BS2="$WORK/bandrepeat"; rm -rf "$BS2"
+run_in "$BS2" FAKE_BODY="$(body_projected 500)"                                  # 첫 전이
+run_in "$BS2" CHECK_USAGE_BAND_REPEAT_MIN=0 FAKE_BODY="$(body_projected 500)"
+[ "$(nsent)" = 1 ] && ok "높은 구간 지속 + 주기 경과 → 한 번 더 운다 (무음으로 안 빠진다)" \
+  || bad "지속 반복" "1건" "$(nsent)건"
+LC_ALL=C grep -q 'band_reason=지속' "$LOGF" && ok "  사유가 «지속»으로 남는다 — 전이와 안 섞인다" \
+  || bad "지속 사유" "band_reason=지속…" "$(tail -1 "$LOGF")"
+# 🧪 [음성 대조군] ok 는 주기가 지나도 «안» 운다 — 안 그러면 조용할 자리가 2시간마다 시끄러워진다
+run_in "$BS2" CHECK_USAGE_BAND_REPEAT_MIN=0 FAKE_BODY="$(body_projected 20)"     # 전이(→ok), 운다
+run_in "$BS2" CHECK_USAGE_BAND_REPEAT_MIN=0 FAKE_BODY="$(body_projected 20)"
+[ "$(nsent)" = 0 ] && ok "  🧪 [음성 대조군] ok 는 주기가 지나도 안 운다" \
+  || bad "ok 주기 억제" "0건" "$(nsent)건"
+
+# ⑨-6 🔴 발송 실패·dry-run 은 기준선을 «갱신하지 않는다» — 그러면 그 회차가 영구히 묻힌다
+BS3="$WORK/bandfail"; rm -rf "$BS3"
+run_in "$BS3" FAKE_SEND_RC=1 FAKE_BODY="$(body_projected 500)"
+run_in "$BS3" FAKE_BODY="$(body_projected 500)"
+[ "$(nsent)" = 1 ] && ok "발송 실패 회차는 기준선을 안 먹는다 — 다음 회차가 다시 운다" \
+  || bad "실패 후 재시도" "1건" "$(nsent)건 — 실패가 기준선이 됐다"
+
+# ⑨-7 🔴 파이썬이 BAND 줄을 안 내면 «정상으로 접지 않는다»
+#   본문 파서가 바뀌어 첫 줄 계약이 깨지면, 억제기는 항상 band=na 로 「전이 없음」을 볼 수 있다.
+BS4="$WORK/bandcontract"; rm -rf "$BS4"; mkdir -p "$BS4"
+sed 's/^print("BAND/#print("BAND/' "$CHECK" > "$BS4/nob.sh"
+STATE="$BS4"; SENT_LOG="$BS4/sent.tsv"; : > "$SENT_LOG"; LOGF="$BS4/usage.log"
+env PATH="$WORK/bin:$PATH" SENT_LOG="$SENT_LOG" CHECK_USAGE_CREDENTIALS="$CREDS" \
+    CHECK_USAGE_LOG="$LOGF" CHECK_USAGE_STATE="$BS4/v.state" \
+    CHECK_USAGE_BAND_STATE="$BS4/b.state" DISCORD_SEND="$WORK/bin/discord-send" \
+    FAKE_BODY="$(body_projected 500)" bash "$BS4/nob.sh" >/dev/null 2>&1
+_nbrc=$?
+[ "$_nbrc" = 2 ] && LC_ALL=C grep -q 'verdict=parse-no-band' "$LOGF" \
+  && ok "🧪 [대조군] BAND 줄이 없으면 rc=2 «판정 불가» — 조용한 ok 로 안 접힌다" \
+  || bad "BAND 줄 부재" "rc=2 + verdict=parse-no-band" "rc=$_nbrc / $(tail -1 "$LOGF" 2>/dev/null)"
 
 echo
 # 🔸 판정 불가를 요약줄에 **항상** 싣는다(0이어도). 조건부로 붙이면 0과 '이 칸이 없음'이
