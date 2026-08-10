@@ -103,11 +103,10 @@ deferred() {  # $1=경로 $2=정규식 $3=사유
         bad "유예 항목이 이제 안 걸린다 — 목록에서 지웠어야 한다: $df" "1줄 이상" "0줄"
     fi
 }
-deferred src/bot.py 'claude-(opus|sonnet|haiku)-[0-9a-z-]+' \
-    'Ⅲ 대기 — 이 파일을 지울지가 Darren 판단이다. 판별식도 못 본다(`return "claude-…"` 라 --model 접두가 없다)'
-deferred src/botctl.py 'Claude Opus [0-9.]+' \
-    '산문형 표시 이름(모델 id 아님). bot.py 와 «한 묶음»으로 Darren 께 물었다 — 따로 물으면 이 산문형이 남는다'
-deferred config/bots.json 'Claude Opus [0-9.]+' '위와 같음'
+# 🗑️ `src/bot.py`·`src/botctl.py`·`config/bots.json` 세 줄은 여기 있었다 — Darren 승인(`M:3z0h`)으로
+#   이 PR 이 파일을 지우면서 «같이» 뺐다. 유예 좌변이 「파일이 추적에 없다」로 빨개져서
+#   안 빼면 못 지나간다 — 설계대로 «엄격한 쪽»으로 실패한 자리다.
+#   🔑 이 삭제가 유예 목록의 값을 실증했다: 목록이 «장식»이었다면 파일이 사라져도 아무도 안 알려줬다.
 deferred claude-config/skills/agent-browser/SKILL.md 'claude-sonnet-4\.6' \
     '스킬 게이트웨이의 «다른 이름 공간» — config/models.sh 와 같은 값이 아니다'
 
