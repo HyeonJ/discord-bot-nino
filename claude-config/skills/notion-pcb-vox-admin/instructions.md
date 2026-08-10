@@ -15,7 +15,10 @@ cat > /tmp/notion-prompt.txt << 'EOF'
 EOF
 
 # 2. 래퍼 스크립트 생성 (unix 줄바꿈 필수)
-printf '#!/bin/bash\nexport PATH="/home/bpx27/.nvm/versions/node/v24.14.0/bin:$PATH"\nexport HOME="/home/bpx27"\nPROMPT=$(cat /mnt/c/Users/bpx27/notion-prompt.txt)\nclaude -p "$PROMPT" --model claude-haiku-4-5-20251001 --dangerously-skip-permissions\n' > /tmp/run-notion.sh
+# 🔑 모델 id 를 여기 다시 적지 말 것 — 값은 config/models.sh 한 곳에 산다.
+#    printf 는 «니노 쪽»에서 도니 여기서 펼쳐 넣는다(회사컴엔 이 레포가 없어 source 못 한다).
+. ~/discord-bot-nino/config/models.sh
+printf '#!/bin/bash\nexport PATH="/home/bpx27/.nvm/versions/node/v24.14.0/bin:$PATH"\nexport HOME="/home/bpx27"\nPROMPT=$(cat /mnt/c/Users/bpx27/notion-prompt.txt)\nclaude -p "$PROMPT" --model %s --dangerously-skip-permissions\n' "$NINO_MODEL_HAIKU" > /tmp/run-notion.sh
 
 # 3. SCP로 파일 전송 후 WSL에서 실행
 scp /tmp/notion-prompt.txt bpx27@100.111.194.120:C:/Users/bpx27/notion-prompt.txt

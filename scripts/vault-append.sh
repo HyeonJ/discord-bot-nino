@@ -13,6 +13,9 @@ set -euo pipefail
 
 VAULT_DIR="${VAULT_DIR:-$HOME/obsidian-vault}"
 WIKI_DIR="$VAULT_DIR/wiki"
+# 🔑 모델 id 는 `config/models.sh` 한 곳에서만 온다 — 사본이 둘이면 한쪽만 고쳐지고
+#    다른 쪽이 조용히 낡는다(2026-08-10 실물: 두 스크립트가 같은 옛 이름에 멈춰 있었다).
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/config/models.sh"
 BOT_DIR="${BOT_DIR:-$HOME/discord-bot-nino}"
 LOG_FILE="$BOT_DIR/logs/vault-append.log"
 VAULT_LOG="$VAULT_DIR/log.md"
@@ -217,7 +220,7 @@ if ! load_node_env; then
     exit 1
 fi
 
-output=$(cd /tmp && "$CLAUDE_BIN" -p "$ingest_prompt" --model claude-sonnet-4-6 --dangerously-skip-permissions 2>/dev/null) || {
+output=$(cd /tmp && "$CLAUDE_BIN" -p "$ingest_prompt" --model "$NINO_MODEL_SONNET" --dangerously-skip-permissions 2>/dev/null) || {
     log "ERROR: Claude failed for '$TOPIC'"
     rm -f "$prompt_file"
     exit 1
