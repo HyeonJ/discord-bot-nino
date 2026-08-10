@@ -43,7 +43,11 @@ export RC_PIPE_GUARD_LOG="$_T/scratch.log"
 #   `$HOME` 만 문자열 치환으로 편다. 가드가 다른 변수를 쓰기 시작하면 아래 검사가 잡는다.
 _derive_oplog() {
     local raw
-    raw="$(LC_ALL=C sed -n 's/.*RC_PIPE_GUARD_LOG:-\([^}]*\)}.*/\1/p' "$1" | head -1)"
+    # 🔴 «주석»이 아니라 «코드»에서 뽑는다 (룬드 🟡) — 가드에 그 변수를 설명하는 주석이 붙으면
+    #   `head -1` 이 그 주석을 집는다. **`#166` ⑤ 에서 내가 고친 그 병이고 처방도 같다**:
+    #   주석 줄을 먼저 빼고 유도한다. 지금은 가드에 한 줄뿐이라 «아직» 안 물렸을 뿐이다.
+    raw="$(LC_ALL=C grep -vE '^[[:space:]]*#' "$1" \
+           | LC_ALL=C sed -n 's/.*RC_PIPE_GUARD_LOG:-\([^}]*\)}.*/\1/p' | head -1)"
     printf '%s' "${raw//\$HOME/$HOME}"
 }
 OPLOG="$(_derive_oplog "$GUARD")"
@@ -224,6 +228,22 @@ else
       || bad "유도가 가드를 안 읽는다 — 사본이 둘일 때와 같은 상태다" "/tmp/nino-derive-probe.log" "$_got"
 fi
 
+# 🧪 **주석 미끼** — 가드에 그 변수를 «설명하는» 주석이 붙어도 «코드»를 뽑나 (룬드 🟡).
+#   지금 가드엔 한 줄뿐이라 이 함정이 «아직» 안 물렸다. 그런 자리는 대조군이 없으면
+#   **주석 한 줄이 늘어난 날 조용히 틀린다** — 그날 이 시험은 여전히 초록이다.
+_BAIT="$_T/guard-bait.sh"
+{ head -1 "$GUARD"
+  printf '%s\n' '# 기본값은 ${RC_PIPE_GUARD_LOG:-/tmp/미끼-주석.log} 이다 — 설명 주석'
+  tail -n +2 "$GUARD"; } > "$_BAIT"
+_bait_got="$(_derive_oplog "$_BAIT")"
+case "$_bait_got" in
+    */미끼-주석.log) bad "유도가 «주석»을 집었다 — 코드가 아니라 설명을 읽는다" "코드의 기본값" "$_bait_got" ;;
+    "$OPLOG")       ok "🧪 설명 주석을 앞에 붙여도 «코드»의 기본값을 뽑는다" ;;
+    *)              bad "주석 미끼 뒤 유도가 엉뚱한 값을 냈다" "$OPLOG" "$_bait_got" ;;
+esac
+
 echo
-echo "  통과 $pass · 실패 $fail${skip:+ · 판정 불가 $skip}"
+# 🔸 `${skip:+ …}` 는 `skip=0` 도 «비어 있지 않음»이라 조건이 «항상 참»이었다(룬드 🟡).
+#   그런데 **항상 내는 쪽이 옳다** — 판정 불가 0 도 「쟀는데 0」이라는 값이다. 조건만 뺀다.
+echo "  통과 $pass · 실패 $fail · 판정 불가 $skip"
 [ "$fail" -eq 0 ] || exit 1
