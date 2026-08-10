@@ -5,7 +5,18 @@
 #   0건            → 조용. 하트비트만 남긴다(안 돌고 있는 것과 구분하려고)
 #   새 항목 있음   → 알린다. **그 항목만** 보낸다
 #   같은 항목 반복 → 조용. ← 이게 이 스크립트의 존재 이유다
+#   같은 항목이 «늙음» → 알린다. ← 위 규칙이 낳은 반대편 결함을 막는다 (2026-08-11)
 #   판정 불가      → 알린다. 검사가 못 돈 것을 "문제 없음"과 같게 두지 않는다
+#
+# 🔴 «늙음» 갈래가 왜 붙었나 (Darren 승인 M:1ctw, 2026-08-11):
+#    「같은 항목이면 조용」은 새 문제는 잘 잡는데 **늙은 문제를 영영 안 띄운다**.
+#    실측 — 미해결 9건이 **15시간** 방치됐고 그동안 완전 무음이었다.
+#    개수만 세면 「많다」는 나오는데 **「안 줄고 있다」가 안 나온다.**
+#    🔑 **알림을 늘리는 게 아니다** — 새 항목은 지금대로 한 번, **늙은 것만** 다시 뜬다.
+#
+# 🔴 나이의 두 칸을 «따로» 둔다 — `first_seen`(처음 본 시각) / `last_notified`(마지막으로 소리낸 시각).
+#    합치면 재알림이 first_seen 을 밀어 **나이가 리셋**되고, 그러면 「얼마나 오래 방치됐나」가
+#    영영 안 자란다 — 이 기능이 재려던 값 자신이 죽는다.
 #
 # ⚠️ 왜 "매번 알리기"가 아닌가 (2026-07-28 실측):
 #    배선을 미뤄뒀던 이유가 검사 결과가 **213건**이었기 때문이다. 그 상태로 켜면 시간마다
@@ -39,6 +50,17 @@ LOG="${LOG:-$BOT_DIR/logs/memory-lint.log}"
 #   (지금은 날짜별 vs 기간별로 달라서, 서로의 경보가 「저쪽 기준 위반」으로만 뜬다). 8/5 안건.
 NOTIFY_TARGET="${NOTIFY_TARGET:-현인-업무}"
 DISCORD_SEND="${DISCORD_SEND:-$BOT_DIR/src/discord-send}"
+
+# 🔴 **「지금」은 주입 가능한 입력이다 — 벽시계에 매달지 않는다.**
+#   `darren-mention-guard` 가 창을 러너 로컬 시각에 걸어놨다가 **하루 6시간 빨강**이 됐고,
+#   그 빨강은 CI 가 «구조적으로» 못 본다(UTC 러너의 창과 우리 머지 시각이 안 겹친다)
+#   — **원장에 한 번도 안 나타난 결함**이다. 같은 자리를 여기 만들지 않는다.
+NOW="${MEMORY_LINT_NOW:-$(date +%s)}"
+# 임계·재알림 간격(시간). 값 자체는 «사람 값»이라 여기 기본만 두고 env 로 연다.
+AGE_ALERT_HOURS="${AGE_ALERT_HOURS:-24}"
+AGE_RENOTIFY_HOURS="${AGE_RENOTIFY_HOURS:-24}"
+AGE_SEC=$((AGE_ALERT_HOURS * 3600))
+RENOTIFY_SEC=$((AGE_RENOTIFY_HOURS * 3600))
 
 [ -f "$BOT_DIR/.env" ] && { set -a; . "$BOT_DIR/.env"; set +a; }
 mkdir -p "$(dirname "$HEARTBEAT")"
@@ -141,32 +163,90 @@ fi
 # 🔸 상태 파일에는 이제 **키**가 산다(사람 줄이 아니라). 첫 줄의 표지로 옛 형식과 가른다 —
 #   옛 상태를 키로 읽으면 **13건이 통째로 「새 항목」**이 되어, 이 수리가 마지막으로 한 번
 #   크게 우는 것으로 끝난다. Darren 이 잡은 그 소음을 고치면서 같은 소음을 내지 않는다.
-STATE_MARK='#keys-v1'
-PREV_KEYS=""
+# 🔸 v2 = `first_seen<TAB>last_notified<TAB>키`. v1 은 키만 있어 **나이를 모른다**.
+STATE_MARK='#keys-v2'
+STATE_MARK_V1='#keys-v1'
+PREV=""            # v2 원본 줄(세 칸)
+PREV_KEYS=""       # 키만 뽑은 것 — 「새 항목인가」 판정용
 MIGRATED=0
 if [ -f "$STATE" ]; then
-  if [ "$(head -1 "$STATE")" = "$STATE_MARK" ]; then
-    PREV_KEYS="$(tail -n +2 "$STATE")"
+  _head="$(head -1 "$STATE")"
+  if [ "$_head" = "$STATE_MARK" ]; then
+    PREV="$(tail -n +2 "$STATE")"
+    PREV_KEYS="$(printf '%s\n' "$PREV" | cut -f3-)"
   else
-    MIGRATED=1        # 옛 형식(사람 줄) — 지금 것을 기준선으로 삼는다
+    # 🔴 v1(키만) 도 사람 줄도 **나이를 모르는 건 같다**. Ⅰ「관측한 것만 안다」의 자리다 —
+    #   없는 나이를 epoch 0 으로 채우면 전 항목이 즉시 「무한히 늙었다」가 되어 **한 번에 전부
+    #   운다**(213건 소음의 재발). 게다가 그 나이는 **관측이 아니라 날조**다.
+    #   ⇒ 전환 시점을 first_seen 으로 삼고, **그렇게 했다고 전환 통보에 적는다**.
+    MIGRATED=1
+    [ "$_head" = "$STATE_MARK_V1" ] && MIGRATED=2   # 2 = 키는 있었다(v1) / 1 = 사람 줄
   fi
 fi
+
+# prev 조회 — 연관배열을 안 쓴다(bash 3.2 에 없다. 룬드 맥이 그 판이고 공유 코어 후보다).
+prev_field() {  # $1=키 $2=필드번호(1=first_seen 2=last_notified)
+  printf '%s\n' "$PREV" | awk -F'\t' -v k="$1" -v f="$2" '$3 == k { print $f; exit }'
+}
 
 # 🔸 출력은 **현재 항목 원문**이다(측정값 포함) — 키는 판정용이고 사람이 읽는 건 실제 값이다.
 #   순서도 lint 출력 순서를 그대로 둔다(옛 `comm` 은 정렬을 강제했다).
 NEW_LINES=""
+AGED_LINES=""      # 늙어서 «다시» 알릴 것 (이번 회차에 소리내는 것만)
+AGED_KEYS=""       # 그 키들 — 상태 쓸 때 last_notified 를 미는 대상
 if [ "$MIGRATED" -eq 0 ]; then
   _i=0
-  NEW_LINES="$(printf '%s\n' "$CURRENT" | while IFS= read -r _l; do
+  while IFS= read -r _l; do
       [ -n "$_l" ] || continue
       _i=$((_i + 1))
       _k="$(printf '%s\n' "$KEYS" | sed -n "${_i}p")"
-      printf '%s\n' "$PREV_KEYS" | grep -qxF -- "$_k" || printf '%s\n' "$_l"
-  done)"
+      if ! printf '%s\n' "$PREV_KEYS" | grep -qxF -- "$_k"; then
+          NEW_LINES="${NEW_LINES}${_l}
+"
+          continue
+      fi
+      # 이미 아는 항목 — 늙었나?
+      _fs="$(prev_field "$_k" 1)"; _ln="$(prev_field "$_k" 2)"
+      [ -n "$_fs" ] || continue
+      [ -n "$_ln" ] || _ln="$_fs"
+      _age=$((NOW - _fs))
+      _since=$((NOW - _ln))
+      # 🔑 두 조건이 **둘 다** 필요하다: 늙었나(_age) · 최근에 안 떠들었나(_since).
+      #   앞엣것만 두면 임계를 넘는 순간부터 **매시** 운다 — 그게 이 스크립트가 막으려던 소음이다.
+      if [ "$_age" -ge "$AGE_SEC" ] && [ "$_since" -ge "$RENOTIFY_SEC" ]; then
+          AGED_LINES="${AGED_LINES}${_l}  ← $((_age / 3600))시간째
+"
+          AGED_KEYS="${AGED_KEYS}${_k}
+"
+      fi
+  done <<EOF_CUR
+$CURRENT
+EOF_CUR
 fi
-NEW="$(printf '%s\n' "$NEW_LINES" | grep -c . || true)"
+NEW="$(printf '%s' "$NEW_LINES" | grep -c . || true)"
+AGED="$(printf '%s' "$AGED_LINES" | grep -c . || true)"
 
-write_state() { { printf '%s\n' "$STATE_MARK"; printf '%s\n' "$KEYS"; } > "$STATE"; }
+# 🔴 상태 쓰기가 **세 칸**을 유지한다. 규율은 그대로 — «알림에 성공했을 때만» 부른다.
+#   🔑 `last_notified` 는 **이번에 실제로 소리낸 것만** 민다. 늙었는데 소리를 못 냈으면
+#      옛 값이 남아 다음 회차에 다시 시도한다 — *「조치했다」가 「해소했다」를 대신하지 않게*.
+write_state() {
+  {
+    printf '%s\n' "$STATE_MARK"
+    _j=0
+    while IFS= read -r _k; do
+      [ -n "$_k" ] || continue
+      _j=$((_j + 1))
+      _f="$(prev_field "$_k" 1)"
+      [ -n "$_f" ] || _f="$NOW"                       # 처음 보는 것 = 지금부터 센다
+      _l="$(prev_field "$_k" 2)"
+      [ -n "$_l" ] || _l="$NOW"
+      printf '%s\n' "$AGED_KEYS" | grep -qxF -- "$_k" && _l="$NOW"
+      printf '%s\t%s\t%s\n' "$_f" "$_l" "$_k"
+    done <<EOF_KEYS
+$KEYS
+EOF_KEYS
+  } > "$STATE"
+}
 
 # 🔴 **전환은 «한 줄로» 알린다** (룬드 실증, 2026-08-02).
 #   처음엔 여기서 조용히 넘겼다. 그런데 삼키는 건 「이미 알린 것」만이 아니다 —
@@ -176,10 +256,19 @@ write_state() { { printf '%s\n' "$STATE_MARK"; printf '%s\n' "$KEYS"; } > "$STAT
 # 🔑 이 스크립트의 나머지는 전부 **시끄러운 쪽으로 실패**하는데(판정 불가 → 알림 + rc=2)
 #   여기만 반대였다. 피하려던 건 「전 항목 통째 나열」이고, **한 줄은 그게 아니다.**
 # 🔸 그리고 전환이 **보인다** — 로그에만 남기면 아무도 안 본다.
-if [ "$MIGRATED" -eq 1 ]; then
-  if notify "🔸 기억 검사 — 항목 식별 방식을 바꿨다(사람 줄 → **안정 키**). 현재 ${COUNT}건을 기준선으로 삼는다. 새 항목 알림은 다음 회차부터."; then
+if [ "$MIGRATED" -ne 0 ]; then
+  # 🔴 **무엇을 «모르는지»를 통보에 적는다.** 안 적으면 다음 사람이 이 시점의 나이를 «진짜 나이»로
+  #   읽는다 — 「15시간 방치」를 재려고 만든 기능이 첫 날부터 틀린 수를 낸다.
+  if [ "$MIGRATED" -eq 2 ]; then
+    _mig_msg="🔸 기억 검사 — 상태에 **나이 칸**을 붙였다(키 → 키+시각). 현재 ${COUNT}건의 나이는 **지금부터** 센다 — 옛 상태엔 «언제 처음 봤나»가 없어서 그 전 기간은 **모르는 것**이고, 지어내지 않는다. 늙음 알림은 ${AGE_ALERT_HOURS}시간 뒤부터."
+    _mig_log="상태 형식 전환(키 → 키+나이) — ${COUNT}건, 나이 기준점=$NOW, 1줄 통보"
+  else
+    _mig_msg="🔸 기억 검사 — 항목 식별 방식을 바꿨다(사람 줄 → **안정 키**). 현재 ${COUNT}건을 기준선으로 삼는다. 새 항목 알림은 다음 회차부터. 나이는 **지금부터** 센다."
+    _mig_log="상태 형식 전환(사람 줄 → 키+나이) — ${COUNT}건을 기준선으로, 1줄 통보"
+  fi
+  if notify "$_mig_msg"; then
     write_state
-    echo "$STAMP 상태 형식 전환(사람 줄 → 키) — ${COUNT}건을 기준선으로, 1줄 통보" >> "$LOG"
+    echo "$STAMP $_mig_log" >> "$LOG"
     exit 0
   fi
   # 통보가 실패했으면 상태를 갱신하지 않는다 — 아무도 모르는 채로 기준선이 잡히면 안 된다(⑧과 같은 규율).
@@ -189,16 +278,32 @@ fi
 
 # 상태는 **비교 후 항상** 갱신한다. 알림 실패와 무관하게 갱신하면 다음 회차에 조용해지므로,
 # 알림을 보내는 경우에만 갱신한다 — "조치했다"가 "해소했다"를 대신하지 않게.
-if [ "$NEW" -eq 0 ]; then
-  # 새 항목 없음 = 조용. 상태만 최신화(해소된 항목 반영)
+if [ "$NEW" -eq 0 ] && [ "$AGED" -eq 0 ]; then
+  # 새 항목도 늙은 항목도 없음 = 조용. 상태만 최신화(해소된 항목 반영)
   write_state
   exit 0
 fi
 
-MSG="🔸 기억 검사 — **새 항목 ${NEW}건** (전체 ${COUNT}건)
+# 🔑 **두 갈래를 한 메시지에 «갈라» 싣는다** — 「새로 생겼다」와 「안 줄고 있다」는 처방이 다르다.
+#   한 덩어리로 부으면 읽는 쪽이 그 구별을 다시 해야 하고, 그러면 늙은 것이 새 것 사이에 묻힌다.
+MSG="🔸 기억 검사"
+[ "$NEW" -gt 0 ] && MSG="$MSG — **새 항목 ${NEW}건**"
+[ "$AGED" -gt 0 ] && MSG="$MSG — **늙은 항목 ${AGED}건**"
+MSG="$MSG (전체 ${COUNT}건)"
+if [ "$NEW" -gt 0 ]; then
+  MSG="$MSG
+**새 항목**
 \`\`\`
-$NEW_LINES
+$(printf '%s' "$NEW_LINES")
 \`\`\`"
+fi
+if [ "$AGED" -gt 0 ]; then
+  MSG="$MSG
+**${AGE_ALERT_HOURS}시간 넘게 안 줄고 있는 것**
+\`\`\`
+$(printf '%s' "$AGED_LINES")
+\`\`\`"
+fi
 if notify "$MSG"; then
   write_state
 else

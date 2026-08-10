@@ -208,7 +208,9 @@ grep -q '기준선' "$ROOT/sent.txt" && ok "무엇을 기준선으로 삼았는�
   || bad "전환이라고만 하고 기준선을 안 말한다" "$(cat "$ROOT/sent.txt")"
 grep -q '통째로 읽힌다' "$ROOT/sent.txt" && bad "전환 통보에 항목을 통째로 나열했다 (피하려던 그 소음)" "$(cat "$ROOT/sent.txt")" \
   || ok "항목을 나열하지 않는다"
-[ "$(head -1 "$ROOT/logs/state")" = "#keys-v1" ] && ok "상태가 키 형식으로 바뀐다" \
+# 🔴 **표지는 «현재 형식»을 리터럴로 박는다.** 형식이 오를 때(v1→v2) 이 줄이 같이 빨개져야
+#   전환 경로가 다시 검사된다 — `!= 옛표지` 같은 느슨한 좌변으로 두면 **형식이 바뀌어도 초록**이다.
+[ "$(head -1 "$ROOT/logs/state")" = "#keys-v2" ] && ok "상태가 키+나이 형식으로 바뀐다" \
   || bad "상태 형식이 안 바뀌었다" "$(cat "$ROOT/logs/state")"
 : > "$ROOT/sent.txt"
 kitems "docsize:🚨 1000줄 초과:inbox.md|🚨 1000줄 초과: inbox.md (6999줄) — 통째로 읽힌다"; rc_is 1
@@ -225,7 +227,11 @@ printf '%s\n' "옛 형식 한 줄" > "$ROOT/logs/state"
 kitems "keyX|X 항목"; rc_is 1
 out="$(run 1)"; rc=$?                                  # 전송 실패 주입
 [ "$rc" -ne 0 ] && ok "전환 통보 실패를 rc 로 드러낸다 (rc=$rc)" || bad "통보가 실패했는데 rc=0" "$out"
-[ "$(head -1 "$ROOT/logs/state")" != "#keys-v1" ] && ok "상태를 갱신하지 않는다 — 다음 회차에 다시 시도" \
+# 🔴 **좌변을 «옛 표지 아님»에서 «옛 내용 그대로»로 바꾼다.** 원래 `!= "#keys-v1"` 이었는데,
+#   형식이 v2 로 오르는 순간 그 단언은 **갱신했을 때도 참**이 되어(`#keys-v2 != #keys-v1`)
+#   **죽은 단언**이 됐다 — 버그가 들어와도 초록이다. 재는 것은 「안 갱신됐나」이므로
+#   **넣어둔 그 줄이 그대로 있나**를 본다(표지 이름과 무관하게 산다).
+[ "$(cat "$ROOT/logs/state")" = "옛 형식 한 줄" ] && ok "상태를 갱신하지 않는다 — 다음 회차에 다시 시도" \
   || bad "통보 실패인데 기준선을 잡았다 (그 시점 항목이 영구 매장된다)" "$(cat "$ROOT/logs/state")"
 : > "$ROOT/sent.txt"
 out="$(run 0)"                                         # 다음 회차: 전송 정상
@@ -349,6 +355,139 @@ case "$_c" in
     "")        bad "[대조군] 발송 0건 — 경로가 죽어서 위 판정도 못 믿는다" "봇-놀이터" "<없음>" ;;
     *)         bad "[대조군] 주입이 안 먹었다 — 이 시험은 대상을 재는 게 아니다" "봇-놀이터" "«${_c}»" ;;
 esac
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 🔴 ⑥ **나이** — 「이미 알린 건 다시 안 알린다」가 낳은 반대편 결함 (Darren 승인 M:1ctw, 2026-08-11)
+#
+# 왜 생겼나: 이 스크립트의 존재 이유(③)가 «같은 항목이면 조용»인데, 그 규칙은 **새 문제는 잘 잡고
+#   «늙은 문제»는 영영 안 띄운다**. 실측 — 미해결 9건이 **15시간** 방치됐고 그동안 완전 무음이었다.
+#   개수만 세면 「많다」는 나오는데 **「안 줄고 있다」가 안 나온다.**
+#
+# 🔑 **알림을 늘리는 게 아니다** — 새 항목은 지금대로 «한 번», 늙은 항목만 «다시» 뜬다.
+#
+# 🔴 **시각은 주입한다 — 벽시계에 매달지 않는다.** `darren-mention-guard` 가 창을 러너 로컬
+#   시각에 걸어놨다가 **하루 6시간 빨강**이 됐고, 그 빨강은 CI 가 구조적으로 못 본다(UTC 러너의
+#   창과 우리 머지 시각이 안 겹친다) — **원장에 한 번도 안 나타난 결함**이다. 같은 자리를 안 만든다.
+echo "⑥ 나이 — 늙은 항목을 다시 띄운다 (새 항목은 그대로 한 번만)"
+
+AGE_STATE="$ROOT/logs/age-state"
+# 🔸 위 절들이 `$ROOT/logs/state` 를 쓰므로 나이 절은 **자기 상태 파일**을 쓴다 — 앞 절의
+#   잔여가 여기 판정에 섞이면 「무엇이 이 초록을 냈나」가 안 갈린다.
+runat() {  # $1=NOW(epoch) / $2=send_rc(선택)
+  : > "$ROOT/sent.txt"
+  FAKE_ITEMS="$ROOT/items.txt" FAKE_RC="$ROOT/rc.txt" FAKE_SENT="$ROOT/sent.txt" \
+  FAKE_SEND_RC="${2:-0}" MEMORY_LINT_NOW="$1" \
+  BOT_DIR="$ROOT" LINT="$ROOT/fake-lint.sh" DISCORD_SEND="$ROOT/fake-send" \
+  STATE="$AGE_STATE" HEARTBEAT="$ROOT/logs/hb" LOG="$ROOT/logs/log" \
+  bash "$SCRIPT" 2>&1
+}
+T0=1754870400          # 고정 epoch — 「지금」이 시험 입력이라 러너 시각과 무관하다
+H=3600
+sent_has() { grep -q "$1" "$ROOT/sent.txt" 2>/dev/null; }
+
+rm -f "$AGE_STATE"
+kitems "k-old|늙을 항목" ; rc_is 1
+runat "$T0" >/dev/null
+sent_has "늙을 항목" && ok "⑥-a 첫 등장은 «새 항목»으로 한 번 알린다" \
+  || bad "⑥-a 첫 등장을 안 알렸다" "$(cat "$ROOT/sent.txt")"
+sent_has "늙" && sent_has "새 항목" && ok "  → 첫 등장을 «늙었다»고 부르지 않는다(문구가 새 항목 쪽)" \
+  || ok "  → 첫 등장 문구 확인(새 항목 경로)"
+
+echo "⑥-b 🔑 임계 미만이면 **조용하다** — 나이가 새 소음이 되면 안 된다"
+runat "$((T0 + 23 * H))" >/dev/null
+[ "$(sent_count)" -eq 0 ] && ok "23시간 = 임계(24h) 미만 → 무음" \
+  || bad "임계 미만인데 울었다 — 나이가 배경소음이 된다" "$(cat "$ROOT/sent.txt")"
+
+echo "⑥-c 🔴 임계를 넘으면 **다시** 알린다 — 이 기능의 존재 이유"
+runat "$((T0 + 25 * H))" >/dev/null
+sent_has "늙을 항목" && ok "25시간 → 재알림" \
+  || bad "임계를 넘었는데 조용하다 — 늙은 항목이 여전히 매장된다" "$(cat "$ROOT/sent.txt")"
+
+echo "⑥-d 🧪 [대조군] 같은 실행에서 «어린» 항목은 안 뜬다 (늙은 것«만» 뜨는가)"
+# 🔑 ⑥-c 만 두면 「임계 넘으면 전부 다시 보낸다」로도 통과한다. 그건 213건 소음의 재발이다.
+#   ⇒ 늙은 것 하나 + 방금 생긴 것 하나를 같이 두고, **재알림 절에 어린 것이 섞이는지**를 본다.
+rm -f "$AGE_STATE"
+kitems "k-old|늙을 항목" ; rc_is 1
+runat "$T0" >/dev/null                                    # k-old 등장
+kitems "k-old|늙을 항목" "k-young|방금 생긴 항목" ; rc_is 1
+runat "$((T0 + 25 * H))" >/dev/null                        # k-old 는 25h, k-young 은 0h
+if sent_has "늙을 항목" && sent_has "방금 생긴 항목"; then
+  # 둘 다 나오는 건 정상이다 — 하나는 «재알림», 하나는 «새 항목»이라 **경로가 다르다**.
+  ok "[대조군] 늙은 것은 재알림, 어린 것은 새 항목 — 둘 다 뜨되 이유가 다르다"
+else
+  bad "[대조군] 한쪽이 빠졌다" "$(cat "$ROOT/sent.txt")"
+fi
+: > "$ROOT/sent.txt"
+runat "$((T0 + 26 * H))" >/dev/null                        # k-old 재알림 직후 · k-young 은 1h
+if sent_has "방금 생긴 항목"; then
+  bad "[대조군] 어린 항목이 재알림에 섞였다 — 「늙은 것만」이 아니다" "$(cat "$ROOT/sent.txt")"
+else
+  ok "[대조군] 어린 항목은 재알림에 안 섞인다"
+fi
+
+echo '⑥-e 🔴 재알림 직후 **또 울지 않는다** — «last_notified» 가 산다'
+[ "$(sent_count)" -eq 0 ] && ok "재알림 1시간 뒤 무음 (재알림 간격 24h)" \
+  || bad "매시 다시 운다 — 재알림에 간격이 없다" "$(cat "$ROOT/sent.txt")"
+
+echo "⑥-f 🔴 재알림 **전송이 실패하면 상태를 갱신하지 않는다** (룬드 리뷰 축 ②)"
+# 🔑 이 스크립트의 기존 규율 그대로 — *「조치했다」가 「해소했다」를 대신하지 않게*.
+#   여기서 갱신해버리면 **아무도 못 받은 알림이 「보냈음」으로 기록**되고 24시간 더 묻힌다.
+rm -f "$AGE_STATE"
+kitems "k-f|실패 재현 항목" ; rc_is 1
+runat "$T0" >/dev/null
+runat "$((T0 + 25 * H))" 1 >/dev/null                      # 재알림 시도 → 전송 rc=1
+: > "$ROOT/sent.txt"
+runat "$((T0 + 26 * H))" >/dev/null                        # 다음 회차: 다시 시도해야 한다
+sent_has "실패 재현 항목" && ok "전송 실패 뒤 다음 회차에 **다시** 알린다" \
+  || bad "전송이 실패했는데 「보냈음」으로 기록됐다 — 24시간 더 묻힌다" "$(cat "$ROOT/sent.txt")"
+
+echo '⑥-g 🔴 «first_seen» 과 «last_notified» 는 **따로** 산다 (룬드 리뷰 축 ③)'
+# 🔑 하나로 합치면(재알림 때 first_seen 을 밀면) **나이가 리셋**돼서 «얼마나 오래 방치됐나»가
+#   영영 안 자란다 — 이 기능이 재려던 값 자신이 죽는다. 그래서 두 칸이다.
+rm -f "$AGE_STATE"
+kitems "k-g|나이 누적 항목" ; rc_is 1
+runat "$T0" >/dev/null
+runat "$((T0 + 25 * H))" >/dev/null                        # 1차 재알림
+_fs="$(grep -F 'k-g' "$AGE_STATE" 2>/dev/null | cut -f1)"
+if [ "$_fs" = "$T0" ]; then
+  ok "재알림해도 first_seen 이 안 움직인다 (T0 그대로)"
+else
+  bad "재알림이 first_seen 을 밀었다 — 나이가 리셋된다" "want $T0 / got «${_fs:-<없음>}»"
+fi
+: > "$ROOT/sent.txt"
+runat "$((T0 + 50 * H))" >/dev/null                        # 2차 재알림 (1차로부터 25h)
+if sent_has "50시간" || sent_has "2일" || sent_has "나이 누적 항목"; then
+  ok "  → 2차 재알림이 나가고, 나이는 T0 기준으로 계속 는다"
+else
+  bad "  → 2차 재알림이 안 나갔다" "$(cat "$ROOT/sent.txt")"
+fi
+
+echo "⑥-h 🔴 v1 상태에서 올라올 땐 나이를 **«지금부터»** 센다 — 안 잰 나이를 지어내지 않는다"
+# 🔴 Ⅰ「관측한 것만 안다」의 자리다. v1 상태엔 «언제 처음 봤나»가 **없다**. 없는 것을
+#   epoch 0 으로 두면 전 항목이 즉시 「무한히 늙었다」가 되어 **한 번에 전부 운다**(213건 재발)
+#   — 게다가 그 나이는 **관측이 아니라 날조**다. 그래서 전환 시점을 first_seen 으로 삼고,
+#   **그렇게 했다고 전환 통보에 적는다**(적지 않으면 다음 사람이 그 수를 진짜 나이로 읽는다).
+rm -f "$AGE_STATE"
+{ printf '#keys-v1\n'; printf 'k-v1\n'; } > "$AGE_STATE"
+kitems "k-v1|v1 에서 올라온 항목" ; rc_is 1
+runat "$T0" >/dev/null
+[ "$(sent_count)" -ge 1 ] && ok "전환을 한 줄로 알린다" || bad "전환이 무음이다" "$(cat "$ROOT/sent.txt")"
+sent_has "지금부터" && ok "  → 무엇을 «모르는지»를 통보에 적는다 (안 잰 기간을 나이로 안 판다)" \
+  || bad "  → 나이 기준점을 안 밝힌다 — 다음 사람이 이 수를 진짜 나이로 읽는다" "$(cat "$ROOT/sent.txt")"
+# 🔴 **`first_seen` 을 «직접» 잰다.** 「23h 에 무음」으로만 두면 그 무음이 재알림 간격(24h)에서도
+#   나오므로, 나이를 epoch 0 으로 날조해도 **똑같이 초록**이다(실측: 변이 D 가 이 절을 안 밟고
+#   ⑥-g 에서만 걸렸다). 무음은 두 원인이 겹치는 자리라 **원인을 안 갈라준다.**
+_v1fs="$(grep -F 'k-v1' "$AGE_STATE" 2>/dev/null | cut -f1)"
+[ "$_v1fs" = "$T0" ] && ok "  → 나이 기준점이 «전환 시각»이다 (T0)" \
+  || bad "  → 안 잰 나이를 지어냈다" "want $T0 / got «${_v1fs:-<없음>}»"
+: > "$ROOT/sent.txt"
+runat "$((T0 + 23 * H))" >/dev/null
+[ "$(sent_count)" -eq 0 ] && ok "  → 23h 는 아직 무음" \
+  || bad "  → v1 항목이 즉시 늙은 것으로 취급됐다" "$(cat "$ROOT/sent.txt")"
+: > "$ROOT/sent.txt"
+runat "$((T0 + 25 * H))" >/dev/null
+sent_has "v1 에서 올라온 항목" && ok "  → 25h 에는 재알림된다 (전환이 나이를 «면제»하지 않는다)" \
+  || bad "  → 전환 항목이 영영 안 늙는다" "$(cat "$ROOT/sent.txt")"
 
 echo
 echo "  통과 $pass · 실패 $fail"
