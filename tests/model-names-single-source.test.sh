@@ -29,11 +29,15 @@ if ! command -v git >/dev/null 2>&1 || ! git -C "$ROOT" rev-parse --git-dir >/de
     echo "⛔ 판정 불가 — git 이 없어 «추적되는 파일»을 못 센다 (find 로 좁히면 분모가 조용히 달라진다)"
     exit 2
 fi
+# 🔴 분모는 **추적되는 파일 전부**다. `'*.sh'` 로 좁혔던 게 카브아웃이었다 —
+#   추적 327 중 93(28.4%)만 보고 있었고, 남은 리터럴 9건 중 `.sh` 는 0건이라 **미탐 100%**였다.
+#   실물: 이 PR 이 «고치는» `CLAUDE.md` 자신이 분모 밖이었다(룬드 리뷰 `#155`).
+#   🔑 확장자로 좁히는 것도 열거다 — 「셸에만 박힌다」가 전제인데 그 전제가 틀렸다.
 # ⚠️ `mapfile` 은 bash 4+ 다 — 룬드 맥(3.2)에서 죽는다. while-read 로 담는다.
-SHFILES=()
-while IFS= read -r _f; do SHFILES+=("$_f"); done < <(git -C "$ROOT" ls-files '*.sh')
-[ "${#SHFILES[@]}" -gt 0 ] || { echo "⛔ 판정 불가 — 셸 스크립트를 하나도 못 찾았다"; exit 2; }
-ok "분모: 추적되는 셸 스크립트 ${#SHFILES[@]}개 (열거가 아니라 git 이 센다)"
+FILES=()
+while IFS= read -r _f; do FILES+=("$_f"); done < <(git -C "$ROOT" ls-files)
+[ "${#FILES[@]}" -gt 0 ] || { echo "⛔ 판정 불가 — 추적되는 파일을 하나도 못 찾았다"; exit 2; }
+ok "분모: 추적되는 파일 ${#FILES[@]}개 «전부» (확장자로도 안 좁힌다 — 그것도 열거다)"
 
 # 판별식: `--model` 뒤에 «리터럴 모델 id»가 오는 자리. 변수(`"$NINO_MODEL_…"`)는 통과.
 detect() {  # $1=루트  $2…=파일들 → 위반 줄을 출력
@@ -42,14 +46,14 @@ detect() {  # $1=루트  $2…=파일들 → 위반 줄을 출력
     for f in "$@"; do
         [ "$f" = "$SRC_REL" ] && continue          # 단일 출처 자신은 «정의하는 자리»다
         [ -f "$root/$f" ] || continue
-        LC_ALL=C grep -nE -- '--model[= ]+["'"'"']?claude-[a-z0-9-]+' "$root/$f" 2>/dev/null \
+        LC_ALL=C grep -InE -- '--model[= ]+["'"'"']?claude-[a-z0-9-]+' "$root/$f" 2>/dev/null \
             | grep -v '^[0-9]*: *#' | sed "s#^#${f}:#"
     done
 }
 
-VIOL="$(detect "$ROOT" "${SHFILES[@]}")"
+VIOL="$(detect "$ROOT" "${FILES[@]}")"
 if [ -z "$VIOL" ]; then
-    ok "--model 에 리터럴 모델 id 를 박은 셸 스크립트가 없다"
+    ok "--model 에 리터럴 모델 id 를 박은 추적 파일이 없다"
 else
     bad "모델 id 사본이 있다 — 한쪽만 고쳐지고 다른 쪽이 조용히 낡는다" \
         "0건 (config/models.sh 를 source 해서 \$NINO_MODEL_* 사용)" "$(printf '%s' "$VIOL" | tr '\n' ' ')"
@@ -73,6 +77,49 @@ printf 'claude -p x --model "$NINO_MODEL_SONNET" --dangerously-skip-permissions\
 [ -z "$(detect "$_t" scripts/good.sh)" ] \
   && ok "[오탐 대조군] 변수로 쓴 자리는 안 잡는다" \
   || bad "올바른 형태를 빨갛게 만든다 (오탐)" "0건" "$(detect "$_t" scripts/good.sh)"
+
+# ── 🕳️ 유예 목록 — 「지금 안 고치기로 한 것」이 «PR 본문»이 아니라 «시험 출력»에 산다.
+#   본문은 머지되면 사실상 조회 불가고, 여기 있으면 **매 실행마다 보인다**(`.gitignore` 에서 얻은 형태).
+#   여기 실린 것은 판별식이 «구조적으로 못 보는» 자리다 — `--model` 접두가 없어서(`return "claude-…"`)
+#   분모를 아무리 넓혀도 안 걸린다. ⇒ 분모 확장으로는 못 닫히는 구멍이라 «선언»으로 남긴다.
+#
+#   ⚠️ 좌변을 붙인다 — 항목이 **아직 실재하는가**를 매번 재고, 사라졌으면 「지웠어야 한다」로 빨개진다.
+#      좌변 없는 유예 목록은 조용히 낡아서 **「고쳤는데 목록에 남은 것」과 구별이 안 된다.**
+echo
+echo "🕳️ 유예 — 판별식이 못 보는 자리(선언으로 남긴다)"
+# 🔑 구분자로 «쪼개지» 않는다 — 정규식에 `|` 가 들어가서 `IFS='|' read` 가 패턴을 반토막 냈다
+#   (`claude-(opus` 로 잘려 grep 이 오류를 내고 0줄이 됐다). 인자 셋짜리 함수면 그 축이 없다.
+deferred() {  # $1=경로 $2=정규식 $3=사유
+    local df="$1" dpat="$2" dwhy="$3" dn
+    if ! git -C "$ROOT" ls-files --error-unmatch "$df" >/dev/null 2>&1; then
+        bad "유예 항목의 파일이 추적에 없다 — 경로가 낡았다: $df" "추적됨" "없음"; return
+    fi
+    dn="$(LC_ALL=C grep -IcE -- "$dpat" "$ROOT/$df" 2>/dev/null || true)"
+    if [ "${dn:-0}" -ge 1 ]; then
+        ok "유예 ${df} (${dn}줄) — ${dwhy}"
+    else
+        bad "유예 항목이 이제 안 걸린다 — 목록에서 지웠어야 한다: $df" "1줄 이상" "0줄"
+    fi
+}
+deferred src/bot.py 'claude-(opus|sonnet|haiku)-[0-9a-z-]+' \
+    'Ⅲ 대기 — 이 파일을 지울지가 Darren 판단이다. 판별식도 못 본다(`return "claude-…"` 라 --model 접두가 없다)'
+deferred src/botctl.py 'Claude Opus [0-9.]+' \
+    '산문형 표시 이름(모델 id 아님). bot.py 와 «한 묶음»으로 Darren 께 물었다 — 따로 물으면 이 산문형이 남는다'
+deferred config/bots.json 'Claude Opus [0-9.]+' '위와 같음'
+deferred claude-config/skills/agent-browser/SKILL.md 'claude-sonnet-4\.6' \
+    '스킬 게이트웨이의 «다른 이름 공간» — config/models.sh 와 같은 값이 아니다'
+
+# 🧪 대조군 — 유예 검사가 «낡음»에 실제로 반응하나. 없으면 위 초록 넷은 장식이고,
+#   항목을 고친 뒤 목록에 남겨둬도 아무도 안 알려준다. 셈은 되돌린다(대조군은 계약이 아니다).
+_p0=$pass; _f0=$fail
+deferred config/models.sh 'zz절대없는패턴zz' '대조군' >/dev/null 2>&1
+if [ "$fail" -gt "$_f0" ]; then
+    pass=$_p0; fail=$_f0
+    ok "[대조군] 유예 항목이 낡으면 실제로 빨개진다 (목록이 장식이 아니다)"
+else
+    pass=$_p0; fail=$_f0
+    bad "[대조군] 유예 검사가 낡음에 반응 안 한다 — 위 초록 넷은 못 믿는다" "빨강" "초록"
+fi
 
 # ── 단일 출처가 «실제로 값을 싣는가». 이름만 있고 빈 값이면 `--model ""` 이 나간다.
 echo

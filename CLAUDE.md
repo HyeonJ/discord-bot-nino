@@ -121,10 +121,11 @@ discord-bot-nino/
 ## 서브 Claude 세션
 - Darren과 대화 중 Tim/Klaude/Darren이 한 번에 처리하기 어려운 작업을 부탁하면, 서브 Claude CLI 세션을 열어서 처리 후 결과를 알려줄 것
 - 명령어: `source ~/.nvm/nvm.sh && claude -p "작업내용" --model <모델> --dangerously-skip-permissions`
-- 모델 선택 기준:
-  - **Haiku** (`claude-haiku-4-5-20251001`): 간단한 검색, 파일 읽기, 짧은 작업
-  - **Sonnet** (`claude-sonnet-5`): 복잡한 코딩, 멀티스텝 작업, 판단이 필요한 작업
-  - 🔑 스크립트에서 부를 땐 값을 다시 적지 말 것 — `config/models.sh` 를 source 해서 `$NINO_MODEL_SONNET` 을 쓴다(`tests/model-names-single-source.test.sh` 가 사본을 막는다)
+- 모델 선택 기준 — 🔑 **여기에 값을 적지 않는다. 이름만 적고 값은 `config/models.sh` 에서 읽는다** (여기 적으면 사본이 둘이 돼 세대가 바뀔 때 한쪽만 고쳐진다 — 이 줄 자신이 그 실물이었다)
+  - `$NINO_MODEL_HAIKU`: 간단한 검색, 파일 읽기, 짧은 작업
+  - `$NINO_MODEL_SONNET`: 복잡한 코딩, 멀티스텝 작업, 판단이 필요한 작업
+  - `$NINO_MODEL_OPUS`: 복잡한 판단·긴 추론
+  - 쓸 땐 `. ~/discord-bot-nino/config/models.sh` 로 source 한다. `tests/model-names-single-source.test.sh` 가 사본이 다시 생기는 걸 막는다(분모는 **추적되는 파일 전부**라 이 파일도 그 안이다)
 
 ## YouTube Music 재생 규칙
 - 재생 요청 시 **항상** 셔플 + 반복("모두 반복") 활성화할 것
