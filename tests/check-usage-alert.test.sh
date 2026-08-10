@@ -54,6 +54,20 @@ export CORE_REPO="$CORE_FIXTURE"
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK/bin"
 
+# 🔴 **운영 상태의 «좌변»을 시험 시작 전에 뜬다** — 아래 ⑮ 가 이걸로 부작용을 잰다.
+#   «없음»도 값이다: 새 체크아웃엔 `logs/` 가 아예 없고, 그때 시험이 만들어버리면
+#   그것도 오염이다(부재 → 존재도 변화).
+OPSTATE_DIR="$REPO/logs"
+opstate_fp() {   # 두 운영 상태 파일의 지문. 없으면 «없음»
+    local f out=""
+    for f in "$OPSTATE_DIR/check-usage-verdict.state" "$OPSTATE_DIR/check-usage-band.state"; do
+        if [ -e "$f" ]; then out="$out$(basename "$f")=$(cat "$f" 2>/dev/null | tr -d '\n');"
+        else out="$out$(basename "$f")=없음;"; fi
+    done
+    printf '%s' "$out"
+}
+OPSTATE_BEFORE="$(opstate_fp)"
+
 nlines() { wc -l < "$1" | tr -d '[:space:]'; }
 
 # ── 가짜 curl: 상태코드·본문·헤더를 주입으로 제어 ────────────────────────────
@@ -109,6 +123,18 @@ PYEOF
 #   운영 기준선을 시험이 덮어써서 **다음 진짜 전이가 묻힌다**(부작용). 그리고 반대로
 #   운영 상태가 시험 결과를 바꿔서 **같은 시험이 기계마다 다른 답**을 낸다.
 #   [[feedback_vault_script_test_isolation]] 와 같은 계약.
+#
+# 🔴 **격리는 «헬퍼»가 아니라 «환경»에 건다** (2026-08-10 실측, `#159` 와 같은 병).
+#   이 주석은 예전부터 있었는데 격리는 `run_in()` 안에만 걸려 있었고,
+#   `"$CHECK"` 를 직접 부르는 자리 셋(크래시·임시파일·`run_cli`)이 그걸 안 거쳤다.
+#   그래서 **운영 상태가 있는 기계에서만** 3건이 빨개졌다:
+#     깨끗한 워크트리 통과 89 · 실패 0   /   운영 `logs/` 가 있는 트리 통과 86 · 실패 3
+#   기전 확인: `logs/check-usage-{band,verdict}.state` **두 파일만** 복사하면 그 자리에서 뒤집힌다.
+#   🔑 **그리고 CI 는 이걸 «구조적으로» 못 본다** — 새 체크아웃엔 `logs/` 가 없고,
+#      스크립트는 디렉터리가 없으면 상태를 안 쓴다. **초록이 「격리된다」의 증거가 아니었다.**
+#   ⇒ 아래 export 로 **호출 자리를 안 믿는다.** 새 호출을 추가해도 자동으로 격리된다.
+export CHECK_USAGE_STATE="$WORK/global-verdict.state"
+export CHECK_USAGE_BAND_STATE="$WORK/global-band.state"
 run() {   # run <설명없음> — 환경변수는 앞에 붙여 넘긴다. 매 호출이 «새 상태»다
   STATE="$WORK/run$RANDOM"; mkdir -p "$STATE"
   run_in "$STATE" "$@"
@@ -247,6 +273,7 @@ grep -q 'verdict=parse-unknown' "$LOGF" && ok "  → parse-unknown 으로 갈린
 #    run() 은 출력을 버리므로 여기서만 stderr 를 직접 받는다.
 _crash_out="$(env PATH="$WORK/bin:$PATH" SENT_LOG="$WORK/s.tsv" \
   CHECK_USAGE_CREDENTIALS="$CREDS" CHECK_USAGE_LOG="$WORK/c.log" \
+  CHECK_USAGE_STATE="$WORK/c.verdict.state" CHECK_USAGE_BAND_STATE="$WORK/c.band.state" \
   DISCORD_SEND="$WORK/bin/discord-send" FAKE_CODE=200 \
   FAKE_BODY='{"five_hour":{"utilization":"abc","resets_at":"2099-01-01T00:00:00Z"}}' \
   bash "$CHECK" 2>&1)"
@@ -263,6 +290,7 @@ _TMP="$(mktemp -d)"
 for _ in 1 2 3; do
   env PATH="$WORK/bin:$PATH" TMPDIR="$_TMP" SENT_LOG="$WORK/s2.tsv" \
     CHECK_USAGE_CREDENTIALS="$CREDS" CHECK_USAGE_LOG="$WORK/c2.log" \
+    CHECK_USAGE_STATE="$WORK/c2.verdict.state" CHECK_USAGE_BAND_STATE="$WORK/c2.band.state" \
     DISCORD_SEND="$WORK/bin/discord-send" FAKE_CODE=200 \
     FAKE_BODY='{"five_hour":{"utilization":"abc","resets_at":"2099-01-01T00:00:00Z"}}' \
     bash "$CHECK" >/dev/null 2>&1
@@ -352,6 +380,8 @@ runargs() {   # runargs <스크립트 인자…>   (GUARD_ENV 를 세우면 CLI_
   LOGF="$STATE/usage.log"; OUTF="$STATE/out.txt"
   env PATH="$WORK/bin:$PATH" SENT_LOG="$SENT_LOG" \
       CHECK_USAGE_CREDENTIALS="$CREDS" CHECK_USAGE_LOG="$LOGF" \
+      CHECK_USAGE_STATE="$STATE/verdict.state" \
+      CHECK_USAGE_BAND_STATE="$STATE/band.state" \
       DISCORD_SEND="$WORK/bin/discord-send" \
       FAKE_CODE=200 FAKE_BODY="$ALERT_BODY" \
       ${GUARD_ENV:+CLI_DRY_RUN="$GUARD_ENV"} \
@@ -683,6 +713,24 @@ _nbrc=$?
 [ "$_nbrc" = 2 ] && LC_ALL=C grep -q 'verdict=parse-no-band' "$LOGF" \
   && ok "🧪 [대조군] BAND 줄이 없으면 rc=2 «판정 불가» — 조용한 ok 로 안 접힌다" \
   || bad "BAND 줄 부재" "rc=2 + verdict=parse-no-band" "rc=$_nbrc / $(tail -1 "$LOGF" 2>/dev/null)"
+
+echo "── ⑮ 🔴 시험이 «운영 상태»를 안 건드린다 (격리를 환경에 걸었는지의 좌변) ──"
+# 🔑 좌변이 «시험 안의 값»이 아니라 «시험 밖의 파일»이다. 격리가 새면 여기서만 보인다 —
+#   다른 단언은 전부 격리된 자리를 보고 있어서 새는 걸 못 본다(그래서 오늘까지 안 잡혔다).
+OPSTATE_AFTER="$(opstate_fp)"
+[ "$OPSTATE_BEFORE" = "$OPSTATE_AFTER" ] \
+  && ok "운영 상태 파일이 시험 전후로 같다" \
+  || bad "운영 상태 오염" "$OPSTATE_BEFORE" "$OPSTATE_AFTER"
+
+# 🧪 대조군 — 이 검사가 «변화를 실제로 잡나». 안 그러면 위 초록은 항진명제다.
+_op_probe="$WORK/opprobe"; mkdir -p "$_op_probe"
+( OPSTATE_DIR="$_op_probe"
+  _b="$(opstate_fp)"
+  printf 'x\n' > "$_op_probe/check-usage-band.state"
+  _a="$(opstate_fp)"
+  [ "$_b" != "$_a" ] ) \
+  && ok "🧪 [대조군] 상태가 바뀌면 지문이 달라진다" \
+  || bad "지문 대조군" "달라짐" "같음 — 이 검사는 아무것도 못 잡는다"
 
 echo
 # 🔸 판정 불가를 요약줄에 **항상** 싣는다(0이어도). 조건부로 붙이면 0과 '이 칸이 없음'이
