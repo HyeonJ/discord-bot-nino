@@ -175,7 +175,15 @@ esac
 CALLED="$(command grep -ho 'scripts/[A-Za-z0-9_-]*\.sh' "$REPO"/tests/*.sh | sort -u)"
 # 🔸 이 PR 이전부터 있던 위반은 **이름으로 적어둔다**(줄 수가 아니라 파일). 새 파일은 자동으로
 #   판정에 들어오고, 여기 있는 것은 «줄어드는 방향으로만» 지운다. 별건 안건 — 08-05 감사.
-LEGACY_DIRTY='morning-briefing.sh check-core-drift.sh vault-audit.sh vault-append.sh'
+# ⚠️ **분모가 «주석»으로도 는다** — `CALLED` 는 tests/*.sh 를 grep 해 뽑으므로,
+#   시험이 «설명으로만» 언급한 스크립트도 분모에 들어온다. 안전한 방향(과대추정)이지만
+#   놀랍다: `#155` 의 새 시험이 주석에 `scripts/vault-audit-llm.sh` 를 적자
+#   그 파일이 판정에 들어와 **스택 머지에서만** 빨개졌다(개별 CI 는 둘 다 초록).
+#   🔑 이걸 「grep 을 정교하게」로 고치지 않는다 — 좁히면 «부르는데 안 잡히는» 쪽으로 샌다.
+#   🔸 그 파일은 스스로 `:5` 에 **「Linux/bash 4+ 전용(GNU date·grep -P·mapfile)」**이라 적어뒀고
+#      연관배열도 쓴다 — 이식성 «회귀»가 아니라 **선언된 범위 밖**이라 면제 원장에 넣는다.
+#      (3.2 로 내리려면 별건 PR 이다. 여기서 같이 고치면 한 PR 이 두 가지가 된다)
+LEGACY_DIRTY='morning-briefing.sh check-core-drift.sh vault-audit.sh vault-append.sh vault-audit-llm.sh'
 CALLED_FILES=""
 for rel in $CALLED; do
     base="${rel##*/}"
