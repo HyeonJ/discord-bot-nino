@@ -262,7 +262,8 @@ CRON_ENTRIES=(
 
 CURRENT_CRON=$(crontab -l 2>/dev/null || true)
 ADDED=0
-for entry in "${CRON_ENTRIES[@]}"; do
+# 🔸 안전형 — bash 3.2 + set -u 는 «빈» 배열의 맨 확장에서 unbound 로 죽는다.
+for entry in "${CRON_ENTRIES[@]+"${CRON_ENTRIES[@]}"}"; do
     if ! echo "$CURRENT_CRON" | grep -qF "$(echo "$entry" | awk '{print $NF}')"; then
         CURRENT_CRON="$CURRENT_CRON
 $entry"
@@ -288,7 +289,7 @@ step "Phase 9: 헬스체크"
 #    계속 초록이었고 **실제 relay 유무는 한 번도 안 재고 있었다**(거짓 초록, 2026-07-28 실측).
 #    ⇒ relay 점검은 scripts/check-relay-present.sh 가 맡는다(아래). 소스를 둘로 두지 않는다.
 REQUIRED_FILES=(".env" "src/discord-send" "CLAUDE.md" "scripts/start-nino.sh")
-for f in "${REQUIRED_FILES[@]}"; do
+for f in "${REQUIRED_FILES[@]+"${REQUIRED_FILES[@]}"}"; do
     if [[ -f "$BOT_DIR/$f" ]] || [[ -x "$BOT_DIR/$f" ]]; then
         ok "파일 존재: $f"
     else

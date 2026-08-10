@@ -139,7 +139,8 @@ sync_dir() {
         return
     fi
     mkdir -p "$dst"
-    if rsync "${RSYNC_OPTS[@]}" "$src/" "$dst/"; then
+    # 🔸 안전형 — bash 3.2 + set -u 는 «빈» 배열의 맨 확장에서 unbound 로 죽는다.
+    if rsync "${RSYNC_OPTS[@]+"${RSYNC_OPTS[@]}"}" "$src/" "$dst/"; then
         log "OK: $label synced ($(find "$src" -type f | wc -l) files)"
     else
         fail "$label rsync 실패 (디스크 full·권한·I/O 확인)"
