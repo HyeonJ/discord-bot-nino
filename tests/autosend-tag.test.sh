@@ -15,6 +15,17 @@ bad() { echo "  ❌ $1"; fail=$((fail + 1)); [ -n "${2:-}" ] && echo "     want:
 
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 
+# 🔴 **가짜 BOT_DIR — 이게 없으면 이 시험은 «내 기계에서만» 돈다.**
+#   셔틀이 `$BOT_DIR/.env` 를 절대경로로 source 하는데 CI 엔 그 경로가 없다. `set -e` 아래라
+#   그 줄에서 죽고, 태그 로직은 `exec` 앞이라 **거기까지 못 간다** ⇒ rc=1.
+#   로컬엔 `.env` 가 있어서 초록이었다 — **초록이 「태그가 붙는다」의 증거가 아니라
+#   「내 기계에 `.env` 가 있다」의 증거**였다(2026-08-10 `#166` CI 빨강에서 잡혔다).
+#   ⇒ 격리와 같은 처방이다: **호출 자리가 아니라 «환경»에 건다.**
+FAKE_BOT="$WORK/bot"; mkdir -p "$FAKE_BOT/config" "$FAKE_BOT/logs"
+printf 'DISCORD_BOT_TOKEN=fake-token-for-test\n' > "$FAKE_BOT/.env"
+printf '{}\n' > "$FAKE_BOT/config/channel-map.json"
+printf '{}\n' > "$FAKE_BOT/config/mention-map.json"
+
 # 가짜 코어 — 받은 인자를 그대로 적는다. 실제 전송은 «절대» 안 한다.
 cat > "$WORK/fake-core.js" <<'EOF'
 placeholder
@@ -37,6 +48,7 @@ run_shim() {   # run_shim <VAR=VAL…> -- <셔틀 인자…>
     [ "${1:-}" = "--" ] && shift
     : > "$WORK/argv"; : > "$WORK/err"
     env DISCORD_SEND_BUN="$WORK/fake-bun" DISCORD_SEND_CORE_CLI="$WORK/fake-core.js" \
+        DISCORD_SEND_BOT_DIR="$FAKE_BOT" \
         ${envs[@]+"${envs[@]}"} bash "$SHIM" "$@" >"$WORK/out" 2>"$WORK/err"
     RC=$?
     return 0
@@ -92,6 +104,7 @@ _mut="$WORK/shim-mut"; sed 's/"\[감시\] \${_args/"${_args/' "$SHIM" > "$_mut"
 if ! cmp -s "$SHIM" "$_mut"; then
     : > "$WORK/argv"
     env DISCORD_SEND_BUN="$WORK/fake-bun" DISCORD_SEND_CORE_CLI="$WORK/fake-core.js" \
+        DISCORD_SEND_BOT_DIR="$FAKE_BOT" \
         NINO_AUTOSEND=1 bash "$_mut" 봇-놀이터 "변이 본문" >/dev/null 2>&1
     [ "$(last_arg)" = "변이 본문" ] \
       && ok "🧪 태그 문자열을 지우면 붙지 않는다 — ①은 항진명제가 아니다" \
@@ -137,6 +150,37 @@ echo "  분모 $n_all (켬 $n_on · 면제 $n_ex)"
 [ "$n_all" -gt 0 ] \
   && ok "분모가 «유도»됐다 — scripts/ 에서 셔틀 호출자 $n_all 개" \
   || bad "분모 0" "1개 이상" "0 — 유도식이 아무것도 못 봤다(패턴이 낡았나)"
+
+echo
+echo "── ⑥ 🔴 이음매가 «기본값»이 되지 않았나 — 안 걸면 하드코딩 경로로 간다 ──"
+# 🔑 위 시험 전부가 `DISCORD_SEND_BOT_DIR` 를 걸고 돈다. 그러면 **셔틀이 그 변수 «없이»도
+#   제 경로로 가는지**는 아무도 안 잰다 — 이음매가 조용히 정본이 되는 길이다.
+#   (이 파일 머리의 「정체 고정」이 지키려던 바로 그 값이다.)
+NINO_HOME="/home/bpx27/discord-bot-nino"
+LC_ALL=C grep -q -- ":-$NINO_HOME}" "$SHIM" \
+  && ok "안 걸었을 때의 기본값이 하드코딩 경로다 (정적)" \
+  || bad "기본값" ":-$NINO_HOME}" "$(LC_ALL=C grep -n 'BOT_DIR=' "$SHIM")"
+
+# 🔸 위는 «문자열» 좌변이라 재서술에 죽는다. 실제로 그 경로로 «가는지»는 셔틀을 돌려서만 재는데,
+#   그러려면 그 기계에 진짜 `.env` 가 있어야 한다 ⇒ CI 에선 못 잰다. **판정 불가로 적고 축을 밝힌다.**
+if [ -r "$NINO_HOME/.env" ]; then
+    : > "$WORK/argv"; : > "$WORK/env"
+    cat > "$WORK/fake-bun-env" <<EOF
+#!/bin/sh
+printf '%s\n' "\$CHANNEL_MAP" > "$WORK/env"
+exit 0
+EOF
+    chmod +x "$WORK/fake-bun-env"
+    env DISCORD_SEND_BUN="$WORK/fake-bun-env" DISCORD_SEND_CORE_CLI="$WORK/fake-core.js" \
+        bash "$SHIM" 봇-놀이터 "기본값 확인" >/dev/null 2>&1
+    [ "$(cat "$WORK/env" 2>/dev/null)" = "$NINO_HOME/config/channel-map.json" ] \
+      && ok "  → 실제로 그 경로의 config 를 코어에 넘긴다 (실측)" \
+      || bad "기본 BOT_DIR" "$NINO_HOME/config/channel-map.json" "$(cat "$WORK/env" 2>/dev/null)"
+else
+    echo "  🔸 판정 불가: «기본 BOT_DIR 로 실제로 가는지» 축 — 이 기계엔 $NINO_HOME/.env 가 없다"
+    echo "     (정적 좌변은 위에서 쟀다. 못 잰 것은 「기본값이 실행에서도 그 값인가」 하나다)"
+    skip=$((skip + 1))
+fi
 
 echo
 echo "  통과 $pass · 실패 $fail · 판정 불가 $skip"
