@@ -51,7 +51,25 @@ done
 export CORE_REPO="$CORE_FIXTURE"
 
 [ -f "$CHECK" ] || { echo "❌ 없음: $CHECK"; exit 1; }
-WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
+# 🔴 **씨앗 회수를 «직선 코드»에 두면 안 된다 — 죽는 갈래에서 «운영 자리»에 남는다** (룬드 `#169` 리뷰).
+#   실측: 씨앗 심긴 뒤 SIGTERM → 두 상태 파일이 씨앗인 채 남고, **그 상태로 시험을 정상 완주시키면
+#   rc=0 · ❌0 인데 씨앗은 그대로**다. 아래 씨앗 로직이 `[ ! -e ]` 일 때만 심으므로 **남은 씨앗은
+#   다음 실행에서 안 심고 안 지운다** = **자가 치유가 구조적으로 불가능**하고, BEFORE·AFTER 가 둘 다
+#   씨앗이라 **⑮ 는 초록**이다 — **오염을 재는 장치가 «자기가 만든 오염»에 무음**이다.
+#   그 뒤 운영 스크립트가 그걸 `prev_band` 로 읽어 **항상 전이**를 만든다.
+#   🔑 「검증하느라 만든 것이 검증 대상에 상태를 남긴다」의 실물이고, **`#163` 엔 없던 위험을
+#      이 PR 이 도입했다.**
+# 🔴 **기존 trap 문자열에 «얹는다»** — `trap … EXIT` 를 따로 걸면 앞엣것이 덮여 사라진다(:329 실측).
+# 🔴 **`INT TERM` 도 건다** — bash 는 «안 잡은» 치명 시그널에선 EXIT trap 을 «안» 돌린다.
+#   위 실측이 정확히 SIGTERM 이었으므로 EXIT 만으로는 그 갈래가 안 덮인다.
+# 🔸 변수는 전부 `:-` 로 읽는다 — 정의 «전»에 죽는 갈래가 있고 `set -u` 아래다.
+#   그리고 목록이 아니라 «파일별 깃발»로 둔다(비인용 확장을 아예 안 만든다).
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK";
+      [ -n "${OPSTATE_SEEDED_V:-}" ] && rm -f "$OPSTATE_V";
+      [ -n "${OPSTATE_SEEDED_B:-}" ] && rm -f "$OPSTATE_B";
+      [ -n "${OPSTATE_DIR_MADE:-}" ] && rmdir "${OPSTATE_DIR:-/nonexistent}" 2>/dev/null;
+      :' EXIT INT TERM
 mkdir -p "$WORK/bin"
 
 # 🔴 **운영 상태의 «좌변»을 시험 시작 전에 뜬다** — 아래 ⑮ 가 이걸로 부작용을 잰다.
@@ -86,13 +104,26 @@ fi
 #   ⚠️ 있는 파일은 **절대 안 건드린다** — 없을 때만 심고, 심은 것만 지운다.
 OPSTATE_V="$OPSTATE_DIR/check-usage-verdict.state"
 OPSTATE_B="$OPSTATE_DIR/check-usage-band.state"
-OPSTATE_SEEDED=""
-for _f in "$OPSTATE_V" "$OPSTATE_B"; do
-    if [ ! -e "$_f" ]; then
-        printf 'SEED-시험이-심음\n' > "$_f" 2>/dev/null \
-          && OPSTATE_SEEDED="$OPSTATE_SEEDED$_f "
-    fi
-done
+
+# 🔴 **이 «값»은 실제 band 값과 겹치면 안 된다 — 겹치면 ⑮ 가 조용히 항진명제로 돌아간다.**
+#   실측(룬드 `#169` 리뷰, 2026-08-10): 격리를 뺀 사본에서 씨앗을 `ok` 로 바꾸면
+#   **전제 ⓐ·ⓑ·ⓒ 가 전부 초록인 채** 통과 94 · 실패 0 · 판정 불가 0 이 나온다.
+#   기전: `scripts/check-usage-alert.sh:398-400` — 전이는 **직전 값과 «다를 때»만** 성립하므로
+#   씨앗이 실제 값과 겹치면 **전이가 안 나고 누수도 안 난다.**
+#   🔑 아래 ⓒ(자리 유도-대조)가 막는 함정의 **«값» 판**이다. 자리를 옮기면 ⓒ 가 빨개지는데
+#      **값을 바꾸면 아무것도 안 빨개진다** — 값 축이 한 겹 조용하다.
+#   ⚠️ 재발 경로가 구체적이다: 누가 *「더 현실적인 값으로」* `ok`·`na` 로 바꾸면
+#      **diff 는 값 하나**이고 CI 는 초록이다. 그래서 실측을 값 옆에 붙여 둔다.
+#   🔸 값 집합을 `case` 로 열거해 거부하는 안은 **또 열거**라 안 쓴다(구간 라벨은 사람 값이라 는다).
+SEED_STATE='SEED-시험이-심음'
+
+OPSTATE_SEEDED_V=""; OPSTATE_SEEDED_B=""
+if [ ! -e "$OPSTATE_V" ]; then
+    printf '%s\n' "$SEED_STATE" > "$OPSTATE_V" 2>/dev/null && OPSTATE_SEEDED_V=1
+fi
+if [ ! -e "$OPSTATE_B" ]; then
+    printf '%s\n' "$SEED_STATE" > "$OPSTATE_B" 2>/dev/null && OPSTATE_SEEDED_B=1
+fi
 
 opstate_fp() {   # 두 운영 상태 파일의 지문. 없으면 «없음»
     local f out=""
@@ -788,11 +819,8 @@ OPSTATE_AFTER="$(opstate_fp)"
   && ok "운영 상태 파일이 시험 전후로 같다" \
   || bad "운영 상태 오염" "$OPSTATE_BEFORE" "$OPSTATE_AFTER"
 
-# 🔸 우리가 «심은» 것만 지운다 — 있던 파일은 손대지 않는다.
-for _f in $OPSTATE_SEEDED; do rm -f "$_f"; done
-# 🔸 우리가 만든 디렉터리면 돌려놓는다 — 시험이 트리에 «흔적»을 남기지 않는다.
-#   비어 있을 때만 지운다(누가 그 사이에 쓴 것을 지우면 그게 새 오염이다).
-[ -n "$OPSTATE_DIR_MADE" ] && rmdir "$OPSTATE_DIR" 2>/dev/null
+# 🔸 회수는 **머리의 EXIT·INT·TERM trap** 이 한다 — 여기 직선 코드로 두면 죽는 갈래에서
+#   씨앗이 «운영 자리»에 남고, 그 오염을 이 검사 자신이 못 본다(룬드 `#169`, 머리말 참조).
 
 # 🧪 대조군 — 이 검사가 «변화를 실제로 잡나». 안 그러면 위 초록은 항진명제다.
 _op_probe="$WORK/opprobe"; mkdir -p "$_op_probe"
