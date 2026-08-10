@@ -399,9 +399,15 @@ _d="2026-08-08"
 _e1="$(iso_epoch "$_d")"; _e2="$(iso_epoch "${_d}T16:02:24Z")"
 if [ "$_e1" = "$_e2" ]; then ok "iso_epoch: 시각이 붙어 있어도 같은 값(날짜만 본다)"; else
   bad "같은 날짜인데 값이 다르다 — 시각이 새어들어간다" "$_e1 vs $_e2"; fi
-if [ $(( _e1 % 86400 )) -eq 0 ] 2>/dev/null || [ -n "$(date -d @"$_e1" +%H%M%S 2>/dev/null | grep -x 000000)" ]; then
+# 🔴 `date -d @…` 로 되읽지 «않는다» — 그건 GNU 전용이라 이 파일이 맥에서 죽는다
+#    (실물: 첫 판이 그렇게 썼다가 portability 가드에 걸렸다 — 이식성 시험을 이식 불가로 썼다).
+#    자정 여부는 «산술»로 잰다: 지역 자정이면 `(epoch + UTC오프셋) % 86400 == 0`.
+#    `date +%z` 는 GNU·BSD 둘 다 `+0900` 꼴을 준다.
+_z="$(date +%z)"; _off=$(( 10#${_z:1:2} * 3600 + 10#${_z:3:2} * 60 ))
+[ "${_z:0:1}" = "-" ] && _off=$(( -_off ))
+if [ $(( (_e1 + _off) % 86400 )) -eq 0 ]; then
   ok "iso_epoch: 값이 «자정»이다 (벽시계가 안 섞인다)"; else
-  bad "자정이 아니다 — 값이 실행 시각을 따라 흐른다" "$(date -d @"$_e1" 2>/dev/null || echo "$_e1")"; fi
+  bad "자정이 아니다 — 값이 실행 시각을 따라 흐른다" "epoch=$_e1 tz=$_z"; fi
 # ② 형태: BSD 갈래가 시·분·초를 «명시»하나. 리눅스에선 그 갈래가 안 돌아 동작으로 못 잰다
 if command grep -q "date -j -f '%Y-%m-%d %H:%M:%S'" "$SCRIPT"; then
   ok "iso_epoch: BSD 갈래가 자정을 명시한다 (리눅스에선 이 형태 검사가 유일한 좌변)"; else
