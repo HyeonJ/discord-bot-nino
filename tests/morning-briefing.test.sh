@@ -390,6 +390,24 @@ if iso_epoch "$(fmt_ago 0 '+%Y-%m-%d')" >/dev/null; then ok "iso_epoch: 정상 �
 if ! iso_epoch "not-a-date" >/dev/null 2>&1; then ok "iso_epoch: 못 재면 실패로 낸다(0 아님)"; else
   bad "못 쟀는데 값을 돌려줬다" "$(iso_epoch 'not-a-date')"; fi
 
+# ⑪-11b 🔴 iso_epoch 은 «자정»을 뜻해야 한다 — BSD `date -j -f` 는 빠진 필드를
+#   «현재 시각»으로 채워서 값이 벽시계를 따라 흐른다(룬드 맥 33% 플레이키의 기전).
+#   🔑 좌변이 «두 층»이다. 리눅스 러너에선 GNU 갈래만 도니 ②가 여기서 죽고,
+#      ①은 맥에서 죽는다. 하나만 두면 각자 자기 OS 에서 조용하다.
+# ① 동작: 같은 날짜는 «언제 물어도» 같은 값이고, 그 값은 자정이다
+_d="2026-08-08"
+_e1="$(iso_epoch "$_d")"; _e2="$(iso_epoch "${_d}T16:02:24Z")"
+if [ "$_e1" = "$_e2" ]; then ok "iso_epoch: 시각이 붙어 있어도 같은 값(날짜만 본다)"; else
+  bad "같은 날짜인데 값이 다르다 — 시각이 새어들어간다" "$_e1 vs $_e2"; fi
+if [ $(( _e1 % 86400 )) -eq 0 ] 2>/dev/null || [ -n "$(date -d @"$_e1" +%H%M%S 2>/dev/null | grep -x 000000)" ]; then
+  ok "iso_epoch: 값이 «자정»이다 (벽시계가 안 섞인다)"; else
+  bad "자정이 아니다 — 값이 실행 시각을 따라 흐른다" "$(date -d @"$_e1" 2>/dev/null || echo "$_e1")"; fi
+# ② 형태: BSD 갈래가 시·분·초를 «명시»하나. 리눅스에선 그 갈래가 안 돌아 동작으로 못 잰다
+if command grep -q "date -j -f '%Y-%m-%d %H:%M:%S'" "$SCRIPT"; then
+  ok "iso_epoch: BSD 갈래가 자정을 명시한다 (리눅스에선 이 형태 검사가 유일한 좌변)"; else
+  bad "BSD 갈래가 날짜만 준다 — 맥에서 «그 날의 지금 시각»이 된다" \
+      "$(command grep -n 'date -j -f' "$SCRIPT" | head -1)"; fi
+
 echo "⑫ 🔴 인자 계약 (코어 cli-guard) — 09:50 사고의 형태를 막는다"
 # 🔴 이 스크립트는 **이미 한 번 말없이 안 나갔다** (07-30 23:03 재시작에 세션 cron 이 같이
 #   사라져 금요일 07시 브리핑이 조용히 빠졌고 아무도 몰랐다 — CLAUDE.md 기록).
