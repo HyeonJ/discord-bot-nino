@@ -51,7 +51,9 @@ detect() {  # $1=루트  $2…=파일들 → 위반 줄을 출력
     done
 }
 
-VIOL="$(detect "$ROOT" "${FILES[@]}")"
+# 🔑 안전형 확장 — bash 3.2 + `set -u` 는 «빈 배열»의 맨 `${a[@]}` 에서 죽는다.
+#   위 개수 검사가 있어도 «형태»가 남으면 portability 가드가 잡는다(그게 맞다 — 형태로 잰다).
+VIOL="$(detect "$ROOT" "${FILES[@]+"${FILES[@]}"}")"
 if [ -z "$VIOL" ]; then
     ok "--model 에 리터럴 모델 id 를 박은 추적 파일이 없다"
 else
