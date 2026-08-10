@@ -54,6 +54,12 @@ function fetchHealth(url) {
   });
 }
 
+// 🤝 자동 발신엔 `[감시]` 를 붙인다 — 셔틀이 이 변수를 보고 «모든» 전송에 태그한다.
+//    호출 자리마다 붙이지 않는 이유: 새 전송을 추가해도 자동으로 태그되게(환경에 건다).
+// 🔴 이 파일이 셸이 아니라 **놓칠 뻔했다**(룬드 `#166` 리뷰) — 시험 ⑤ 의 분모가
+//    `scripts/*.sh` 만 봐서 여기 경보 발신이 통째로 안 보였다. 유도식은 «보는 것»만큼만 넓다.
+process.env.NINO_AUTOSEND = '1';
+
 function sendAlert(message, dmChannel) {
   try {
     const escaped = message.replace(/'/g, "'\\''");

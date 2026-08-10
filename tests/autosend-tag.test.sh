@@ -98,6 +98,63 @@ LC_ALL=C grep -q "NINO_AUTOSEND" "$WORK/err" \
   || bad "진단문" "NINO_AUTOSEND 언급" "$(cat "$WORK/err")"
 
 echo
+echo "── ③-b 🔴 진단문이 시킨 복구가 «실제로» 통한다 ──"
+# 🔴 안내가 거짓이면 rc=2 는 「엄격한 실패」가 아니라 **알림이 안 나간 것**이다.
+#   이 계약이 막으려던 건 「무표시 발송」이지 「발송 없음」이 아니다 — 출구가 없으면 방향이 뒤집힌다.
+#   실물(룬드 `#166` 리뷰): 안내대로 `--` 뒤에 둬도 마지막 인자만 봐서 같은 rc=2, 전송 0건이었다.
+#   자동 알림이 마크다운 리스트(`- 항목`)로 시작하면 그대로 걸린다.
+run_shim NINO_AUTOSEND=1 -- 봇-놀이터 -- "- 첫 항목"
+[ "$RC" = 0 ] && [ "$(last_arg)" = "[감시] - 첫 항목" ] \
+  && ok "'--' 뒤의 메시지는 '-' 로 시작해도 태그되어 나간다" \
+  || bad "-- 복구" "[감시] - 첫 항목 (rc=0)" "$(last_arg) (rc=$RC)"
+# 🔸 `wc -l` 은 BSD 에서 «공백 패딩»이 붙는다 — 문자열이 아니라 «수»로 비교한다(이식성 가드)
+[ "$(head -1 "$WORK/argv")" = "봇-놀이터" ] && [ "$(wc -l < "$WORK/argv")" -eq 2 ] \
+  && ok "  → '--' 자체는 코어에 안 넘어간다 (positional 파서라 밀린다)" \
+  || bad "-- 가 남았다" "target·message 둘" "$(tr '\n' '|' < "$WORK/argv")"
+# 🔸 출구가 «생겼다»고 «막던 것»이 풀리면 안 된다 — `--` 없는 원래 모호함은 그대로 거절한다.
+run_shim NINO_AUTOSEND=1 -- 봇-놀이터 "--"
+[ "$RC" = 2 ] \
+  && ok "  → '--' 가 «마지막»이면(뒤에 메시지 없음) 여전히 rc=2" \
+  || bad "-- 만 있을 때" "rc=2" "rc=$RC · $(last_arg)"
+
+echo
+echo "── ③-c 🔴 감시가 «본체»를 띄울 땐 변수를 벗긴다 — 경계를 넘는 자리 ──"
+# 🔑 「환경에 건다」는 자식이 «같은 종류»일 때만 맞다. 감시가 감시를 부르면 상속이 맞고,
+#   **감시가 본체를 띄우면** 사람이 쓴 말이 `[감시]` 로 나간다(룬드 `#166` 리뷰).
+# 🔴 tmux 서버는 한 번 오염되면 «변수 없이» 만든 세션도 물려받는다 — 양쪽 실측
+#   (룬드 맥 3.6a · 니노 WSL 3.4). 되돌리려면 서버를 죽여야 하므로 «새기 전»에 벗긴다.
+WD="$BOT_DIR/scripts/nino-watchdog.sh"
+if [ -f "$WD" ]; then
+    LC_ALL=C grep -qE 'env[[:space:]]+-u[[:space:]]+NINO_AUTOSEND[[:space:]]+"\$@"' "$WD" \
+      && ok "복구 목(wd_restart)이 env -u 로 변수를 벗기고 자식을 띄운다" \
+      || bad "복구 목이 변수를 그대로 물려준다 — 본체 발신이 [감시] 로 나간다" \
+             'env -u NINO_AUTOSEND "$@"' "$(LC_ALL=C grep -nE '^\s+.*"\$@" >> "\$LOG"' "$WD")"
+    # 🧪 실행 대조군 — 문자열만 보면 「적혀 있다」와 「그렇게 «돈다»」가 안 갈린다.
+    #    wd_restart 만 떼어내 진짜로 돌린다.
+    cat > "$WORK/wdprobe.sh" <<'PROBE'
+export NINO_AUTOSEND=1
+LOG=/dev/null
+CLI_DRY_RUN=0
+PROBE
+    LC_ALL=C sed -n '/^wd_restart() {/,/^}/p' "$WD" >> "$WORK/wdprobe.sh"
+    printf 'wd_restart /usr/bin/env sh -c %s\n' \
+      "'printenv NINO_AUTOSEND > \"\$0\" 2>&1 || echo NONE > \"\$0\"' $WORK/inherit.txt" \
+      >> "$WORK/wdprobe.sh"
+    : > "$WORK/inherit.txt"
+    bash "$WORK/wdprobe.sh" >/dev/null 2>&1
+    _inh="$(cat "$WORK/inherit.txt" 2>/dev/null)"
+    if [ -z "$_inh" ]; then
+        echo "  🔸 판정 불가: 프로브가 아무것도 안 적었다 — wd_restart 를 못 떼어냈다"; skip=$((skip + 1))
+    elif [ "$_inh" = "NONE" ]; then
+        ok "🧪 실제로 돌려보니 자식에 변수가 «없다» (문자열이 아니라 동작으로 확인)"
+    else
+        bad "🧪 자식이 변수를 물려받았다 — 벗김이 안 돈다" "NONE" "$_inh"
+    fi
+else
+    echo "  🔸 판정 불가: $WD 가 없다"; skip=$((skip + 1))
+fi
+
+echo
 echo "── ④ 🧪 변이 대조군 — 태그 로직을 빼면 ①이 빨개지나 ──"
 # 항진명제 방지: 이 시험이 «태그 유무»를 실제로 가르는지 그 자리에서 확인한다.
 _mut="$WORK/shim-mut"; sed 's/"\[감시\] \${_args/"${_args/' "$SHIM" > "$_mut"
@@ -129,17 +186,35 @@ exempt_reason() {
 #   `grep -l` 로는 호출자로 잡혔다. (오늘 portability 시험에서 밟은 것과 «같은 병»:
 #   「유도된 분모는 유도식이 «보는 것»만큼만 넓다」.)
 #   ⇒ 주석 줄(`#` 로 시작)을 뺀 뒤에도 남는 파일만 호출자로 센다.
+# 🔴 **`.sh` 만 보면 «셸이 아닌 발신자»를 통째로 놓친다** (룬드 `#166` 리뷰).
+#   실물: `src/health-checker.js:60` 이 `execSync` 로 셔틀을 진짜 부른다(경보 발신). 유도식이
+#   `scripts/*.sh` 만 훑어서 **보이지도 않았다** — 위 「부푼 분모」의 «거울상»이고, 이쪽이
+#   **무음**이라 더 나쁘다(부푼 쪽은 이름이 화면에 뜨기라도 한다).
+#   ⇒ 셸과 JS 를 «둘 다» 훑고, 주석 문법도 언어마다 다르므로 따로 뺀다.
+_strip_comments() {   # $1 = 파일
+    case "$1" in
+        *.js) LC_ALL=C grep -vE '^[[:space:]]*(//|\*|/\*)' "$1" 2>/dev/null ;;
+        *)    LC_ALL=C grep -vE '^[[:space:]]*#' "$1" 2>/dev/null ;;
+    esac
+}
+# 🔸 켜는 «꼴»도 언어마다 다르다 — 셸은 `export NINO_AUTOSEND=`, JS 는 `process.env.NINO_AUTOSEND =`.
+_has_switch() {
+    case "$1" in
+        *.js) LC_ALL=C grep -qE 'process\.env\.NINO_AUTOSEND[[:space:]]*=' "$1" ;;
+        *)    LC_ALL=C grep -qE '^[[:space:]]*export[[:space:]]+NINO_AUTOSEND=' "$1" ;;
+    esac
+}
 CALLERS="$(
-  for _f in "$BOT_DIR"/scripts/*.sh "$BOT_DIR"/scripts/*/*.sh; do
+  for _f in "$BOT_DIR"/scripts/*.sh "$BOT_DIR"/scripts/*/*.sh "$BOT_DIR"/src/*.js; do
       [ -f "$_f" ] || continue
-      LC_ALL=C grep -vE '^[[:space:]]*#' "$_f" 2>/dev/null | LC_ALL=C grep -q 'discord-send' \
+      _strip_comments "$_f" | LC_ALL=C grep -q 'discord-send' \
         && printf '%s\n' "${_f#$BOT_DIR/}"
   done | sort
 )"
 n_all=0; n_on=0; n_ex=0
 for f in $CALLERS; do
     n_all=$((n_all + 1))
-    if LC_ALL=C grep -qE '^[[:space:]]*export[[:space:]]+NINO_AUTOSEND=' "$BOT_DIR/$f"; then
+    if _has_switch "$BOT_DIR/$f"; then
         n_on=$((n_on + 1)); continue
     fi
     why="$(exempt_reason "$f")"
@@ -148,8 +223,14 @@ for f in $CALLERS; do
 done
 echo "  분모 $n_all (켬 $n_on · 면제 $n_ex)"
 [ "$n_all" -gt 0 ] \
-  && ok "분모가 «유도»됐다 — scripts/ 에서 셔틀 호출자 $n_all 개" \
+  && ok "분모가 «유도»됐다 — 셔틀 호출자 $n_all 개 (scripts/*.sh · src/*.js)" \
   || bad "분모 0" "1개 이상" "0 — 유도식이 아무것도 못 봤다(패턴이 낡았나)"
+# 🧪 **분모가 «셸 밖»을 실제로 보나** — `.sh` 만 보던 시절엔 이 확인이 통째로 없었다.
+#   확장자별로 세서, JS 쪽이 0 이면 「JS 를 훑는다」가 말만 남은 상태다.
+n_js=0; for f in $CALLERS; do case "$f" in *.js) n_js=$((n_js + 1)) ;; esac; done
+[ "$n_js" -gt 0 ] \
+  && ok "🧪 셸이 아닌 호출자도 분모에 있다 (JS $n_js 개) — 확장자 축이 살아 있다" \
+  || bad "JS 호출자 0 — 「.js 도 훑는다」가 말만 남았다" "1개 이상" "0"
 
 echo
 echo "── ⑥ 🔴 이음매가 «기본값»이 되지 않았나 — 안 걸면 하드코딩 경로로 간다 ──"

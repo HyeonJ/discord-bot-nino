@@ -49,6 +49,23 @@ export DISCORD_SEND_SHIM_LOG="${DISCORD_SEND_SHIM_LOG:-$BOT_DIR/logs/discord-sen
 if [ -n "${NINO_AUTOSEND:-}" ] && [ "$#" -gt 0 ]; then
     _args=("$@")
     _last=$(( ${#_args[@]} - 1 ))
+    # 🔴 **`--` 를 «실제로» 옵션 끝으로 읽는다** — 안 그러면 아래 진단문이 **거짓말**이 된다.
+    #   실물(룬드 `#166` 리뷰): 안내대로 `-- "- 항목"` 을 써도 마지막 인자만 보므로 같은 rc=2 였고,
+    #   **전송 0건**이었다. 자동 알림이 마크다운 리스트(`- 항목`)로 시작하면 그대로 걸린다.
+    #   🔑 **그때 rc=2 는 「엄격한 실패」가 아니라 «알림이 안 나간 것»이다** — 이 계약이 막으려던
+    #      것은 「무표시 발송」이지 「발송 없음」이 아니다. 출구가 없으면 방향이 뒤집힌다.
+    # 🔸 `--` 는 여기서 «먹는다»(코어에 안 넘긴다) — 코어는 positional 파서라 그대로 주면
+    #   인자 하나로 세어 target·message 가 밀린다. 이 처리는 **자동 발신일 때만** 돈다.
+    _sep=-1
+    for _i in "${!_args[@]}"; do
+        [ "${_args[$_i]}" = "--" ] && { _sep=$_i; break; }
+    done
+    if [ "$_sep" -ge 0 ] && [ "$_sep" -lt "$_last" ]; then
+        _args[$_last]="[감시] ${_args[$_last]}"
+        unset '_args[_sep]'
+        set -- ${_args[@]+"${_args[@]}"}
+        exec "${DISCORD_SEND_BUN:-$BUN}" "${DISCORD_SEND_CORE_CLI:-$CORE_CLI}" "$@"
+    fi
     case "${_args[$_last]}" in
         -*)
             # 🔴 마지막 인자가 «메시지가 아닐 수» 있다(플래그 값 등). 여기서 태그를 «생략»하면
