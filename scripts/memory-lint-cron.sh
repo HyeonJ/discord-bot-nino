@@ -21,6 +21,10 @@
 #    이게 없으면 "cron 이 죽은 상태"가 여전히 무음이다. 묻어두지 않으려고 여기 적는다.
 set -uo pipefail
 
+# 🤝 자동 발신엔 `[감시]` 를 붙인다 — 셔틀이 이 변수를 보고 «모든» 전송에 태그한다.
+#    호출 자리마다 붙이지 않는 이유: 새 전송을 추가해도 자동으로 태그되게(환경에 건다).
+export NINO_AUTOSEND=1
+
 BOT_DIR="${BOT_DIR:-$HOME/discord-bot-nino}"
 LINT="${LINT:-$BOT_DIR/scripts/lint-nino-memory.sh}"
 STATE="${STATE:-$BOT_DIR/logs/memory-lint.state}"

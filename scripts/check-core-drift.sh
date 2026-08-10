@@ -26,6 +26,10 @@
 #        그 뭉치는 계약 마지막 항으로 남긴다 — 버리면 셸이 내는 코드가 갈래 밖으로 샌다.
 set -uo pipefail
 
+# 🤝 자동 발신엔 `[감시]` 를 붙인다 — 셔틀이 이 변수를 보고 «모든» 전송에 태그한다.
+#    호출 자리마다 붙이지 않는 이유: 새 전송을 추가해도 자동으로 태그되게(환경에 건다).
+export NINO_AUTOSEND=1
+
 # 🔴 cron 에서 돌 때 `systemctl --user` 는 이게 없으면 실패한다:
 #    "Failed to connect to bus: No medium found" (2026-07-28 실측)
 #    그러면 MainPID 를 못 구하고 process_behind 가 `?` 가 된다 — 실제로 첫 실전 발동에서 그랬다.

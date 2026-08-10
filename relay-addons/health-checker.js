@@ -74,10 +74,16 @@ function fetchHealth(url) {
 //   *"봇이 아프다"* 를 못 알리고, **그 실패조차 아무도 모른다.**
 //   ⚠️ 던지지는 않는다(검사 루프가 죽으면 감시가 통째로 멈춘다). 대신 **성공 여부를 돌려준다** —
 //     부르는 쪽이 셀 수 있어야 "보냈다"와 "보내려다 실패했다"가 갈린다.
+// 🤝 자동 발신엔 `[감시]` 를 붙인다 — 셔틀이 `NINO_AUTOSEND` 를 보고 태그한다.
+// 🔴 **모듈 최상위가 아니라 «발송 자리»에 건다** (룬드 `#166` 리뷰). 최상위에서 `process.env` 를
+//    쓰면 이 모듈을 require 하는 «누구든» 프로세스 전역이 바뀌는데, addon 은 **본체 relay
+//    프로세스에 로드**되므로 그러면 **본체 발신까지 태그된다.** watchdog 과 같은 「경계를
+//    넘는다」이고, 이쪽은 자식이 아니라 **같은 프로세스**라 `env -u` 로도 못 막는다.
 function sendAlert(message, dmChannel) {
   try {
     const escaped = message.replace(/'/g, "'\\''");
-    execSync(`${discordSendBin()} ${dmChannel} '${escaped}'`);
+    execSync(`${discordSendBin()} ${dmChannel} '${escaped}'`,
+             { env: { ...process.env, NINO_AUTOSEND: '1' } });
     return true;
   } catch (e) {
     console.error('[health-checker] alert send failed:', e.message);
