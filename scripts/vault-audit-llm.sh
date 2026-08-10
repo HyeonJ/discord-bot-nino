@@ -12,6 +12,9 @@
 
 set -euo pipefail
 
+# 🔑 모델 id 는 `config/models.sh` 한 곳에서만 온다 — 사본이 둘이면 한쪽만 고쳐지고
+#    다른 쪽이 조용히 낡는다(2026-08-10 실물: 두 스크립트가 같은 옛 이름에 멈춰 있었다).
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/config/models.sh"
 VAULT_DIR="${VAULT_DIR:-$HOME/obsidian-vault}"
 WIKI_DIR="$VAULT_DIR/wiki"
 CLAUDE_BIN="${CLAUDE_BIN:-claude}"
@@ -75,7 +78,7 @@ for tag in "${!TAG_NOTES[@]}"; do
 
 ${bundle}"
 
-    verdict=$(source ~/.nvm/nvm.sh 2>/dev/null; cd /tmp && "$CLAUDE_BIN" -p "$prompt" --model claude-sonnet-4-6 --dangerously-skip-permissions 2>/dev/null || echo "(판정 실패)")
+    verdict=$(source ~/.nvm/nvm.sh 2>/dev/null; cd /tmp && "$CLAUDE_BIN" -p "$prompt" --model "$NINO_MODEL_SONNET" --dangerously-skip-permissions 2>/dev/null || echo "(판정 실패)")
     verdict=$(echo "$verdict" | sed '/^```/d')
 
     # "모순 없음" 뒤 마침표/공백 허용 (LLM이 '모순 없음.' 등으로 답해도 오탐 안 나게)

@@ -123,7 +123,8 @@ discord-bot-nino/
 - 명령어: `source ~/.nvm/nvm.sh && claude -p "작업내용" --model <모델> --dangerously-skip-permissions`
 - 모델 선택 기준:
   - **Haiku** (`claude-haiku-4-5-20251001`): 간단한 검색, 파일 읽기, 짧은 작업
-  - **Sonnet** (`claude-sonnet-4-6`): 복잡한 코딩, 멀티스텝 작업, 판단이 필요한 작업
+  - **Sonnet** (`claude-sonnet-5`): 복잡한 코딩, 멀티스텝 작업, 판단이 필요한 작업
+  - 🔑 스크립트에서 부를 땐 값을 다시 적지 말 것 — `config/models.sh` 를 source 해서 `$NINO_MODEL_SONNET` 을 쓴다(`tests/model-names-single-source.test.sh` 가 사본을 막는다)
 
 ## YouTube Music 재생 규칙
 - 재생 요청 시 **항상** 셔플 + 반복("모두 반복") 활성화할 것
