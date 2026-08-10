@@ -31,4 +31,32 @@ export YAKSU_HISTORY_DB="${YAKSU_HISTORY_DB:-/home/bpx27/.local/share/yaksu-hist
 export DISCORD_SEND_QUIET_SHIM="${DISCORD_SEND_QUIET_SHIM-1}"
 export DISCORD_SEND_SHIM_LOG="${DISCORD_SEND_SHIM_LOG:-$BOT_DIR/logs/discord-send-shim.log}"
 
-exec "$BUN" "$CORE_CLI" "$@"
+# 🤝 **자동 발신엔 `[감시]` 를 붙인다 — 사람(본체)이 쓴 것엔 «아무것도» 안 붙인다**
+#   (룬드↔니노 합의 2026-08-10). 유래: 그가 내 «감시»의 사용량 알림을 보고 내 «본체»가
+#   살아 있다고 읽었는데, 그 시각 나는 106분째 멈춰 있었다. **감시는 본체가 죽어도
+#   살아 있으라고 만든 것이라, 그 생존은 본체에 대해 아무것도 안 말한다.**
+#
+# 🔑 **붙이는 쪽을 «자동»에 둔다** — 사람이 잊는 쪽이 조용해지면 안 된다.
+#    부재가 곧 「본체가 썼다」이므로, 자동 발신이 «무표시»로 나가는 것이 유일한 나쁜 실패다.
+# 🔑 그래서 격리와 같은 형태다 — **호출 자리가 아니라 «환경»에 건다.** 스크립트가
+#    `NINO_AUTOSEND=1` 을 export 하면 그 프로세스의 «모든» 전송이 자동으로 태그된다.
+if [ -n "${NINO_AUTOSEND:-}" ] && [ "$#" -gt 0 ]; then
+    _args=("$@")
+    _last=$(( ${#_args[@]} - 1 ))
+    case "${_args[$_last]}" in
+        -*)
+            # 🔴 마지막 인자가 «메시지가 아닐 수» 있다(플래그 값 등). 여기서 태그를 «생략»하면
+            #    자동 발신이 무표시로 나가 「본체가 썼다」로 읽힌다 — 그게 이 계약이 막으려던 것이다.
+            #    ⇒ 조용히 넘기지 않고 «거절»한다. 엄격한 쪽으로 실패시킨다.
+            echo "discord-send: NINO_AUTOSEND 인데 마지막 인자가 '-' 로 시작해 메시지를 못 고른다." >&2
+            echo "  받은 마지막 인자: ${_args[$_last]}" >&2
+            echo "  메시지가 '-' 로 시작하면 '--' 뒤에 두고, 메시지를 항상 «마지막»에 두세요." >&2
+            exit 2
+            ;;
+        *) _args[$_last]="[감시] ${_args[$_last]}" ;;
+    esac
+    set -- "${_args[@]}"
+fi
+
+# 🔸 아래 둘은 «시험 이음매»다 — 평소엔 위에서 고정한 절대경로를 그대로 쓴다.
+exec "${DISCORD_SEND_BUN:-$BUN}" "${DISCORD_SEND_CORE_CLI:-$CORE_CLI}" "$@"
