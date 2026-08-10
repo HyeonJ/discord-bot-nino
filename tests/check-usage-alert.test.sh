@@ -71,6 +71,29 @@ if [ ! -d "$OPSTATE_DIR" ]; then
     mkdir -p "$OPSTATE_DIR" 2>/dev/null && OPSTATE_DIR_MADE=1
 fi
 
+# 🔴 **디렉터리를 만든 것으로는 «부족했다» — 새는 쪽은 «파일»이다** (2026-08-10 실측, `#163` 후속).
+#   격리(전역 export 두 줄)를 뺀 사본으로 두 세계를 재니 **A 만 잡히고 B 는 0건**이었다:
+#   ```
+#   세계 B  logs/ 없음(시험이 만듦) · 상태 파일 없음   → 실패 0   ← CI 가 정확히 이 세계다
+#   세계 A  logs/ 있음 · 상태 파일 «있음»              → 실패 1   ← ⑮ 「운영 상태 오염」
+#   ```
+#   범인은 **band 상태 하나**다(`band.state` 가 `ok<TAB>1786363947` 로 덮였다. verdict 는 무사).
+#   기전: 그 스크립트는 **구간 «전이»일 때만** band 를 쓰는데, 전이는 «직전 값»이 있어야 성립한다
+#   ⇒ **선행 상태가 없으면 누수가 «일어나지 않는다».** 실행 후 `logs/` 가 `rmdir` 로 지워진 것이
+#   그 증거다(빈 디렉터리였다).
+#   🔑 그래서 `#163` 은 **반쪽을 고쳤다** — 「쓸 자리(디렉터리)」는 만들었는데 「덮을 것(파일)」이 없어
+#      CI 에서 ⑮ 는 여전히 항진명제였다. **「잴 수 있는 세계를 만들고 잰다」를 한 겹 더** 적용한다.
+#   ⚠️ 있는 파일은 **절대 안 건드린다** — 없을 때만 심고, 심은 것만 지운다.
+OPSTATE_V="$OPSTATE_DIR/check-usage-verdict.state"
+OPSTATE_B="$OPSTATE_DIR/check-usage-band.state"
+OPSTATE_SEEDED=""
+for _f in "$OPSTATE_V" "$OPSTATE_B"; do
+    if [ ! -e "$_f" ]; then
+        printf 'SEED-시험이-심음\n' > "$_f" 2>/dev/null \
+          && OPSTATE_SEEDED="$OPSTATE_SEEDED$_f "
+    fi
+done
+
 opstate_fp() {   # 두 운영 상태 파일의 지문. 없으면 «없음»
     local f out=""
     for f in "$OPSTATE_DIR/check-usage-verdict.state" "$OPSTATE_DIR/check-usage-band.state"; do
@@ -733,14 +756,40 @@ echo "── ⑮ 🔴 시험이 «운영 상태»를 안 건드린다 (격리를
 # 🔴 **전제 먼저 — 「잴 수 있는 세계였나」.** 이게 없으면 아래 초록은 「안 샜다」가 아니라
 #   「샐 자리가 없었다」를 뜻하고, 그 둘은 다른 사실이다(룬드 `#162` 실측).
 [ -d "$OPSTATE_DIR" ] \
-  && ok "전제: 운영 상태를 «쓸 수 있는» 자리가 있다 ($OPSTATE_DIR)" \
+  && ok "전제 ⓐ: 운영 상태를 «쓸 수 있는» 자리가 있다 ($OPSTATE_DIR)" \
   || bad "⑮ 전제 불성립" "$OPSTATE_DIR 존재" "없음 — 아래 초록은 아무 뜻이 없다"
+
+# 🔴 **전제 ⓑ — 「덮을 것이 있나」.** 디렉터리만 있고 «파일»이 없으면 누수가 «일어나지 않는다»
+#   (band 는 구간 전이일 때만 쓰고, 전이는 직전 값이 있어야 성립한다). 실측으로 확인한 축이다.
+[ -e "$OPSTATE_V" ] && [ -e "$OPSTATE_B" ] \
+  && ok "전제 ⓑ: 덮일 «선행 상태»가 둘 다 있다 — 누수가 일어날 수 있는 세계다" \
+  || bad "⑮ 전제 불성립 — 덮을 것이 없다" "상태 파일 둘" "$(opstate_fp)"
+
+# 🔴 **씨앗이 «스크립트가 쓰는 그 자리»인가 — 경로를 여기 다시 적지 않고 «뽑아»온다.**
+#   딴 데 심으면 전제 ⓑ 는 초록인데 누수는 여전히 안 보인다(가장 나쁜 조합: 대비했다는 착각).
+#   🔑 `#167` 과 같은 처방이고 같은 함정이다 — 주석 줄을 먼저 뺀 뒤 «코드»에서 뽑는다.
+_derive_state() {   # $1 = 변수명
+    local raw
+    raw="$(LC_ALL=C grep -vE '^[[:space:]]*#' "$REPO/scripts/check-usage-alert.sh" \
+           | LC_ALL=C sed -n "s/.*\${$1:-\([^}]*\)}.*/\1/p" | head -1)"
+    printf '%s' "${raw//\$BOT_DIR/$REPO}"
+}
+_dv="$(_derive_state CHECK_USAGE_STATE)"; _db="$(_derive_state CHECK_USAGE_BAND_STATE)"
+if [ -z "$_dv" ] || [ -z "$_db" ]; then
+    bad "스크립트에서 기본 상태 경로를 «못 뽑았다» — 씨앗이 맞는 자리인지 모른다" "두 경로" "v='$_dv' b='$_db'"
+elif [ "$_dv" = "$OPSTATE_V" ] && [ "$_db" = "$OPSTATE_B" ]; then
+    ok "  → 씨앗 자리 = 스크립트의 기본 경로 (유도해서 대조했다)"
+else
+    bad "씨앗을 «딴 데» 심었다 — 전제 ⓑ 가 초록이어도 누수는 안 보인다" "$OPSTATE_V · $OPSTATE_B" "$_dv · $_db"
+fi
 
 OPSTATE_AFTER="$(opstate_fp)"
 [ "$OPSTATE_BEFORE" = "$OPSTATE_AFTER" ] \
   && ok "운영 상태 파일이 시험 전후로 같다" \
   || bad "운영 상태 오염" "$OPSTATE_BEFORE" "$OPSTATE_AFTER"
 
+# 🔸 우리가 «심은» 것만 지운다 — 있던 파일은 손대지 않는다.
+for _f in $OPSTATE_SEEDED; do rm -f "$_f"; done
 # 🔸 우리가 만든 디렉터리면 돌려놓는다 — 시험이 트리에 «흔적»을 남기지 않는다.
 #   비어 있을 때만 지운다(누가 그 사이에 쓴 것을 지우면 그게 새 오염이다).
 [ -n "$OPSTATE_DIR_MADE" ] && rmdir "$OPSTATE_DIR" 2>/dev/null
