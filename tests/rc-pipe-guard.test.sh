@@ -27,10 +27,22 @@ bad() { echo "  ❌ $1"; [ -n "${2:-}" ] && echo "     want rc=$2  got rc=$3"; f
 
 [ -f "$GUARD" ] || { echo "❌ 없음: $GUARD"; exit 1; }
 
+# 🔴 시험이 «운영» 로그를 쓰지 않게 격리한다. 안 하면 이 파일을 한 번 돌릴 때마다
+#   BLOCK 이 20여 줄 쌓여 「오늘 몇 번 막혔나」가 «시험 횟수»가 된다 — 세려고 만든 계측기를
+#   세는 행위 자체가 오염시킨다. (`#157` 에서 같은 누수를 잡았다: 시험이 운영 상태 파일을 썼다)
+#   🔑 격리는 «헬퍼»가 아니라 «환경»에 건다 — 헬퍼에만 걸면 헬퍼를 안 쓰는 호출이 샌다.
+#      실제로 ⑥ 절이 `bash "$GUARD"` 를 직접 불러 «운영 로그에 한 줄을 남겼다»(이 절을 쓰다 발견).
+_T="$(mktemp -d)"; trap 'rm -rf "$_T"' EXIT
+export RC_PIPE_GUARD_LOG="$_T/scratch.log"
+OPLOG="${HOME}/discord-bot-nino/logs/rc-pipe-guard.log"
+OPLOG_BEFORE="$([ -f "$OPLOG" ] && wc -l < "$OPLOG" || echo 0)"
+
 # PreToolUse 페이로드를 만들어 먹인다 (기존 가드들과 같은 계약: stdin JSON, exit 2 = 차단)
-run() {
+run() { run_in "$_T/scratch.log" "$1"; }
+run_in() {
+  local log="$1"; shift
   printf '%s' "$1" | python3 -c 'import json,sys; print(json.dumps({"tool_name":"Bash","tool_input":{"command":sys.stdin.read()}}))' \
-    | bash "$GUARD" >/dev/null 2>&1
+    | RC_PIPE_GUARD_LOG="$log" bash "$GUARD" >/dev/null 2>&1
   echo $?
 }
 blocks()  { local rc; rc="$(run "$2")"; [ "$rc" = "2" ] && ok "$1" || bad "$1" 2 "$rc"; }
@@ -132,6 +144,46 @@ rc="$(printf '%s' '{"tool_name":"Edit","tool_input":{"file_path":"/tmp/x"}}' | b
 [ "$rc" = "0" ] && ok "Edit 페이로드는 통과" || bad "Edit 에 관여" 0 "$rc"
 rc="$(printf '%s' 'not json at all' | bash "$GUARD" >/dev/null 2>&1; echo $?)"
 [ "$rc" = "0" ] && ok "파싱 불가는 통과 (가드가 도구를 못 쓰게 만들면 안 된다)" || bad "파싱 실패 시 차단" 0 "$rc"
+
+echo
+echo "⑧ 🔑 차단을 «셀 수 있나» — 이게 없으면 이 가드의 효과가 일화로만 남는다"
+# 🔴 왜 생겼나 (2026-08-10): 룬드의 Tim 보고에 「오늘 세 번 막혔다」를 보태놓고 «세지 않고»
+#   말했다. 보낼 땐 2건이었고 3분 뒤에 3건이 돼서 «늦게» 참이 됐다. 재셀 유일 경로가
+#   내 세션 jsonl 이었는데, 그건 압축되면 사라지고 «남이 검산할 수도 없다».
+#   ⇒ 가드가 스스로 세지 못하면 ⏱️「칸의 효과는 채택 시각 이후 사례로만 센다」를 실행할 수단이 없다.
+LOGF="$_T/blocked.log"
+rc="$(run_in "$LOGF" 'git commit -F m.txt a.sh | tail -2 && git push')"
+n="$([ -f "$LOGF" ] && wc -l < "$LOGF" || echo 0)"
+[ "$rc" = "2" ] && [ "$n" -eq 1 ] \
+  && ok "차단하면 로그가 «한 줄» 늘어난다" \
+  || bad "차단이 안 세어진다 (rc=$rc · ${n}줄)" 2 "$rc"
+
+# 🔑 한 줄이어야 한다 — 여러 줄이면 `wc -l` 이 «건수»가 아니게 되고, 세는 방법이 조용히 틀린다.
+grep -q '	BLOCK	' "$LOGF" 2>/dev/null \
+  && ok "형식이 «시각 TAB BLOCK TAB 사유» 한 줄이다" \
+  || bad "로그 형식이 계약과 다르다 — 세는 쪽이 파싱 못 한다" "BLOCK 행" "$(cat "$LOGF" 2>/dev/null)"
+
+# 🧪 대조군 — 「막을 때만」 적나. 없으면 «늘 적는 것»과 구별이 안 되고 건수가 통과까지 센다.
+CTRL="$_T/passed.log"
+rc="$(run_in "$CTRL" 'git push origin main | tail -3')"
+{ [ "$rc" = "0" ] && [ ! -s "$CTRL" ]; } \
+  && ok "[대조군] 통과한 명령은 «안» 적는다 (건수가 통과까지 세지 않는다)" \
+  || bad "통과도 로그에 남는다 — 건수가 «차단 수»가 아니게 된다 (rc=$rc)" 0 "$rc"
+
+# 🔴 실패 방향 — 로그를 못 써도 «차단은 그대로» 한다. 계측이 안 된다고 조용히 통과하면
+#   가드가 로그 경로 하나로 통째로 무력화된다.
+rc="$(run_in /proc/nonexistent-dir/x.log 'git commit -F m.txt a.sh | tail -2 && git push')"
+[ "$rc" = "2" ] \
+  && ok "로그를 못 써도 차단한다 (계측 실패가 가드를 끄지 않는다)" \
+  || bad "로그 경로가 막히면 가드가 통과시킨다 — 우회로다" 2 "$rc"
+
+# 🔴 좌변을 «운영 로그»에 둔다 — 위 격리가 실제로 도는지는 그 파일이 안 늘었을 때만 안다.
+#   시험 안에서만 확인하면 「격리했다고 적었다」와 「격리됐다」가 구별이 안 된다.
+OPLOG_AFTER="$([ -f "$OPLOG" ] && wc -l < "$OPLOG" || echo 0)"
+[ "$OPLOG_AFTER" = "$OPLOG_BEFORE" ] \
+  && ok "이 시험이 «운영» 로그를 안 건드렸다 (${OPLOG_BEFORE}줄 그대로 — 건수가 시험 횟수로 안 오염된다)" \
+  || bad "시험이 운영 로그를 늘렸다 — 「오늘 몇 번 막혔나」가 «시험 횟수»가 된다" \
+        "${OPLOG_BEFORE}줄" "${OPLOG_AFTER}줄"
 
 echo
 echo "  통과 $pass · 실패 $fail"

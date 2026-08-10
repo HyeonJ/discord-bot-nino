@@ -168,4 +168,16 @@ cat >&2 <<EOF
    ✅ 또는 같은 호출 안에서 \`set -o pipefail\` 을 켜세요.
    (근거: skill shell-git-procedure 1번 · 관찰만 할 거면 \`&&\` 를 떼면 통과합니다)
 EOF
+
+# ── 차단을 «센다». 이게 없으면 이 가드의 효과가 영원히 «일화»로만 남는다.
+#   🔴 실물(2026-08-10): 룬드의 Tim 보고에 「오늘 세 번 막혔다」를 보태놓고 «세지 않고» 말했다.
+#      재셀 유일 경로가 내 세션 jsonl 이었고, 그건 압축되면 사라지고 남이 검산할 수도 없다.
+#   🔑 ⏱️ 「칸의 효과는 채택 시각 이후 사례로만 센다」는 «셀 수단»이 있어야 실행된다.
+#   ⚠️ 실패 방향은 이 파일의 나머지와 같다 — 로그를 못 써도 **차단은 그대로 한다**(조용히 통과 X).
+_log="${RC_PIPE_GUARD_LOG:-$HOME/discord-bot-nino/logs/rc-pipe-guard.log}"
+if mkdir -p "$(dirname "$_log")" 2>/dev/null; then
+    # 한 줄로 접는다 — 여러 줄이면 `wc -l` 이 건수가 아니게 된다.
+    printf '%s\tBLOCK\t%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" \
+        "$(printf '%s' "$verdict" | tr '\n\t' '  ')" >> "$_log" 2>/dev/null || true
+fi
 exit 2
