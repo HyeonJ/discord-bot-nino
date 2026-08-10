@@ -32,6 +32,15 @@ if [ -z "$LEDGER" ]; then
     exit 2
 fi
 ok "게이트가 가리키는 원장: ${LEDGER#"$ROOT/"}"
+
+# 라벨도 «소스에서» 뽑는다 — 시험에 「니노」를 또 적으면 사본이 둘이 돼 따로 낡는다.
+REPO_LABEL="$(env -u REPO_LABEL -u MERGE_REPO_LABEL bash -uc "
+    $(grep -m1 -E '^REPO_LABEL=' "$GATE")
+    printf '%s' \"\${REPO_LABEL}\"" 2>/dev/null)"
+if [ -z "$REPO_LABEL" ]; then
+    echo "⛔ 판정 불가 — 게이트에서 레포 라벨 대입문을 못 찾았다. 변수 이름이 바뀌었을 수 있다"
+    exit 2
+fi
 [ -f "$LEDGER" ] && ok "그 원장이 실재한다" \
   || bad "게이트가 «없는 파일»을 가리킨다" "$LEDGER 존재" "없음"
 
@@ -42,7 +51,15 @@ out="$(LEDGER_MODE_SH=/nonexistent/ledger-mode.sh bash "$GATE" 2>&1)"; rc=$?
   || bad "도구 부재가 조용히 넘어간다" "rc=2 + '판정 불가'" "rc=${rc} + ${out}"
 
 _t="$(mktemp -d)"; trap 'rm -rf "$_t"' EXIT
-printf '#!/bin/sh\nexit 0\n' > "$_t/fake-tool.sh"
+# 🔑 가짜 도구는 «받은 인자를 적는다». 이게 없으면 래퍼가 `--ledger`·`--repo-label`·`"$@"` 를
+#   통째로 안 넘겨도 전부 초록이다 — ①② 는 `exec` «앞»의 검사고, 대조군은 rc 만 본다.
+#   래퍼의 존재 이유가 그 두 값을 박아두는 것뿐이라, 안 넘기면 래퍼는 빈 껍데기다.
+cat > "$_t/fake-tool.sh" <<EOF
+#!/bin/sh
+: > "$_t/args"
+for a in "\$@"; do printf '%s\n' "\$a" >> "$_t/args"; done
+exit 0
+EOF
 out="$(LEDGER_MODE_SH="$_t/fake-tool.sh" MERGE_LEDGER=/nonexistent/ledger.md bash "$GATE" 2>&1)"; rc=$?
 { [ "$rc" -eq 2 ] && printf '%s\n' "$out" | grep -q '판정 불가'; } \
   && ok "원장이 없으면 rc=2 «판정 불가»" \
@@ -53,6 +70,35 @@ out="$(LEDGER_MODE_SH="$_t/fake-tool.sh" MERGE_LEDGER=/nonexistent/ledger.md bas
 out="$(LEDGER_MODE_SH="$_t/fake-tool.sh" bash "$GATE" 2>&1)"; rc=$?
 [ "$rc" -eq 0 ] && ok "[대조군] 둘 다 있으면 통과한다 (늘 2 를 내는 게 아니다)" \
   || bad "[대조군] 도구·원장이 다 있는데도 안 통과한다 — 위 rc=2 는 못 믿는다" "rc=0" "rc=${rc} + ${out}"
+
+# ── ③ 래퍼가 두 값을 «실제로» 넘기나 (위 rc=0 은 이걸 못 가른다).
+argv_at() { awk -v k="$1" '$0==k {if (getline > 0) print; exit}' "$_t/args"; }
+if [ ! -f "$_t/args" ]; then
+    bad "가짜 도구가 실행되지 않았다 — 인자 검사는 판정 불가" "인자 기록" "없음"
+else
+    got="$(argv_at --ledger)"
+    [ "$got" = "$LEDGER" ] && ok "래퍼가 --ledger 를 원장 경로로 넘긴다" \
+      || bad "래퍼가 --ledger 를 안 넘긴다(또는 다른 값)" "$LEDGER" "${got:-없음}"
+    got="$(argv_at --repo-label)"
+    [ "$got" = "$REPO_LABEL" ] && ok "래퍼가 --repo-label 을 넘긴다: $got" \
+      || bad "래퍼가 --repo-label 을 안 넘긴다(또는 다른 값)" "$REPO_LABEL" "${got:-없음}"
+    # 🔑 좌변을 «원장»에 둔다 — 라벨을 소스에서 뽑아 소스와 대보면 항진명제라, 라벨이
+    #   조용히 딴 레포로 바뀌어도 둘이 같이 움직여 초록이다. 실제로 물어야 할 것은
+    #   「그 라벨로 읽을 행이 이 원장에 «있나»」다.
+    nrow="$(grep -c "^| *${got} *|" "$LEDGER" || true)"
+    [ "${nrow:-0}" -ge 1 ] && ok "그 라벨로 읽을 행이 원장에 ${nrow}개 있다" \
+      || bad "래퍼가 «이 원장에 없는» 라벨을 넘긴다 — 늘 빈 원장을 읽는다" "행 ≥1" "${got:-없음} 0행"
+fi
+
+# ── ④ 손으로 준 인자가 «그대로» 도구까지 가나 (`"$@"` 를 떨구면 게이트가 조회 전용이 된다).
+out="$(LEDGER_MODE_SH="$_t/fake-tool.sh" bash "$GATE" --unknown 11 2>&1)"; rc=$?
+if [ "$rc" -ne 0 ]; then
+    bad "인자를 주면 게이트가 죽는다 — 통과 검사가 판정 불가" "rc=0" "rc=${rc} + ${out}"
+elif [ "$(argv_at --unknown)" = "11" ]; then
+    ok "게이트에 준 인자가 도구까지 그대로 간다"
+else
+    bad "게이트가 뒤에 붙인 인자를 떨군다 — 조회만 되고 «기록»이 안 된다" "--unknown 11" "$(tr '\n' ' ' < "$_t/args")"
+fi
 
 # ── ② 원장 표가 «한 벌»인가. 표의 경계는 내용이 아니라 «모양»이라,
 #   빈 줄로 끊긴 행은 어느 표에도 안 붙어 파서가 아예 안 본다(`#148` 실물).
@@ -67,11 +113,16 @@ nh="$(grep -c '^| 레포 |' "$LEDGER" || true)"
   || bad "원장 머리글이 한 벌이 아니다 — 「마지막 행」이 어느 표의 것인지 안 정해진다" "1벌" "${nh}벌"
 
 # 고아 행 — 데이터 행 «사이»에 빈 줄이 끼면 그 아래는 다른 표다.
+# 🔑 좌변을 «니노 라벨»에 걸지 않는다 — 라벨을 박아두면 오타 난 라벨·남의 라벨로 떨어진 행이
+#   고아여도 안 보인다. 표 밖에 뜬 «파이프로 시작하는 줄» 전부가 좌변이다.
+#   (코드펜스 안은 뺀다 — 거긴 마크다운 표가 아니라 본문이다.)
 orphan="$(awk '
+    /^```/ {fence = !fence; next}
+    fence {next}
     /^\| 레포 \|/ {intbl=1; next}
-    intbl && /^\|/ {last=NR; next}
-    intbl && !/^\|/ {intbl=0; next}
-    /^\| *니노 *\|/ && !intbl {print NR}
+    intbl && /^\|/ {next}
+    intbl {intbl=0}
+    /^\|/ {print NR}
 ' "$LEDGER" | tr '\n' ' ')"
 [ -z "$orphan" ] && ok "표 밖에 떠 있는 데이터 행이 없다" \
   || bad "고아 행이 있다 — 앞에 빈 줄이 끼면 파서가 그 행을 안 본다" "0줄" "L${orphan}"
