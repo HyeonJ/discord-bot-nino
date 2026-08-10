@@ -445,24 +445,11 @@ else:
     if n:
         problems.append(f"iso_off 밖에서 GNU date -d {n}곳 (BSD 에선 빈 시각이 된다)")
 
-# ② 빈 배열 확장: 안전형 ${a[@]+"${a[@]}"} 를 먼저 지우고 남은 맨 확장을 센다
-code = "\n".join(l for l in script_src.splitlines() if not l.lstrip().startswith("#"))
-safe = re.sub(r'\$\{(\w+)\[@\]\+"\$\{\1\[@\]\}"\}', "", code)
-bare = re.findall(r'\$\{(\w+)\[@\]\}', safe)
-if bare:
-    problems.append(f'맨 ${{{bare[0]}[@]}} 확장 {len(bare)}곳 — bash 3.2 + set -u 에서 unbound')
-
-# ③ bash 4+ 전용 빌트인/문법 — 3.2 엔 없다. 🔴 이 축은 2026-07-29 에 **가드가 놓쳤다**:
-#    `mapfile` 이 있는 블록이 룬드 맥에서 fail 도 skip 도 아니고 **통째로 안 세어졌고**,
-#    통과 수만 보면 아무 이상이 없었다(62 vs 64 를 대조해야만 드러났다).
-#    ⇒ 가드는 *내가 아는 함정*만 잡는다. 축을 하나씩 늘려도 상호 실행을 대체하지 못한다.
-for name, pat in (("mapfile/readarray", r'\b(mapfile|readarray)\b'),
-                  ("연관배열 declare -A", r'declare\s+-A\b'),
-                  ("대소문자 확장 ${x^^}/${x,,}", r'\$\{[A-Za-z_][A-Za-z0-9_]*(\^\^|,,)\}')):
-    for src, where in ((test_src, "시험"), (script_src, "스크립트")):
-        body = "\n".join(l for l in src.splitlines() if not l.lstrip().startswith("#"))
-        if re.search(pat, body):
-            problems.append(f"{where}에 bash 4+ 전용 {name}")
+# 🔴 ②③ (맨 `${a[@]}` · bash 4+ 전용 문법)는 `tests/lib/portability-guard.sh` 로 **이사했다**
+#    (2026-08-10). 여기 있을 땐 분모가 **이 파일 + catchup-hint.sh 둘**뿐이라,
+#    같은 함정이 다른 시험 파일에 생기면 조용히 통과했다.
+#    🔑 판별식은 맞았는데 «분모»가 명제에 안 맞았다 — 새 집의 분모는
+#       `tests/*.sh` 전부 + 시험이 호출하는 `scripts/` 다.
 
 # ④ 러너가 대상의 stderr 를 **합치거나 버리지** 않는다 (2026-07-29, 양봇이 대칭으로 밟음)
 #    합치면: 에러가 정상 출력처럼 세어져 판정이 통과하면 영영 안 보인다  ← 이 파일이 그랬다

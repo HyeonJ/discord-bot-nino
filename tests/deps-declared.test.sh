@@ -27,7 +27,10 @@ bad() { echo "  ❌ $1"; fail=$((fail + 1)); [[ -n "${2:-}" ]] && printf '%s\n' 
 SCAN_DIRS=(src media relay-addons of scripts tools tests)
 
 mods="$(
-  for d in "${SCAN_DIRS[@]}"; do
+  # 🔸 안전형 — bash 3.2 + set -u 는 «빈» 배열의 맨 확장에서 unbound 로 죽는다.
+  #   이 배열은 리터럴이라 빌 일이 없지만, 가드는 자료흐름을 안 본다(그게 그 도구의 한계로
+  #   머리말에 적혀 있다). 처방이 무해하니 엄격한 쪽을 고른다.
+  for d in "${SCAN_DIRS[@]+"${SCAN_DIRS[@]}"}"; do
     [[ -d "$d" ]] || continue
     grep -rhoE "require\('[^']+'\)" "$d" --include="*.js" 2>/dev/null
   done \
@@ -50,7 +53,7 @@ while read -r m; do
   [[ -z "$m" ]] && continue
   [[ "$m" == bun:* ]] && continue
   grep -qxF "$m" <<<"$builtins" && continue
-  grep -qxF "$m" <<<"$declared" || undeclared+="  $m — $(grep -rl "require('$m')" "${SCAN_DIRS[@]}" --include='*.js' 2>/dev/null | head -2 | tr '\n' ' ')"$'\n'
+  grep -qxF "$m" <<<"$declared" || undeclared+="  $m — $(grep -rl "require('$m')" "${SCAN_DIRS[@]+"${SCAN_DIRS[@]}"}" --include='*.js' 2>/dev/null | head -2 | tr '\n' ' ')"$'\n'
   node -e "require.resolve('$m')" >/dev/null 2>&1 || unresolvable+="  $m"$'\n'
 done <<<"$mods"
 

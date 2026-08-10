@@ -271,9 +271,11 @@ bash -n "$CHECK" 2>/dev/null && ok "bash -n 통과 (이 기계)" || bad "문법 
 code_only() { LC_ALL=C grep -v '^[[:space:]]*#' "$1" | LC_ALL=C sed -e 's/\\\$//g' -e 's/<<<//g'; }
 # ⚠️ 이스케이프된 `\$VAR»` 는 «말하는 줄»이라 확장되지 않는다 — 주석 제외(#149)와 같은 축의
 #   오탐이므로 같이 뺀다. 안 빼면 이 판별식을 «설명하는 실패 메시지»가 스스로를 울린다.
-nGU="$(code_only "$CHECK" | LC_ALL=C grep -c '\$[A-Za-z_][A-Za-z0-9_]*»' || true)"
-[ "${nGU:-0}" -eq 0 ] && ok "중괄호 없이 » 가 붙는 변수 참조가 없다 (3.2 가 »의 첫 바이트를 식별자로 먹는다)" \
-  || bad "중괄호 없는 \$VAR» — 맥 bash 3.2 가 unbound variable 로 죽는다" "0건" "${nGU}건"
+# 🔴 `$VAR»` 판별식은 `tests/lib/portability-guard.sh` 로 «이사»했다 (2026-08-10).
+#   여기 있을 땐 분모가 `$CHECK` **한 파일**이었고, 그래서 `#153` 의 `«$want_msg»` 가
+#   **판별식이 이 레포에 있는 채로** 룬드 맥에서 죽었다. 판별식이 아니라 «분모»가 문제였다.
+#   ⇒ 분모가 명제(「모든 시험이 상대 봇 기계에서 돈다」)에 맞는 집으로 옮기고 여기선 지운다.
+#     사본을 남기면 셋째가 따로 낡는다.
 # ⚠️ `<<<`(herestring)는 **재스캔과 무관**한데 `<<` 패턴에 걸린다 — 룬드 코퍼스에서 오탐 4곳
 #   (판별식 오탐 네 번째 형태). 내 코퍼스엔 0건이지만 **없다고 판별식이 맞는 건 아니다.**
 nHD="$(code_only "$CHECK" | LC_ALL=C grep -c '\$(.*<<' || true)"
@@ -288,10 +290,8 @@ printf 'X="$(python3 - <<%sPY\nprint(1)\nPY\n)"\n' "'" > "$W/hd-probe.sh"
 # 🔴 **이스케이프 층엔 대조군이 없었다**(룬드 질문 ②, 08-02). 지금까지 이 층은 checker 자기
 #   내용으로만 «우연히» 밟혔다 — 픽스처가 없으면 sed 를 망가뜨려도 초록이다.
 #   ⇒ 한 파일에 «진짜 1 + 이스케이프 1»을 같이 두어 **양방향**을 한 번에 잰다.
-{ printf 'real() { echo "«$REAL»"; }\n'; printf 'msg="\\$VAR» 는 설명일 뿐"\n'; } > "$W/esc-probe.sh"  # hygiene:allow-nonascii — 이 줄은 «미끼»다. 고치면 양성 대조군이 죽는다
-nE="$(code_only "$W/esc-probe.sh" | LC_ALL=C grep -c '\$[A-Za-z_][A-Za-z0-9_]*»' || true)"
-[ "${nE:-0}" -eq 1 ] && ok "  이스케이프 대조군: 진짜 1 만 세고 이스케이프된 것은 안 센다" \
-  || bad "이스케이프 층 오작동" "1건(진짜만)" "${nE}건"
+# 🔸 이스케이프 대조군도 같이 갔다 — 픽스처는 판별식을 따라간다.
+#   여기 남기면 «검사기 없는 대조군»이 되어 아무것도 안 지킨다.
 
 printf 'X="$(tr a b <<%s hi)"\n' '<' > "$W/hs-probe.sh"
 [ "$(code_only "$W/hs-probe.sh" | LC_ALL=C grep -c '\$(.*<<')" -eq 0 ] \

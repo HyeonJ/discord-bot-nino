@@ -59,6 +59,31 @@ PROBE_N="$(printf '%s' "$PROBE_OUT" | grep -c . || true)"
   && ok "🧪 [양성 대조군] 심어둔 네 형태를 전부 잡는다 (touch -d · stat -c · date -d · stat -f)" \
   || bad "🧪 [양성 대조군] 검출 개수" "4건" "${PROBE_N:-0}건 — $PROBE_OUT"
 
+# 🔴 **bash 3.2 축 양성 대조군** (2026-08-10 이사와 함께 신설).
+#   이 넷은 원래 다른 파일에 «분모 1~2개»로 살았다. 옮겨오면서 **대조군도 같이 세운다** —
+#   안 세우면 「위반 0건」이 「없다」인지 「판별식이 눈이 멀었다」인지 안 갈린다.
+#   🔑 픽스처를 «리터럴로 안 적는다»: 이 파일은 CANON 이라 스캔에서 빠지지만,
+#      그 면제에 기대면 면제가 사라지는 날 조용히 자기를 세기 시작한다.
+cat > "$WORK/b32.sh" <<'B32'
+set -u
+mapfile -t arr < <(printf 'a\n')
+declare -A m
+echo "${name^^}"
+for x in "${arr[@]}"; do echo "$x"; done
+echo "${arr[@]+"${arr[@]}"}"
+B32
+B32_OUT="$(portability_scan "$WORK/b32.sh")"
+B32_N="$(printf '%s' "$B32_OUT" | grep -c . || true)"
+# 3건: mapfile · declare -A · ${name^^}  (+ 맨 ${arr[@]} 1건 = 4건)
+# 🔸 `$VAR»` 축은 여기 없다 — `tests/lib/nonascii-scan.py` 가 레포 전수로 소유한다.
+# 🔑 안전형 `${arr[@]+…}` 과 중괄호 `${ok}»` 는 **안 잡혀야** 한다 — 그 둘이 처방이다.
+[ "${B32_N:-0}" -eq 4 ] \
+  && ok "🧪 [양성 대조군] bash 3.2/4 축 넷만 잡는다 (안전형은 안 잡는다)" \
+  || bad "bash 3.2 축 검출" "정확히 4건" "${B32_N:-0}건 — $B32_OUT"
+case "$B32_OUT" in
+  *'[@]+'*)  bad "안전형 \${a[@]+\"\${a[@]}\"} 를 잡는다 (오탐) — 올바른 형태를 벌하면 다음 사람이 되돌린다" "0건" "$B32_OUT" ;;
+  *)         ok "  → 안전형 배열 확장은 «안» 잡는다 = 처방을 벌하지 않는다" ;;
+esac
 # 🔴 출력 형식 축 — **같은 명령인데 출력 모양이 갈리는 자리**
 #   BSD `wc -l` 은 우측정렬로 패딩한다(GNU `[2]` vs BSD `[       2]`).
 #   ⇒ 문자열 비교는 맥에서 **항상 거짓**. 산술 비교(`-eq`)는 앞공백을 무시하니 안전하다.
@@ -150,7 +175,15 @@ esac
 CALLED="$(command grep -ho 'scripts/[A-Za-z0-9_-]*\.sh' "$REPO"/tests/*.sh | sort -u)"
 # 🔸 이 PR 이전부터 있던 위반은 **이름으로 적어둔다**(줄 수가 아니라 파일). 새 파일은 자동으로
 #   판정에 들어오고, 여기 있는 것은 «줄어드는 방향으로만» 지운다. 별건 안건 — 08-05 감사.
-LEGACY_DIRTY='morning-briefing.sh check-core-drift.sh vault-audit.sh vault-append.sh'
+# ⚠️ **분모가 «주석»으로도 는다** — `CALLED` 는 tests/*.sh 를 grep 해 뽑으므로,
+#   시험이 «설명으로만» 언급한 스크립트도 분모에 들어온다. 안전한 방향(과대추정)이지만
+#   놀랍다: `#155` 의 새 시험이 주석에 `scripts/vault-audit-llm.sh` 를 적자
+#   그 파일이 판정에 들어와 **스택 머지에서만** 빨개졌다(개별 CI 는 둘 다 초록).
+#   🔑 이걸 「grep 을 정교하게」로 고치지 않는다 — 좁히면 «부르는데 안 잡히는» 쪽으로 샌다.
+#   🔸 그 파일은 스스로 `:5` 에 **「Linux/bash 4+ 전용(GNU date·grep -P·mapfile)」**이라 적어뒀고
+#      연관배열도 쓴다 — 이식성 «회귀»가 아니라 **선언된 범위 밖**이라 면제 원장에 넣는다.
+#      (3.2 로 내리려면 별건 PR 이다. 여기서 같이 고치면 한 PR 이 두 가지가 된다)
+LEGACY_DIRTY='morning-briefing.sh check-core-drift.sh vault-audit.sh vault-append.sh vault-audit-llm.sh'
 CALLED_FILES=""
 for rel in $CALLED; do
     base="${rel##*/}"

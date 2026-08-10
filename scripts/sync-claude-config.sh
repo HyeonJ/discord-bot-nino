@@ -23,7 +23,7 @@ CHANGED=0
 #      (조용한 무한 재복사 — 로그만 늘고 원인이 안 보인다).
 EXCLUDES=(node_modules .venv __pycache__ .pytest_cache)
 DIFF_EXCLUDE=(); RSYNC_EXCLUDE=()
-for e in "${EXCLUDES[@]}"; do
+for e in "${EXCLUDES[@]+"${EXCLUDES[@]}"}"; do
     DIFF_EXCLUDE+=(--exclude="$e")
     RSYNC_EXCLUDE+=(--exclude="$e/")
 done
@@ -36,10 +36,10 @@ for d in "$CLAUDE_DIR/skills"/*/; do
     #    주석엔 "symlink은 건너뜀"이라 적혀 있었지만 실제로는 링크 대상을 통째로 복사했다.
     [ -L "${d%/}" ] && continue  # symlink은 건너뜀 (슬래시를 떼고 판정해야 한다)
     name=$(basename "$d")
-    if ! diff -rq "${DIFF_EXCLUDE[@]}" "$d" "$CONFIG_DIR/skills/$name" &>/dev/null 2>&1; then
+    if ! diff -rq "${DIFF_EXCLUDE[@]+"${DIFF_EXCLUDE[@]}"}" "$d" "$CONFIG_DIR/skills/$name" &>/dev/null 2>&1; then
         rm -rf "$CONFIG_DIR/skills/$name"
         mkdir -p "$CONFIG_DIR/skills/$name"
-        rsync -a "${RSYNC_EXCLUDE[@]}" "$d" "$CONFIG_DIR/skills/$name/"
+        rsync -a "${RSYNC_EXCLUDE[@]+"${RSYNC_EXCLUDE[@]}"}" "$d" "$CONFIG_DIR/skills/$name/"
         log "SYNC: skill/$name"
         CHANGED=$((CHANGED + 1))
     fi
@@ -134,7 +134,7 @@ mkdir -p "$SYNC_WORKTREE/claude-config" "$SYNC_WORKTREE/.claude"
 # 🔴 --checksum 필수: rsync 의 기본 quick check 는 **크기+mtime** 이라, 같은 크기의 내용 수정이
 #    같은 초에 일어나면 **갱신을 건너뛴다**. 실제로 시험에서 `# demo v2`→`# demo v5`(둘 다 10바이트)가
 #    복사되지 않아 "tracked 내용은 동일"로 흘렀다 — 조용히 옛 내용을 커밋할 경로였다.
-rsync -a --checksum --delete "${RSYNC_EXCLUDE[@]}" "$CONFIG_DIR/" "$SYNC_WORKTREE/claude-config/"
+rsync -a --checksum --delete "${RSYNC_EXCLUDE[@]+"${RSYNC_EXCLUDE[@]}"}" "$CONFIG_DIR/" "$SYNC_WORKTREE/claude-config/"
 [ -f "$BOT_DIR/.claude/settings.json" ] && cp "$BOT_DIR/.claude/settings.json" "$SYNC_WORKTREE/.claude/settings.json"
 
 git -C "$SYNC_WORKTREE" add -A claude-config .claude/settings.json 2>/dev/null || \
