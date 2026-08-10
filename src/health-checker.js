@@ -54,16 +54,20 @@ function fetchHealth(url) {
   });
 }
 
-// 🤝 자동 발신엔 `[감시]` 를 붙인다 — 셔틀이 이 변수를 보고 «모든» 전송에 태그한다.
-//    호출 자리마다 붙이지 않는 이유: 새 전송을 추가해도 자동으로 태그되게(환경에 건다).
-// 🔴 이 파일이 셸이 아니라 **놓칠 뻔했다**(룬드 `#166` 리뷰) — 시험 ⑤ 의 분모가
-//    `scripts/*.sh` 만 봐서 여기 경보 발신이 통째로 안 보였다. 유도식은 «보는 것»만큼만 넓다.
-process.env.NINO_AUTOSEND = '1';
-
+// 🤝 자동 발신엔 `[감시]` 를 붙인다 — 셔틀이 `NINO_AUTOSEND` 를 보고 태그한다.
+// ⚠️ **이 파일은 운영에서 «안 돈다»** — 정본은 `relay-addons/health-checker.js` 다(그 파일 `:5` 가
+//    「구 src/health-checker.js 로직을 addon 인터페이스로 포팅」이라 적고 있다). 참조는
+//    `tests/health-checker.test.js` 하나뿐이고 셸·systemd·package.json 어디에도 없다.
+//    🔴 초안은 **여기만** 켜고 「JS 발신자를 덮었다」고 적었다 — **죽은 사본을 켠 것**이라
+//       막으려던 「자동이 무표시로 나간다」가 그대로 남아 있었다(룬드 `#166` 리뷰).
+//    그래도 켜 두는 이유: 분모가 「셔틀을 부르는 파일 전부」라 이 파일도 그 안이고,
+//    **면제로 빼면 「죽었다」가 «주장»이 된다.** 켜는 건 한 줄이고 죽음의 판정은 따로 산다.
+// 🔴 모듈 최상위가 아니라 «발송 자리»에 건다 — 최상위면 require 하는 누구든 프로세스 전역이 바뀐다.
 function sendAlert(message, dmChannel) {
   try {
     const escaped = message.replace(/'/g, "'\\''");
-    execSync(`${SCRIPT_DIR}/discord-send ${dmChannel} '${escaped}'`);
+    execSync(`${SCRIPT_DIR}/discord-send ${dmChannel} '${escaped}'`,
+             { env: { ...process.env, NINO_AUTOSEND: '1' } });
   } catch (e) {
     console.error('[health-checker] alert send failed:', e.message);
   }

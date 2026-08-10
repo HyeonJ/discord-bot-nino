@@ -108,9 +108,31 @@ run_shim NINO_AUTOSEND=1 -- 봇-놀이터 -- "- 첫 항목"
   && ok "'--' 뒤의 메시지는 '-' 로 시작해도 태그되어 나간다" \
   || bad "-- 복구" "[감시] - 첫 항목 (rc=0)" "$(last_arg) (rc=$RC)"
 # 🔸 `wc -l` 은 BSD 에서 «공백 패딩»이 붙는다 — 문자열이 아니라 «수»로 비교한다(이식성 가드)
-[ "$(head -1 "$WORK/argv")" = "봇-놀이터" ] && [ "$(wc -l < "$WORK/argv")" -eq 2 ] \
-  && ok "  → '--' 자체는 코어에 안 넘어간다 (positional 파서라 밀린다)" \
-  || bad "-- 가 남았다" "target·message 둘" "$(tr '\n' '|' < "$WORK/argv")"
+# 🔴 **`--` 를 «먹지» 않는다 — 코어가 이미 먹는다.** 초안은 「코어가 positional 파서라 밀린다」는
+#   «거짓 전제» 위에서 셔틀이 `--` 를 지웠고, 그러면 **리터럴 계약이 깨진다**(룬드 `#166` 리뷰).
+#   ⇒ 여기서는 **주장을 restate 하지 않고 «코어 파서에 직접 물어본다»** — 순수 함수라 부작용 0.
+[ "$(head -1 "$WORK/argv")" = "봇-놀이터" ] \
+  && ok "  → target 은 그대로다" \
+  || bad "target 훼손" "봇-놀이터" "$(tr '\n' '|' < "$WORK/argv")"
+_PARSER="${CORE_PARSER:-/home/bpx27/yaksu-bot-core-live/relay/discord-send/parser.js}"
+if [ -r "$_PARSER" ] && command -v node >/dev/null 2>&1; then
+    _verdict="$(node -e '
+const {parse}=require(process.argv[1]);
+const g=a=>{try{const r=parse(a);return JSON.stringify([r.target,r.message,!!r.silent]);}catch(e){return "THROW";}};
+const A=g(["봇-놀이터","--","[감시] - 첫 항목"]), B=g(["봇-놀이터","[감시] - 첫 항목"]);
+const D=g(["봇-놀이터","--","--silent","메시지"]),  E=g(["봇-놀이터","--silent","메시지"]);
+console.log((A===B?"AB같음":"AB다름")+" "+(D==="THROW"?"D던짐":"D안던짐")+" "+(E===D?"DE같음":"DE다름"));
+' "$_PARSER" 2>&1)"
+    case "$_verdict" in
+        "AB같음 D던짐 DE다름")
+            ok "  → 🧪 코어 파서에 직접 물었다: '--' 를 넘겨도 결과가 같고(A≡B), 먹으면 리터럴 계약이 깨진다(D 던짐 ≠ E)" ;;
+        *)  bad "코어 파서 대조가 예상과 다르다 — '--' 를 안 먹는 근거가 흔들린다" \
+                "AB같음 D던짐 DE다름" "$_verdict" ;;
+    esac
+else
+    echo "  🔸 판정 불가: 코어 파서를 못 읽었다($_PARSER) — '--' 를 «안 먹는» 근거를 그 자리에서 못 쟀다"
+    skip=$((skip + 1))
+fi
 # 🔸 출구가 «생겼다»고 «막던 것»이 풀리면 안 된다 — `--` 없는 원래 모호함은 그대로 거절한다.
 run_shim NINO_AUTOSEND=1 -- 봇-놀이터 "--"
 [ "$RC" = 2 ] \
@@ -178,6 +200,9 @@ echo "── ⑤ 분모 — discord-send 를 부르는 «자동» 스크립트�
 exempt_reason() {
     case "$1" in
         scripts/setup.sh)            echo "사람이 1회 돌리는 설치 스크립트" ;;
+        # 🔸 시험은 «클래스로» 면제한다 — 자동 발신자가 아니라 셔틀을 **가짜 코어에 대고** 부른다.
+        #   여기에 태그를 켜면 시험이 재는 값이 바뀐다(그리고 실채널로 안 나간다).
+        tests/*)                     echo "시험 — 가짜 코어에 대고 부른다(자동 발신자가 아니다)" ;;
         *) echo "" ;;
     esac
 }
@@ -186,30 +211,48 @@ exempt_reason() {
 #   `grep -l` 로는 호출자로 잡혔다. (오늘 portability 시험에서 밟은 것과 «같은 병»:
 #   「유도된 분모는 유도식이 «보는 것»만큼만 넓다」.)
 #   ⇒ 주석 줄(`#` 로 시작)을 뺀 뒤에도 남는 파일만 호출자로 센다.
-# 🔴 **`.sh` 만 보면 «셸이 아닌 발신자»를 통째로 놓친다** (룬드 `#166` 리뷰).
-#   실물: `src/health-checker.js:60` 이 `execSync` 로 셔틀을 진짜 부른다(경보 발신). 유도식이
-#   `scripts/*.sh` 만 훑어서 **보이지도 않았다** — 위 「부푼 분모」의 «거울상»이고, 이쪽이
-#   **무음**이라 더 나쁘다(부푼 쪽은 이름이 화면에 뜨기라도 한다).
-#   ⇒ 셸과 JS 를 «둘 다» 훑고, 주석 문법도 언어마다 다르므로 따로 뺀다.
+# 🔴 **좌변을 «꼴의 열거»로 적으면 열거 밖이 남는다 — 두 번 당했다** (룬드 `#166` 리뷰 두 차례).
+#   1차: `scripts/*.sh` 만 봐서 JS 발신자가 안 보였다.
+#   2차: `+ src/*.js` 로 넓혔더니 **`relay-addons/*.js` 가 여전히 밖**이었고, 정작 운영에서
+#        도는 발신자가 거기였다(`relay-addons/health-checker.js:80`). 넓혔는데 **여전히 열거**였다.
+#   ⇒ **뜻으로 적는다: 「셔틀을 «부르는» 파일 전부」.** 디렉터리를 손으로 세지 말고
+#     **이 레포의 정본 목록**(`tests/deps-declared.test.sh` 의 `SCAN_DIRS`)에서 유도한다.
+#     두 자리가 갈리면 「하나가 조용히 좁아진다」가 또 난다.
+# 🔴 그 유도가 «실패»하면 열거로 물러서지 않는다 — 좁아지는 걸 모르게 되니까. 빨강으로 말한다.
+SCAN_SRC="$BOT_DIR/tests/deps-declared.test.sh"
+SCAN_DIRS_LINE="$(LC_ALL=C grep -vE '^[[:space:]]*#' "$SCAN_SRC" 2>/dev/null \
+                  | LC_ALL=C sed -n 's/^SCAN_DIRS=(\(.*\))[[:space:]]*$/\1/p' | head -1)"
+if [ -z "$SCAN_DIRS_LINE" ]; then
+    bad "정본 SCAN_DIRS 를 «못 뽑았다» — 분모의 넓이를 모른다" "SCAN_DIRS=(…)" "$SCAN_SRC 에서 못 찾음"
+fi
 _strip_comments() {   # $1 = 파일
     case "$1" in
         *.js) LC_ALL=C grep -vE '^[[:space:]]*(//|\*|/\*)' "$1" 2>/dev/null ;;
         *)    LC_ALL=C grep -vE '^[[:space:]]*#' "$1" 2>/dev/null ;;
     esac
 }
-# 🔸 켜는 «꼴»도 언어마다 다르다 — 셸은 `export NINO_AUTOSEND=`, JS 는 `process.env.NINO_AUTOSEND =`.
+# 🔸 켜는 «꼴»이 언어마다 다르다. JS 는 **모듈 최상위가 아니라 «발송 자리»**에 걸어야 해서
+#   (`execSync(…, { env: { …process.env, NINO_AUTOSEND: '1' } })`) 꼴이 하나로 안 굳는다 —
+#   그래서 JS 쪽은 「주석이 아닌 코드에 그 이름이 있나」로 본다. 느슨한 대신 **실동작 대조군**
+#   (①~③-b)이 그 축을 따로 잡는다.
 _has_switch() {
     case "$1" in
-        *.js) LC_ALL=C grep -qE 'process\.env\.NINO_AUTOSEND[[:space:]]*=' "$1" ;;
+        *.js) _strip_comments "$1" | LC_ALL=C grep -q 'NINO_AUTOSEND' ;;
         *)    LC_ALL=C grep -qE '^[[:space:]]*export[[:space:]]+NINO_AUTOSEND=' "$1" ;;
     esac
 }
 CALLERS="$(
-  for _f in "$BOT_DIR"/scripts/*.sh "$BOT_DIR"/scripts/*/*.sh "$BOT_DIR"/src/*.js; do
+  for _d in $SCAN_DIRS_LINE; do
+      [ -d "$BOT_DIR/$_d" ] || continue
+      find "$BOT_DIR/$_d" -type f \( -name '*.sh' -o -name '*.js' \) 2>/dev/null
+  done | while read -r _f; do
       [ -f "$_f" ] || continue
-      _strip_comments "$_f" | LC_ALL=C grep -q 'discord-send' \
+      # 🔴 **이름이 «둘»이다** — 운영에서 도는 발신자는 리터럴 `discord-send` 를 안 쓰고
+      #   `DISCORD_SEND_BIN` 으로 간접 참조한다(`relay-addons/health-checker.js:85`).
+      #   리터럴만 보면 **정본 발신자가 통째로 안 보인다** — 열거의 셋째 얼굴이다.
+      _strip_comments "$_f" | LC_ALL=C grep -qE 'discord-send|DISCORD_SEND_BIN' \
         && printf '%s\n' "${_f#$BOT_DIR/}"
-  done | sort
+  done | sort -u
 )"
 n_all=0; n_on=0; n_ex=0
 for f in $CALLERS; do
@@ -221,16 +264,22 @@ for f in $CALLERS; do
     if [ -n "$why" ]; then n_ex=$((n_ex + 1)); echo "  🔸 면제: $f — $why"; continue; fi
     bad "자동 발신인데 [감시] 를 안 켰다: $f" "export NINO_AUTOSEND=1" "없음"
 done
-echo "  분모 $n_all (켬 $n_on · 면제 $n_ex)"
+echo "  분모 $n_all (켬 $n_on · 면제 $n_ex · 훑은 디렉터리: $SCAN_DIRS_LINE)"
 [ "$n_all" -gt 0 ] \
-  && ok "분모가 «유도»됐다 — 셔틀 호출자 $n_all 개 (scripts/*.sh · src/*.js)" \
+  && ok "분모가 «유도»됐다 — 셔틀 호출자 $n_all 개 (정본 SCAN_DIRS 에서)" \
   || bad "분모 0" "1개 이상" "0 — 유도식이 아무것도 못 봤다(패턴이 낡았나)"
-# 🧪 **분모가 «셸 밖»을 실제로 보나** — `.sh` 만 보던 시절엔 이 확인이 통째로 없었다.
-#   확장자별로 세서, JS 쪽이 0 이면 「JS 를 훑는다」가 말만 남은 상태다.
-n_js=0; for f in $CALLERS; do case "$f" in *.js) n_js=$((n_js + 1)) ;; esac; done
-[ "$n_js" -gt 0 ] \
-  && ok "🧪 셸이 아닌 호출자도 분모에 있다 (JS $n_js 개) — 확장자 축이 살아 있다" \
-  || bad "JS 호출자 0 — 「.js 도 훑는다」가 말만 남았다" "1개 이상" "0"
+
+# 🧪 **닻(anchor) — 「운영에서 «실제로» 도는 발신자」가 분모 안에 있나.**
+# 🔴 앞판의 가드는 「JS ≥ 1」이었는데, 그건 **죽은 사본 하나로 만족됐다**(`src/health-checker.js`
+#   는 운영 진입점이 0건이다). **수를 세는 가드는 «어느 것인지»를 안 묻는다.**
+#   ⇒ 이름으로 못 박는다. 유도가 좁아지면 여기서 «빨강»으로 말한다.
+#   🔸 열거지만 «분모»의 열거가 아니라 «분모가 반드시 포함해야 할 것»의 열거다 —
+#     빠지는 쪽으로만 실패하고, 새 발신자를 놓치는 것은 위 유도가 잡는다.
+for _anchor in relay-addons/health-checker.js scripts/nino-watchdog.sh; do
+    printf '%s\n' "$CALLERS" | LC_ALL=C grep -qx "$_anchor" \
+      && ok "🧪 닻: 운영 발신자 $_anchor 가 분모 안에 있다" \
+      || bad "🧪 닻이 분모 밖이다: $_anchor — 유도가 조용히 좁아졌다" "분모 포함" "없음"
+done
 
 echo
 echo "── ⑥ 🔴 이음매가 «기본값»이 되지 않았나 — 안 걸면 하드코딩 경로로 간다 ──"
