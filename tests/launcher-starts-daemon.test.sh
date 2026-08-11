@@ -66,6 +66,23 @@ export DAEMON_PIDFILE="$_T/pids"
 OLD="pgrep -f '$(basename "$DAEMON" .sh)' > /dev/null 2>&1 || (nohup bash $DAEMON </dev/null >/dev/null 2>&1 &)"
 NEW="flock -n $LOCK -c 'exec bash $DAEMON' >/dev/null 2>&1 &"
 
+# 🔴 **`pgrep -f` 의 «조상 매칭»이 구현마다 다르다 — 그래서 이 병은 호스트를 탄다.**
+#   GNU procps: 자기 «자신»만 뺀다 ⇒ 부모 `bash -c` 의 명령줄을 **잡는다**(내 실사고)
+#   BSD(macOS): 자기 **조상 전부**를 뺀다 ⇒ 안 잡는다 ⇒ **옛 판이 그냥 뜬다**
+#   실측 2026-08-11(룬드 맥, `#187` 리뷰): `bash -c` 안에서 rc=1 인데 그 셸 명령줄엔 낱말이 있다.
+#
+# 🔑 **그래서 「옛 판이 떴다」는 «실패»가 아니라 «판정 불가»다** — 내가 어제 세운 조항 그대로:
+#   *「관측 자체가 없으면 실패가 아니라 판정 불가」*. 여기서 관측된 건 「시험이 고장났다」가
+#   아니라 **「이 호스트에선 옛 판이 안 아프다」**이고, 그러면 ②의 초록을 뒷받침할 증인이
+#   **없는** 것이지 무언가가 **틀린** 게 아니다. (룬드 `#187` 리뷰)
+#
+# ⚠️ 그렇다고 «전부» note 로 접으면 「대조군이 진짜 고장난 경우」까지 숨는다.
+#   ⇒ **가르는 좌변을 «잰다»**: 이 호스트의 `pgrep` 이 조상을 잡나?
+_pgrep_matches_ancestor() {
+    # 표식이 «그 bash -c 의 명령줄에만» 있다 — 잡히면 조상 매칭이다
+    bash -c "pgrep -f 'zzancestor-probe-$$' > /dev/null 2>&1" 2>/dev/null
+}
+
 echo "① 🔴 [대조군] 옛 판 — 데몬 0개인데 «안 띄운다»(자기 부모를 잡는다)"
 : > "$DAEMON_PIDFILE"
 _before="$(count_live)"
@@ -76,8 +93,12 @@ else
     _after="$(count_live)"
     if [ "$_after" -eq 0 ]; then
         ok "옛 판은 0 → 0 (병이 재현된다 — 이 시험이 무언가를 «본다»는 증인)"
+    elif _pgrep_matches_ancestor; then
+        bad "옛 판이 떴는데 이 호스트의 pgrep 은 조상을 «잡는다» — 대조군이 진짜 고장났다" \
+            "0개" "${_after}개"
     else
-        bad "옛 판이 떴다 — 이 환경에선 병이 재현 안 된다. ② 의 초록이 아무 뜻이 없다" "0개" "${_after}개"
+        note "이 호스트의 pgrep 은 조상을 «안» 잡는다(BSD 계열) — 옛 판이 안 아프므로 이 축을 못 쟀다"
+        note "  ⇒ ②③ 의 초록에는 이 호스트에서 «증인이 없다»(틀린 게 아니라 못 잰 것)"
     fi
 fi
 
@@ -104,7 +125,12 @@ if command -v flock > /dev/null 2>&1; then
         bad "두 번 돌리니 ${_n2}개가 됐다 — 단일성이 없다" "1개" "${_n2}개"
     fi
 else
-    note "`flock` 이 없다 — 이 호스트에선 ②③ 을 못 쟀다 (수단이 갈리는 자리다: launchd·systemd)"
+    # 🔴 여기에 백틱을 쓰면 «명령 치환»이 돌아 낱말이 사라지고 stderr 가 샌다.
+    #   그리고 이 가지가 도는 유일한 조건이 **`flock` 이 없는 호스트**라, 정확히 그 호스트에서
+    #   `flock: command not found` 가 stderr 로 나간다 — 러너의 「rc=0 인데 stderr 있음」 축이
+    #   이 파일을 실패로 센다. 🔑 **판정 불가를 정직하게 내려던 가지가 «왜 못 쟀는지»를 지운다.**
+    #   실측 2026-08-11 룬드 맥(`#187` 리뷰): 메시지가 「 이 없다」로 찍혔다.
+    note "«flock» 이 없다 — 이 호스트에선 ②③ 을 못 쟀다 (수단이 갈리는 자리다: launchd·systemd)"
     note "  (같은 이유로 ③ 도 못 쟀다)"
 fi
 
