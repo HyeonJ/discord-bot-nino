@@ -48,7 +48,10 @@ build_index() {
             [[ -z "$files" ]] && continue
 
             local count
-            count=$(echo "$files" | grep -c . || echo 0)
+            # 🔑 `|| echo 0` 은 값을 «두 줄»로 만든다 — `grep -c` 는 0 을 «출력하고» rc=1 을 내므로
+            #   기본값이 덧대져 "0\n0" 이 된다. `|| true` 로 rc 만 삼키고 출력은 grep 것을 쓴다.
+            count=$(printf '%s\n' "$files" | grep -c . || true)
+            count=${count:-0}
             total_wiki=$((total_wiki + count))
 
             echo "## ${cat} (${count})"
@@ -64,7 +67,8 @@ build_index() {
     fi
 
     if [[ -d "$PROCESSED_DIR" ]]; then
-        total_src=$(find "$PROCESSED_DIR" -maxdepth 1 -type f -name '*.md' 2>/dev/null | grep -c . || echo 0)
+        total_src=$(find "$PROCESSED_DIR" -maxdepth 1 -type f -name '*.md' 2>/dev/null | grep -c . || true)
+        total_src=${total_src:-0}
     fi
 
     echo "---"
