@@ -1064,7 +1064,9 @@ esac
 #   "지금 상태"가 모호해지고, rc 를 grep 하는 판정이 옛 줄에 맞아 통과해버린다(변이 E 로 발견).
 det_reset; det_hb 5; rm -f "$WDHB"
 run_wd >/dev/null; run_wd >/dev/null
-wd_lines=$(grep -c . "$WDHB" 2>/dev/null || echo 0)
+# 🔑 `|| echo 0` 을 붙이면 grep 이 0 을 «출력하면서» rc=1 이라 값이 두 줄이 된다
+wd_lines=$(grep -c . "$WDHB" 2>/dev/null || true)
+wd_lines=${wd_lines:-0}
 [ "$wd_lines" -eq 1 ] && ok "하트비트는 항상 한 줄 (현재 상태만 남긴다)" \
   || bad "하트비트 한 줄 계약" "1줄" "${wd_lines}줄 — 옛 상태가 섞여 판정이 모호해진다"
 
