@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # run-tests.sh — 이 레포의 **모든** 시험을 한 종료코드로 모은다 (양봇 공용 본체)
 #
+# 🔗 코어-사본: 정본은 `yaksu-bot-core` 의 `scripts/run-tests.sh` 다. **여기서 고치지 않는다** —
+#   고치면 사본이 갈린다. 수리는 코어에 내고 이 파일로 흘러온다. (이 표지를 `tests/cli-help-covers-options.test.sh` 가 읽는다)
+#
 # 왜 생겼나 (2026-07-28, 룬드 M:jcic 와 합의):
 #   `npm test`/`bun test` 가 그 레포의 시험을 **대표하지 않는다**. 두 방향으로 확인됐다:
 #     · 룬드 쪽 — JS 시험이 0개인데 jest 가 기본 러너라 하위 별도 레포를 긁어 **상시 rc=1**.
