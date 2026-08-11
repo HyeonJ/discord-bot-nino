@@ -45,6 +45,13 @@ jobs:
     timeout-minutes: 15   # 러너 기본이 6시간 — 매달리면 한 번에 월 한도를 크게 먹는다
     steps:
       - uses: actions/checkout@v4
+        with:
+          # 🔴 **원장 자체검사(`tests/merge-ledger-selfcheck.test.sh`)가 히스토리를 «읽는다».**
+          #   기본값은 depth 1 이라 `git log --first-parent` 이 한 커밋만 보고, 그러면
+          #   축①(없는 행 = 차집합)이 **CI 에서 구조적으로 못 돈다.** 그런데 파일 rc 는
+          #   0 이라 원장엔 «통과»로만 보인다 — `#171` 에서 밟은 「파일 안의 판정 불가」다.
+          #   ⇒ 못 재게 두고 판불로 적는 대신 **잴 수 있게 만든다**(우리가 고칠 수 있는 축이다).
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
