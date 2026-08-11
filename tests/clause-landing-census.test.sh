@@ -34,8 +34,9 @@ cat > "$TMP/old.md" <<'FIX'
 - 🤝 **분모를 안 적으면 「전부」가 거짓이 된다** — 인과형이고 표지 줄에 있다
 - 🤝 **커밋 메시지는 heredoc 으로 적는다** — 명령형이고 표지 줄에 있다
 - **재서술되어 살아남는 줄** 은 새 코퍼스에 낱말로 남는다
-- **과잉이다** 는 희귀 토큰이 하나뿐이라 «프로브가 못 잰다» ⇒ 판정 불가
-- **뻐꾸기 두레박 열쇠고리 셋이 사라진 자리** 는 토큰이 여럿이라 «재고 못 찾았다» ⇒ 읽을 것
+- **과잉이다** 는 조각이 짧지만 «품은 줄»이 넉넉해 줄 좌변으로 재진다 ⇒ 읽을 것(좌변=줄)
+- **뻐꾹**
+- **뻐꾸기 두레박 열쇠고리 셋이 사라진 자리** 는 토큰이 여럿이라 «재고 못 찾았다» ⇒ 읽을 것(좌변=조각)
 - **공유되는 조각** 이 여기 먼저 나온다
 - 🤝 **공유되는 조각** 이 표지 줄에도 나온다
 - 🤝 여는 별표만 있는 줄 **경계가 갈리는
@@ -108,27 +109,33 @@ out="$(python3 "$TOOL" --corpus "$TMP/corpus" 2>&1)"; rc=$?
 [ "$rc" -ne 0 ] && ok "--old 없이 부르면 rc≠0" || bad "인자가 없는데 조용히 돈다" "rc≠0" "$rc"
 
 echo
-echo "④ 「재고 못 찾았다」와 「애초에 못 잰다」를 섞지 않는다:"
+echo "④ 「재고 못 찾았다」·「줄로 재진다」·「애초에 못 잰다」 셋을 안 섞는다:"
 # 🔴 프로브의 힘이 조각 «길이»에 매달린다 — 희귀 토큰이 둘 미만이면 공존을 물을 수가 없다.
-#   섞으면 잔여가 부풀고(실측 198 → 실제 36) 「다 읽었다」가 영영 안 온다.
+#   ✅ 유보를 «푸는 법»: 그 조각을 품은 «줄»로 좌변을 넓힌다. 다만 답이 달라지므로
+#      (「그 조각이 착지했나」 → 「그 줄이 착지했나」) 좌변을 표시로 남기고 안 섞는다.
 python3 - "$TOOL" "$TMP/old.md" "$TMP/corpus" > "$TMP/split.txt" <<'PY'
 import importlib.util, sys, pathlib
 spec = importlib.util.spec_from_file_location("cl", sys.argv[1])
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 r = m.census(pathlib.Path(sys.argv[2]).read_text(encoding="utf-8"), m.load_corpus(sys.argv[3]))
-short = "과잉이다"
-long_ = "뻐꾸기 두레박 열쇠고리 셋이 사라진 자리"
-print("SHORT_IN_UNMEASURABLE" if any(x["조각"] == short for x in r["판정불가"]) else "SHORT_MISPLACED")
-print("LONG_IN_TOREAD" if any(x["조각"] == long_ for x in r["읽을것"]) else "LONG_MISPLACED")
+find = lambda key, frag: next((x for x in r[key] if x["조각"] == frag), None)
+short, bare = find("읽을것", "과잉이다"), find("판정불가", "뻐꾹")
+long_ = find("읽을것", "뻐꾸기 두레박 열쇠고리 셋이 사라진 자리")
+print("SHORT_BY_LINE" if short and short.get("좌변") == "줄" else "SHORT_MISPLACED")
+print("LONG_BY_FRAG" if long_ and long_.get("좌변") is None else "LONG_MISPLACED")
+print("BARE_UNMEASURABLE" if bare else "BARE_MISPLACED")
 PY
 rc_sp=$?
 [ "$rc_sp" -eq 0 ] && ok "분류 프로브가 돌았다" || bad "프로브가 죽었다 — 판정 불가" "0" "$rc_sp"
-grep -q '^SHORT_IN_UNMEASURABLE$' "$TMP/split.txt" \
-    && ok "희귀 토큰 <2 인 조각은 «판정 불가» 로 간다" \
-    || bad "못 재는 것을 「읽을 것」에 섞었다 — 잔여가 부푼다" "SHORT_IN_UNMEASURABLE" "$(head -1 "$TMP/split.txt")"
-grep -q '^LONG_IN_TOREAD$' "$TMP/split.txt" \
-    && ok "재고 못 찾은 조각은 «읽을 것» 으로 간다" \
-    || bad "실측 잔여를 판정 불가로 밀었다" "LONG_IN_TOREAD" "$(tail -1 "$TMP/split.txt")"
+grep -q '^SHORT_BY_LINE$' "$TMP/split.txt" \
+    && ok "짧은 조각은 «줄 좌변»으로 재지고 그 사실이 표시된다" \
+    || bad "줄로 잰 것을 조각으로 잰 것처럼 적었다" "SHORT_BY_LINE" "$(sed -n 1p "$TMP/split.txt")"
+grep -q '^LONG_BY_FRAG$' "$TMP/split.txt" \
+    && ok "긴 조각은 «조각 좌변» 그대로 (줄로 안 넓힌다)" \
+    || bad "안 넓혀도 되는데 넓혔다" "LONG_BY_FRAG" "$(sed -n 2p "$TMP/split.txt")"
+grep -q '^BARE_UNMEASURABLE$' "$TMP/split.txt" \
+    && ok "줄까지 짧으면 «판정 불가» — 넓혀도 못 재는 자리가 남는다" \
+    || bad "못 재는 것을 「읽을 것」에 섞었다 — 잔여가 부푼다" "BARE_UNMEASURABLE" "$(sed -n 3p "$TMP/split.txt")"
 
 echo
 echo "통과 $pass · 실패 $fail"

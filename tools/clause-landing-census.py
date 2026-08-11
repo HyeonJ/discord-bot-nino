@@ -65,12 +65,12 @@ def bold_fragments(text, marker=None):
             continue
         seen.add(frag)  # 🔴 «거르기 전»에 등록한다 — 안 그러면 첫 등장이 표지 밖인 조각이
         #                    좁힌 집합에만 살아남아 부분집합 관계가 깨진다
-        if marker is not None:
-            start = text.rfind("\n", 0, m.start()) + 1
-            end = text.find("\n", m.end())
-            if marker not in text[start : len(text) if end < 0 else end]:
-                continue
-        out.append(frag)
+        start = text.rfind("\n", 0, m.start()) + 1
+        end = text.find("\n", m.end())
+        line = text[start : len(text) if end < 0 else end]
+        if marker is not None and marker not in line:
+            continue
+        out.append((frag, line.strip()))
     return out
 
 
@@ -100,18 +100,18 @@ def census(old_text, docs, marker=None):
     corpus = "\n".join(docs.values())
     freq = collections.Counter(TOKEN.findall(corpus))
 
-    absent = [f for f in frags if f not in corpus]
+    absent = [(f, line) for f, line in frags if f not in corpus]
 
     # 🔑 세 버킷 «전부» 프로브한다 — 한 버킷만 재면 나머지가 「안 쟀다」가 아니라
     #    «없다»처럼 보인다(실측: 인과형만 재던 판이 지시어미 89 와 그밖 466 을 통째로 가렸다).
     buckets = {"지시어미": [], "인과형": [], "그밖": []}
-    for f in absent:
+    for f, line in absent:
         if IMPERATIVE.search(f):
-            buckets["지시어미"].append(f)
+            buckets["지시어미"].append((f, line))
         elif CAUSAL.search(f):
-            buckets["인과형"].append(f)
+            buckets["인과형"].append((f, line))
         else:
-            buckets["그밖"].append(f)
+            buckets["그밖"].append((f, line))
 
     out = {
         "분모_조각": len(frags),
@@ -122,21 +122,34 @@ def census(old_text, docs, marker=None):
         "판정불가": [],
     }
     for name, fs in buckets.items():
-        hit = 0
-        for f in fs:
+        hit = line_hit = 0
+        for f, line in fs:
             count, path, kws = reworded_hit(f, docs, freq)
             row = {"버킷": name, "조각": f, "공존": count, "파일": path, "키워드": kws}
             # 🔴 「프로브가 재고 못 찾았다」와 「프로브가 «애초에 못 잰다»」를 가른다.
             #    희귀 토큰이 둘 미만이면 공존을 물을 수가 없다 — 그건 실패가 아니라 부재다.
-            if len(kws) < COOCCUR_MIN:
+            if len(kws) >= COOCCUR_MIN:
+                if count >= COOCCUR_MIN:
+                    hit += 1
+                else:
+                    out["읽을것"].append(row)
+                continue
+
+            # ✅ 유보를 «푸는 법» — 조각이 짧아 못 재면 «그 조각을 품은 줄»로 좌변을 넓힌다.
+            #    🔴 답이 달라진다는 것을 감추지 않는다: 이건 「그 조각이 착지했나」가 아니라
+            #    「그 줄이 착지했나」다. 그래서 별도 칸(줄로판정)에 세고 조각 판정과 안 섞는다.
+            l_count, l_path, l_kws = reworded_hit(line, docs, freq)
+            if len(l_kws) < COOCCUR_MIN:
                 out["판정불가"].append(row)
-            elif count >= COOCCUR_MIN:
-                hit += 1
+            elif l_count >= COOCCUR_MIN:
+                line_hit += 1
             else:
+                row.update({"좌변": "줄", "공존": l_count, "파일": l_path, "키워드": l_kws})
                 out["읽을것"].append(row)
         out["버킷"][name] = {
             "개수": len(fs),
             "재서술로있음": hit,
+            "줄로판정": line_hit,
             "읽을것": sum(1 for r in out["읽을것"] if r["버킷"] == name),
             "판정불가": sum(1 for r in out["판정불가"] if r["버킷"] == name),
         }
@@ -197,13 +210,20 @@ def main():
     print(f"볼드 조각 {r['분모_조각']}(중복제거)")
     print(f"  ├ 있음 {r['있음']}")
     print(f"  └ 없음 {r['없음']}")
-    print(f"{'버킷':10} {'개수':>5} {'재서술로있음':>12} {'읽을것':>7} {'판정불가':>8}")
+    print(
+        f"{'버킷':10} {'개수':>5} {'조각으로있음':>12} {'줄로판정':>9} "
+        f"{'읽을것':>7} {'판정불가':>8}"
+    )
     for name, b in r["버킷"].items():
         print(
-            f"{name:10} {b['개수']:5d} {b['재서술로있음']:12d} "
+            f"{name:10} {b['개수']:5d} {b['재서술로있음']:12d} {b['줄로판정']:9d} "
             f"{b['읽을것']:7d} {b['판정불가']:8d}"
         )
-    print(f"\n읽을 것 {len(r['읽을것'])} · 판정 불가 {len(r['판정불가'])}")
+    by_line = sum(1 for x in r["읽을것"] if x.get("좌변") == "줄")
+    print(
+        f"\n읽을 것 {len(r['읽을것'])} (조각 좌변 {len(r['읽을것']) - by_line} · "
+        f"줄 좌변 {by_line}) · 판정 불가 {len(r['판정불가'])}"
+    )
     # 🔴 판정 불가를 「읽을 것」에 섞지 않는다 — 프로브의 힘이 조각 «길이»에 매달려서,
     #    짧은 조각은 재고 실패한 게 아니라 «잴 수가 없다». 섞으면 잔여가 부풀고
     #    「다 읽었다」가 영영 안 온다.
