@@ -97,12 +97,49 @@ EFFECT = {"npm","pnpm","yarn","bun","pip","uv","make","cp","mv","rm","mkdir","ch
 GIT_EFFECT = {"commit","push","pull","merge","rebase","reset","checkout","switch","tag",
               "cherry-pick","revert","clean","stash","fetch","am","apply","mv","rm","add"}
 
-def first_word(seg):
-    for w in seg.split():
-        if "=" in w and not w.startswith("-"):   # VAR=v cmd 형태의 앞부분은 건너뛴다
+# 🔴 **rc 를 «가로채지 않고» 남의 rc 를 그대로 돌려주는 것들.** 이걸 안 벗기면 좌변이
+#    `command`·`timeout` 에서 멈춰 EFFECT/OBSERVE 열거에 안 걸린다 — 조용한 미탐.
+#    실측 2026-08-11: 다섯 꼴(`| command tail` · `| timeout 5 tail` · `| env LC_ALL=C grep`
+#    · `timeout 60 git push |` · `nohup git push |`)이 **전부 통과**했고 맨몸만 막혔다.
+#    🔑 이 미탐은 **우리 계약이 만든다** — 계약이 `command grep` 을 쓰라고 시키므로(Bash 도구의
+#      `grep` 이 셸 함수라 ignore 트리를 건너뛴다) 손버릇이 정확히 열거 «밖»으로 간다. 룬드 #155 동형.
+#    🔸 `xargs` 는 **일부러 안 넣는다** — 자체 실행기라 그 rc 가 xargs 것이고, 벗기면 뜻이 달라진다.
+#      열거는 여전히 남지만 **틀릴 거면 «안 벗기는»(=미탐) 쪽으로** 틀린다.
+WRAPPERS = {"command", "builtin", "exec", "env", "nice", "nohup", "stdbuf",
+            "time", "timeout", "sudo", "setsid", "ionice", "chrt"}
+# 🔴 `timeout`·`time` 의 시간 인자는 **옵션도 `VAR=` 도 아닌 맨 낱말**이라 옵션 건너뛰기로는
+#    안 넘어간다 — 여기서 멈추면 좌변이 `5` 가 돼 다시 미탐이다(룬드 판에 이 갈래가 없다).
+DURATION = re.compile(r"^[0-9]+(\.[0-9]+)?[smhd]?$")
+
+def effective_tokens(seg):
+    """래퍼를 벗기고 **실제로 도는 명령**의 낱말들을 돌려준다.
+
+    🔑 좌변을 «꼴의 열거»가 아니라 «뜻»으로 적는다 — 뜻은 「이 낱말의 rc 가 제 것인가」다.
+       `git_subcommand()` 가 이미 같은 생각(옵션과 그 값을 건너뛰고 진짜 낱말을 찾는다)을
+       하고 있었는데 **`git` 축에만 걸려 있어서** 이 래퍼 축으로 안 왔다. 같은 파일 안에서
+       한 함수 옆에 있던 기법이 안 건너온 것 — 「근거를 조항 «안»에 적으면 그 범위로 닫힌다」.
+    """
+    toks = seg.split()
+    i = 0
+    while i < len(toks):
+        t = toks[i]
+        if t.startswith("-"):                       # 래퍼의 옵션
+            i += 1
             continue
-        return w
-    return ""
+        if "=" in t:                                # VAR=v cmd 형태의 앞부분
+            i += 1
+            continue
+        base = t.rsplit("/", 1)[-1]
+        if base not in WRAPPERS:
+            return toks[i:]
+        i += 1
+        if base in ("timeout", "time") and i < len(toks) and DURATION.match(toks[i]):
+            i += 1
+    return []
+
+def first_word(seg):
+    toks = effective_tokens(seg)
+    return toks[0] if toks else ""
 
 # git 의 **전역 옵션 중 값을 따로 받는 것**. 이걸 모르면 그 «값»이 하위명령 자리에 남는다.
 # 🔴 룬드 실측: `git -C /path commit … | tail && push` 가 rc=0 이었다 — `-C` 는 옵션이라 걸러지고
@@ -112,8 +149,14 @@ GIT_VALUE_GLOBALS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace",
                      "--exec-path", "--super-prefix", "--config-env"}
 
 def git_subcommand(seg):
-    """옵션(과 그 값)을 건너뛰고 **첫 비옵션 낱말**을 하위명령으로 본다."""
-    toks = seg.split()
+    """옵션(과 그 값)을 건너뛰고 **첫 비옵션 낱말**을 하위명령으로 본다.
+
+    🔑 좌변이 `seg.split()` 이면 `timeout 60 git … ` 에서 i=1 이 `60` 을 가리킨다 —
+       래퍼를 벗긴 낱말 목록 위에서 세야 두 수리가 «겹쳐서» 산다(`timeout 60 git -C /r push`).
+    """
+    toks = effective_tokens(seg)
+    if not toks:
+        return ""
     i = 1
     while i < len(toks):
         t = toks[i]

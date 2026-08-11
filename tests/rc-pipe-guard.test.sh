@@ -243,6 +243,32 @@ case "$_bait_got" in
 esac
 
 echo
+echo "⑧ 래퍼 — rc 를 «가로채지 않는» 것들을 벗기고 본다 (룬드 #155 동형, 실측 2026-08-11)"
+# 🔴 여기 초록이 값을 하려면 **맨몸이 막힌다**가 같이 서 있어야 한다 — 아래 ①·② 가 그 대조군이다.
+#   래퍼만 검사하면 「가드가 통째로 고장나서 다 막는다」와 구별이 안 된다.
+blocks "관측쪽 «command» (계약이 시키는 손버릇이라 제일 자주 온다)" \
+       'git push origin main | command tail -3 && echo ok'
+blocks "관측쪽 «timeout <시간>» — 시간 인자가 옵션이 아니라 맨 낱말이다" \
+       'git push origin main | timeout 5 tail -3 && echo ok'
+blocks "관측쪽 «env VAR=값»"          'git push origin main | env LC_ALL=C wc -l && echo ok'
+# 🔑 **효과쪽**은 룬드 판에 없던 축이다 — 그는 관측쪽만 샜다. 나는 긴 git 에 «timeout» 을 쓴다.
+blocks "효과쪽 «timeout 60 git push»" 'timeout 60 git push origin main | tail -3 && echo ok'
+blocks "효과쪽 «nohup»"               'nohup git push origin main | tail -3 && echo ok'
+blocks "래퍼 + «git -C» 가 «겹쳐도» 잡힌다 — 두 수리가 같은 낱말 목록 위에 산다" \
+       'timeout 60 git -C /repo commit -m x | tail -3 && echo ok'
+
+echo
+echo "⑨ [대조군] 🔴 벗기면 «뜻이 달라지는» 것은 벗기지 않는다 — 틀릴 거면 미탐 쪽으로"
+# xargs 는 래퍼가 아니라 자체 실행기라 그 rc 가 xargs 것이다. 벗기면 **오탐**이 되고,
+# 오탐은 가드를 죽인다(사람이 꺼버린다). 이 줄이 없으면 다음 사람이 WRAPPERS 에 xargs 를 넣는다.
+passes "«xargs tail» 은 안 벗긴다 (rc 가 정말 xargs 것)" \
+       'git push origin main | xargs tail -3 && echo ok'
+# 🔑 래퍼를 벗겨도 **끝이 관측 도구가 아니면** 여전히 통과여야 한다 — 벗기기가 좌변을
+#   넓히기만 한 게 아니라 «옳은 낱말»을 집는지 가른다.
+passes "«command python3» 으로 끝나면 그 rc 가 정답이라 안 문다" \
+       'git push origin main | command python3 parse.py && echo ok'
+
+echo
 # 🔸 `${skip:+ …}` 는 `skip=0` 도 «비어 있지 않음»이라 조건이 «항상 참»이었다(룬드 🟡).
 #   그런데 **항상 내는 쪽이 옳다** — 판정 불가 0 도 「쟀는데 0」이라는 값이다. 조건만 뺀다.
 echo "  통과 $pass · 실패 $fail · 판정 불가 $skip"
