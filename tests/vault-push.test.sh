@@ -34,7 +34,7 @@ setup() {
     echo "seed" > "$ROOT/vault/seed.md"
     git -C "$ROOT/vault" add -A
     git -C "$ROOT/vault" commit -q -m "seed"
-    git init -q --bare "$ROOT/remote.git"
+    git init -q --bare -b main "$ROOT/remote.git"
     git -C "$ROOT/vault" remote add origin "$ROOT/remote.git"
     git -C "$ROOT/vault" push -q origin main
 }
@@ -132,6 +132,60 @@ if printf '%s' "" | grep -q '저자'; then
 else
     ok "[대조군] 빈 메시지는 위 검사들을 통과 못 한다"
 fi
+
+# ── ⑨ 🔴 tracked 수정이 있는 채로도 «원격 커밋이 로컬에 온다» (룬드 #179)
+#     `git pull --rebase` 는 dirty tree 에서 rc=128 인데 `|| true` 가 그걸 삼킨다.
+#     그 갈래가 정확히 **pull 이 값을 하는 유일한 자리**다(로컬 수정 + 원격 앞섬).
+setup
+git clone -q -b main "$ROOT/remote.git" "$ROOT/phone"
+echo "폰노트" > "$ROOT/phone/폰노트.md"
+git -C "$ROOT/phone" add -A
+git -C "$ROOT/phone" -c user.name=P -c user.email=p@t commit -q -m "from phone"
+git -C "$ROOT/phone" push -q origin main
+echo "고침" >> "$ROOT/vault/seed.md"          # tracked 수정 → tree dirty
+run_script
+if [ -f "$ROOT/vault/폰노트.md" ]; then
+    ok "dirty tree 에서도 원격 커밋이 로컬에 들어온다"
+else
+    bad "원격 커밋이 안 왔다 — dirty tree 에서 pull 이 rc=128 로 죽고 삼켜졌다" \
+        "미푸시 $(git -C "$ROOT/vault" rev-list --count origin/main..main 2>/dev/null) / $(cat "$ROOT/logs/vault-sync.log" 2>/dev/null)"
+fi
+if [ "$(git -C "$ROOT/vault" rev-list --count origin/main..main 2>/dev/null || echo 9)" = "0" ]; then
+    ok "로컬 커밋이 원격에 올라갔다 (미푸시 0)"
+else
+    bad "미푸시 커밋이 남았다 — 다음 회차에도 같은 자리에서 막혀 누적된다"
+fi
+teardown
+
+# ── ⑩ [대조군] 로컬 변경이 «없어도» 원격 커밋은 받아온다
+#     ⑨ 의 수리(pull 을 커밋 뒤로)만 하면 이 갈래가 «조용히 사라진다» — 무변경이면 그 전에 exit 하니까.
+setup
+git clone -q -b main "$ROOT/remote.git" "$ROOT/phone2"
+echo "폰2" > "$ROOT/phone2/폰노트2.md"
+git -C "$ROOT/phone2" add -A
+git -C "$ROOT/phone2" -c user.name=P -c user.email=p@t commit -q -m "from phone2"
+git -C "$ROOT/phone2" push -q origin main
+run_script                                     # 로컬 변경 0
+if [ -f "$ROOT/vault/폰노트2.md" ]; then
+    ok "[대조군] 로컬 변경 없어도 원격 것을 받아온다"
+else
+    bad "무변경 갈래의 pull 이 사라졌다 — 수리가 다른 갈래를 죽였다"
+fi
+teardown
+
+# ── ⑪ 로그 «디렉터리»가 없어도 사유가 남는다 (룬드 #179 곁가지)
+#     🔑 내 픽스처가 `mkdir -p "$ROOT/logs"` 로 조건을 만들어줘서 ①~⑧ 이 이 갈래를 못 봤다.
+setup
+rm -rf "$ROOT/logs"
+git -C "$ROOT/vault" remote set-url origin "$ROOT/없는-원격.git"
+echo "y" > "$ROOT/vault/y.md"
+run_script
+if [ -s "$ROOT/logs/vault-sync.log" ]; then
+    ok "로그 디렉터리가 없어도 만들어서 남긴다"
+else
+    bad "디렉터리가 없으면 이 PR 의 사유 로깅이 통째로 무음이 된다"
+fi
+teardown
 
 echo ""
 echo "  통과 $pass · 실패 $fail"
