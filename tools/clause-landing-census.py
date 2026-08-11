@@ -101,26 +101,46 @@ def census(old_text, docs, marker=None):
     freq = collections.Counter(TOKEN.findall(corpus))
 
     absent = [f for f in frags if f not in corpus]
-    imperative = [f for f in absent if IMPERATIVE.search(f)]
-    rest = [f for f in absent if not IMPERATIVE.search(f)]
-    causal = [f for f in rest if CAUSAL.search(f)]
 
-    probed = []
-    for f in causal:
-        count, path, kws = reworded_hit(f, docs, freq)
-        probed.append({"조각": f, "공존": count, "파일": path, "키워드": kws})
-    unfound = [r for r in probed if r["공존"] < COOCCUR_MIN]
+    # 🔑 세 버킷 «전부» 프로브한다 — 한 버킷만 재면 나머지가 「안 쟀다」가 아니라
+    #    «없다»처럼 보인다(실측: 인과형만 재던 판이 지시어미 89 와 그밖 466 을 통째로 가렸다).
+    buckets = {"지시어미": [], "인과형": [], "그밖": []}
+    for f in absent:
+        if IMPERATIVE.search(f):
+            buckets["지시어미"].append(f)
+        elif CAUSAL.search(f):
+            buckets["인과형"].append(f)
+        else:
+            buckets["그밖"].append(f)
 
-    return {
+    out = {
         "분모_조각": len(frags),
         "있음": len(frags) - len(absent),
         "없음": len(absent),
-        "없음_지시어미": len(imperative),
-        "없음_나머지": len(rest),
-        "인과형_후보": len(causal),
-        "인과형_재서술로있음": len(causal) - len(unfound),
-        "읽을것": unfound,
+        "버킷": {},
+        "읽을것": [],
+        "판정불가": [],
     }
+    for name, fs in buckets.items():
+        hit = 0
+        for f in fs:
+            count, path, kws = reworded_hit(f, docs, freq)
+            row = {"버킷": name, "조각": f, "공존": count, "파일": path, "키워드": kws}
+            # 🔴 「프로브가 재고 못 찾았다」와 「프로브가 «애초에 못 잰다»」를 가른다.
+            #    희귀 토큰이 둘 미만이면 공존을 물을 수가 없다 — 그건 실패가 아니라 부재다.
+            if len(kws) < COOCCUR_MIN:
+                out["판정불가"].append(row)
+            elif count >= COOCCUR_MIN:
+                hit += 1
+            else:
+                out["읽을것"].append(row)
+        out["버킷"][name] = {
+            "개수": len(fs),
+            "재서술로있음": hit,
+            "읽을것": sum(1 for r in out["읽을것"] if r["버킷"] == name),
+            "판정불가": sum(1 for r in out["판정불가"] if r["버킷"] == name),
+        }
+    return out
 
 
 # --selftest — 두 좌변이 «배타적»이라는 것이 이 도구의 전제다. 깨지면 체가 무의미해진다.
@@ -177,15 +197,20 @@ def main():
     print(f"볼드 조각 {r['분모_조각']}(중복제거)")
     print(f"  ├ 있음 {r['있음']}")
     print(f"  └ 없음 {r['없음']}")
-    print(f"      ├ 지시어미 {r['없음_지시어미']}")
-    print(f"      └ 나머지   {r['없음_나머지']}")
-    print(f"          └ 인과형 {r['인과형_후보']}")
-    print(f"              ├ 재서술로 있음 {r['인과형_재서술로있음']}")
-    print(f"              └ 못 찾음      {len(r['읽을것'])}")
+    print(f"{'버킷':10} {'개수':>5} {'재서술로있음':>12} {'읽을것':>7} {'판정불가':>8}")
+    for name, b in r["버킷"].items():
+        print(
+            f"{name:10} {b['개수']:5d} {b['재서술로있음']:12d} "
+            f"{b['읽을것']:7d} {b['판정불가']:8d}"
+        )
+    print(f"\n읽을 것 {len(r['읽을것'])} · 판정 불가 {len(r['판정불가'])}")
+    # 🔴 판정 불가를 「읽을 것」에 섞지 않는다 — 프로브의 힘이 조각 «길이»에 매달려서,
+    #    짧은 조각은 재고 실패한 게 아니라 «잴 수가 없다». 섞으면 잔여가 부풀고
+    #    「다 읽었다」가 영영 안 온다.
     if r["읽을것"]:
         print("\n=== 사람이 읽을 자리 ===")
         for row in r["읽을것"]:
-            print(f"  · 공존{row['공존']} kw={row['키워드']}")
+            print(f"  · [{row['버킷']}] 공존{row['공존']} kw={row['키워드']}")
             print(f"    {' '.join(row['조각'].split())[:140]}")
     return 0
 

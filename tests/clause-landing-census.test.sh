@@ -34,6 +34,8 @@ cat > "$TMP/old.md" <<'FIX'
 - 🤝 **분모를 안 적으면 「전부」가 거짓이 된다** — 인과형이고 표지 줄에 있다
 - 🤝 **커밋 메시지는 heredoc 으로 적는다** — 명령형이고 표지 줄에 있다
 - **재서술되어 살아남는 줄** 은 새 코퍼스에 낱말로 남는다
+- **과잉이다** 는 희귀 토큰이 하나뿐이라 «프로브가 못 잰다» ⇒ 판정 불가
+- **뻐꾸기 두레박 열쇠고리 셋이 사라진 자리** 는 토큰이 여럿이라 «재고 못 찾았다» ⇒ 읽을 것
 - **공유되는 조각** 이 여기 먼저 나온다
 - 🤝 **공유되는 조각** 이 표지 줄에도 나온다
 - 🤝 여는 별표만 있는 줄 **경계가 갈리는
@@ -104,6 +106,29 @@ esac
 
 out="$(python3 "$TOOL" --corpus "$TMP/corpus" 2>&1)"; rc=$?
 [ "$rc" -ne 0 ] && ok "--old 없이 부르면 rc≠0" || bad "인자가 없는데 조용히 돈다" "rc≠0" "$rc"
+
+echo
+echo "④ 「재고 못 찾았다」와 「애초에 못 잰다」를 섞지 않는다:"
+# 🔴 프로브의 힘이 조각 «길이»에 매달린다 — 희귀 토큰이 둘 미만이면 공존을 물을 수가 없다.
+#   섞으면 잔여가 부풀고(실측 198 → 실제 36) 「다 읽었다」가 영영 안 온다.
+python3 - "$TOOL" "$TMP/old.md" "$TMP/corpus" > "$TMP/split.txt" <<'PY'
+import importlib.util, sys, pathlib
+spec = importlib.util.spec_from_file_location("cl", sys.argv[1])
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+r = m.census(pathlib.Path(sys.argv[2]).read_text(encoding="utf-8"), m.load_corpus(sys.argv[3]))
+short = "과잉이다"
+long_ = "뻐꾸기 두레박 열쇠고리 셋이 사라진 자리"
+print("SHORT_IN_UNMEASURABLE" if any(x["조각"] == short for x in r["판정불가"]) else "SHORT_MISPLACED")
+print("LONG_IN_TOREAD" if any(x["조각"] == long_ for x in r["읽을것"]) else "LONG_MISPLACED")
+PY
+rc_sp=$?
+[ "$rc_sp" -eq 0 ] && ok "분류 프로브가 돌았다" || bad "프로브가 죽었다 — 판정 불가" "0" "$rc_sp"
+grep -q '^SHORT_IN_UNMEASURABLE$' "$TMP/split.txt" \
+    && ok "희귀 토큰 <2 인 조각은 «판정 불가» 로 간다" \
+    || bad "못 재는 것을 「읽을 것」에 섞었다 — 잔여가 부푼다" "SHORT_IN_UNMEASURABLE" "$(head -1 "$TMP/split.txt")"
+grep -q '^LONG_IN_TOREAD$' "$TMP/split.txt" \
+    && ok "재고 못 찾은 조각은 «읽을 것» 으로 간다" \
+    || bad "실측 잔여를 판정 불가로 밀었다" "LONG_IN_TOREAD" "$(tail -1 "$TMP/split.txt")"
 
 echo
 echo "통과 $pass · 실패 $fail"
