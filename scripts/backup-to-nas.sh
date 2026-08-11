@@ -174,11 +174,37 @@ if [ -d "$MEMORY_SRC/.git" ]; then
         log "OK: auto-memory 변경 없음 (커밋 생략)"
     else
         git -C "$MEMORY_SRC" add -A
-        if git -C "$MEMORY_SRC" commit -qm "backup: auto-memory 정기 백업 $(date '+%Y-%m-%d %H:%M')"; then
-            log "OK: auto-memory 커밋 ($PENDING 파일)"
+        # 🔴 **이 커밋은 «내 손 편집»을 쓸어담는다 — 그러면 장부가 거짓이 된다.**
+        #   `add -A` 는 편집 중인 것까지 구분 없이 가져가고, 내 변경이 「정기 백업」이라는
+        #   **남의 메시지 밑**으로 들어간다. 내용 유실은 없지만 나중에 `log -S` 로 유래를
+        #   찾으면 **커밋 메시지가 아무것도 안 말한다.**
+        #   실물: `5603d67`「backup: auto-memory 정기 백업 2026-08-11 08:00」이 그 세션 편집
+        #   **5건**(신규 파일 하나 포함)을 통째로 삼켰다.
+        # 🔑 **닫는 방향을 「안 삼킨다」로 잡으면 백업이 죽는다** — 데몬이 안 담으면 그 시간 동안
+        #   두 번째 사본이 없다. ⇒ **담되 «저자를 참칭하지 않는다»**: 무엇이 들어갔는지
+        #   본문에 열거하고, 저자가 미상이라고 «적는다».
+        # 🔑 목록은 `add -A` **뒤**에 `--cached` 로 뽑는다 — 앞에서 뽑으면 그 사이 바뀐 파일이
+        #   목록에 없는 채 커밋된다(메시지가 커밋 내용보다 낡는다).
+        # 🔴 `core.quotepath` 기본값이 **비ASCII 파일명을 8진 이스케이프**로 낸다
+        #   (`"\354\203\210…"`). 그러면 목록이 있어도 **사람이 못 읽고 `log -S` 로도 안 걸린다**
+        #   — 열거의 목적이 통째로 죽는다. 내 `memory/` 엔 한글 파일명이 산다.
+        #   🔑 시험이 이걸 잡았다: 「신규 파일이 `A` 상태로 잡히나」를 한글 이름으로 물었더니 빨강.
+        _staged="$(git -C "$MEMORY_SRC" -c core.quotepath=false diff --cached --name-status)"
+        _n="$(printf '%s\n' "$_staged" | grep -c . || true)"
+        _msgfile="$(mktemp)"
+        {
+            printf 'backup: auto-memory 정기 백업 %s (데몬 자동 · 저자 미상 %s건)\n\n' \
+                   "$(date '+%Y-%m-%d %H:%M')" "$_n"
+            printf '⚠️ 이 커밋은 «데몬이 쓸어담은» 것이라 저자를 말하지 않는다.\n'
+            printf '   아래 변경은 사람/세션이 만든 것일 수 있고, 이 메시지는 그 유래가 아니다.\n\n'
+            printf '%s\n' "$_staged"
+        } > "$_msgfile"
+        if git -C "$MEMORY_SRC" commit -q -F "$_msgfile"; then
+            log "OK: auto-memory 커밋 ($PENDING 파일, 목록 동봉 ${_n}건)"
         else
             log "WARN: auto-memory 커밋 실패 ($PENDING 파일 미커밋 상태로 남음)"
         fi
+        rm -f "$_msgfile"
     fi
     # 커밋이 없어도 이전 주기의 미푸시분이 남아 있을 수 있어 push는 항상 시도
     UNPUSHED="$(git -C "$MEMORY_SRC" rev-list --count '@{u}..HEAD' 2>/dev/null || echo "unknown")"
