@@ -173,5 +173,75 @@ for f in $_targets; do
 done
 
 echo
+echo "⑥ 🔴 [반대 방향 대조군] help 가 머리 주석 «밖»을 뱉지 않는다"
+# 🔴 왜 이게 따로 있나: ②③④⑤ 는 **전부 «더 나오면 통과»하는 단조 단언**이라
+#   **범위가 «넓어지는» 변이를 구조적으로 못 잡는다.** 실측 2026-08-11 — `-h|--help)` 를
+#   `cat "${BASH_SOURCE[0]}"` 로 갈아 help 가 27→94줄이 되며 **본문 셸 코드가 통째로**
+#   찍혔는데 이 시험은 **5/0/0 초록**이었다. ④ 마저 「94줄 → 95줄」로 통과했다.
+#   🔑 개수 단언은 위쪽이 안 막혀 있다 — 막으려면 **반대 방향 대조군**을 따로 둔다.
+#     (룬드 08-11 ⓨ. 「rc 를 안 바꾸는 수정」·「변이 비용이 기능 구현과 같다」에 이은 셋째)
+# 🔑 좌변을 «셸 낱말 목록»(`set`·`if`·`|`…)으로 안 적는다 — 열거는 열려 있어 다음 문법에
+#   또 뚫린다(룬드 `#187` ④ 지적과 같은 축). **구조로 닫는다**: 머리 주석 블록은
+#   「2번째 줄부터 «첫 비주석·비공백 줄» 직전까지」이고, 그 «밖»의 줄이 help 에 나오면 샌 것이다.
+_leak_of() {
+python3 - "$1" "$2" <<'PY'
+import sys
+lines = open(sys.argv[1], encoding="utf-8").read().splitlines()
+help_txt = open(sys.argv[2], encoding="utf-8").read()
+i = 1                                    # 1번째 줄(shebang)은 건너뛴다
+while i < len(lines) and (lines[i].startswith("#") or not lines[i].strip()):
+    i += 1
+body = lines[i:]                         # 머리 주석 블록 «밖» = 본문
+# 🔸 15자 미만은 뺀다 — 짧은 조각은 주석과 우연히 겹칠 수 있어 오탐이 된다.
+#   좁아지는 쪽으로 실패한다(놓치면 미탐이지 거짓 빨강이 아니다).
+leak = [l.strip() for l in body if len(l.strip()) >= 15 and l.strip() in help_txt]
+print(len(body))
+for l in leak[:3]:
+    print(l)
+PY
+}
+_hf="$_T/help.out"
+for f in $_targets; do
+    bash "$f" --help > "$_hf" 2>&1
+    _res="$(_leak_of "$f" "$_hf")"
+    _bodyn="$(printf '%s\n' "$_res" | head -1)"
+    _leaks="$(printf '%s\n' "$_res" | tail -n +2)"
+    # 🔴 좌변이 비면 아래가 상수 참이 된다 — 분모를 따로 단언한다(② 와 같은 규율).
+    if [ "${_bodyn:-0}" -lt 5 ]; then
+        bad "$f — 본문 줄이 ${_bodyn}줄이다(좌변이 비었다)" "5줄 이상" "${_bodyn:-0}"
+    elif [ -z "$_leaks" ]; then
+        ok "$f — 본문 ${_bodyn}줄 중 help 로 새는 줄 없음"
+    else
+        bad "$f — help 가 본문 코드를 뱉는다" "새는 줄 없음" "$(printf '%s' "$_leaks" | tr '\n' '/')"
+    fi
+done
+
+echo
+echo "⑦ 🔴 [대조군의 대조군] ⑥ 이 실제로 «넓어지는» 변이를 잡나"
+# ⑥ 이 없으면 D 급 변이가 통과하는데, ⑥ 자신이 아무것도 안 보면 그 초록도 같은 값이다.
+_wide="$_T/wide.sh"
+for f in $_targets; do
+    python3 - "$f" "$_wide" <<'PY' 2>/dev/null
+import re, sys
+s = open(sys.argv[1], encoding="utf-8").read()
+s2, n = re.subn(r"-h\|--help\).*?;;",
+                "-h|--help)   cat \"${BASH_SOURCE[0]}\"; exit 0 ;;",
+                s, count=1, flags=re.S)
+open(sys.argv[2], "w", encoding="utf-8").write(s2 if n else "")
+PY
+    if [ ! -s "$_wide" ] || ! bash -n "$_wide" 2>/dev/null; then
+        note "$f — 넓히는 변이 심기가 구문을 깼다(이 축을 못 쟀다)"
+        continue
+    fi
+    bash "$_wide" --help > "$_hf" 2>&1
+    _wleaks="$(_leak_of "$_wide" "$_hf" | tail -n +2)"
+    if [ -n "$_wleaks" ]; then
+        ok "$f — help 를 파일 전체로 넓히니 ⑥ 이 빨개진다"
+    else
+        bad "$f — 파일 전체를 뱉어도 ⑥ 이 초록이다. ⑥ 은 아무것도 안 지킨다" "샘 탐지" "없음"
+    fi
+done
+
+echo
 echo "  통과 $pass · 실패 $fail · 판정 불가 $skip"
 [ "$fail" -eq 0 ] || exit 1
