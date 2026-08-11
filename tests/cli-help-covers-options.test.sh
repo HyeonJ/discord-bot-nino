@@ -147,6 +147,15 @@ for f in $_targets; do
     _before="$(bash "$f" --help 2>&1 | command grep -c '' || true)"; _before="${_before:-0}"
     # 사용법 절 «앞»에 맨 빈 줄 하나 — 사람이 제일 흔히 하는 편집
     awk 'BEGIN{done=0} /^# 사용법:/ && !done {print ""; done=1} {print}' "$f" > "$_blank"
+    # 🔴 **분모 단언 — `/^# 사용법:/` 이 안 맞으면 «아무것도 안 넣고» 이 절이 항진명제가 된다.**
+    #   지금은 대상이 하나라 매칭 1건이지만, ① 이 자랑하는 「새 CLI 가 저절로 분모에 든다」가
+    #   실현되는 순간 그 새 파일이 조용히 이 축을 안 재게 된다(룬드 `#184` 리뷰 곁가지 ③).
+    _b0="$(command grep -c '' "$f" || true)"; _b0="${_b0:-0}"
+    _b1="$(command grep -c '' "$_blank" || true)"; _b1="${_b1:-0}"
+    if [ "$_b1" -ne "$((_b0 + 1))" ]; then
+        note "$f — 빈 줄이 «안 심겼다»(${_b0}→${_b1}줄). \`# 사용법:\` 절이 없다 — 이 축을 못 쟀다"
+        continue
+    fi
     if ! bash -n "$_blank" 2>/dev/null; then
         note "$f — 빈 줄 삽입이 구문을 깼다(이 축을 못 쟀다)"
         continue
@@ -183,6 +192,14 @@ echo "⑥ 🔴 [반대 방향 대조군] help 가 머리 주석 «밖»을 뱉�
 # 🔑 좌변을 «셸 낱말 목록»(`set`·`if`·`|`…)으로 안 적는다 — 열거는 열려 있어 다음 문법에
 #   또 뚫린다(룬드 `#187` ④ 지적과 같은 축). **구조로 닫는다**: 머리 주석 블록은
 #   「2번째 줄부터 «첫 비주석·비공백 줄» 직전까지」이고, 그 «밖»의 줄이 help 에 나오면 샌 것이다.
+# 🔴 **좌변에 «본체가 거는 변환»을 같이 걸어야 한다 — 안 그러면 그 도구 «안쪽»의 유출이
+#    통째로 좌변 밖이다.** 본체 awk 는 `sub(/^# ?/,"")` 로 접두를 벗겨 내보내는데, 첫 판은
+#    `# ` 붙은 «원문»으로만 비교해서 **벗겨져 나온 줄을 하나도 못 봤다.**
+#    실측 2026-08-11(룬드 `#184` 리뷰): `{exit}` → `{next}` 로 갈자 help 가 **27→36줄**로
+#    넓어지고 본문 주석 `rc=2 — 초록 개수로 가른다` 가 새어나왔는데 **leak=0 · 7/0/0 초록**.
+#    🔑 **그리고 변이의 «현실성»이 반대였다** — `cat "$0"` 으로 갈아끼우는 실수는 아무도 안
+#      하고, awk 넉 줄을 손보다 `{exit}` 를 잃는 실수는 **다음 사람이 실제로 한다.** ⑦ 이
+#      통과하던 건 `cat` 이 `#` 을 «그대로» 뱉어서였고, 그건 막아야 할 변이와 성질이 정반대다.
 _leak_of() {
 python3 - "$1" "$2" <<'PY'
 import sys
@@ -192,9 +209,18 @@ i = 1                                    # 1번째 줄(shebang)은 건너뛴다
 while i < len(lines) and (lines[i].startswith("#") or not lines[i].strip()):
     i += 1
 body = lines[i:]                         # 머리 주석 블록 «밖» = 본문
+
+def candidates(raw):
+    """그 줄이 help 에 «나타날 수 있는 꼴»들 — 본체의 변환을 같이 건다."""
+    s = raw.strip()
+    out = [s]
+    if s.startswith("#"):                # 본체 awk 의 `sub(/^# ?/,"")` 와 같은 변환
+        out.append(s[1:].lstrip() if s[1:2] == " " else s[1:])
+    return [c for c in out if len(c) >= 15]
+
 # 🔸 15자 미만은 뺀다 — 짧은 조각은 주석과 우연히 겹칠 수 있어 오탐이 된다.
 #   좁아지는 쪽으로 실패한다(놓치면 미탐이지 거짓 빨강이 아니다).
-leak = [l.strip() for l in body if len(l.strip()) >= 15 and l.strip() in help_txt]
+leak = [c for l in body for c in candidates(l) if c in help_txt]
 print(len(body))
 for l in leak[:3]:
     print(l)
@@ -217,29 +243,47 @@ for f in $_targets; do
 done
 
 echo
-echo "⑦ 🔴 [대조군의 대조군] ⑥ 이 실제로 «넓어지는» 변이를 잡나"
+echo "⑦ 🔴 [대조군의 대조군] ⑥ 이 «현실적인» 넓힘 변이를 잡나 — 두 꼴 다"
 # ⑥ 이 없으면 D 급 변이가 통과하는데, ⑥ 자신이 아무것도 안 보면 그 초록도 같은 값이다.
+#
+# 🔴 **변이 «둘»을 심는다 — 성질이 반대라 하나로는 못 잰다.**
+#   ⓐ `cat "$0"`      : 파일 전체. `#` 을 «그대로» 뱉는다 → 원문 비교로도 잡힌다
+#   ⓑ `{exit}`→`{next}`: 범위 종료를 잃는다. 본체가 `# ` 를 «벗겨» 내보낸다 → 원문 비교로는 안 잡힌다
+#   🔑 **막아야 할 회귀는 ⓑ 다.** `cat` 으로 갈아끼우는 실수는 아무도 안 하고,
+#     awk 를 손보다 종료 조건을 잃는 실수는 다음 사람이 실제로 한다. ⓐ 만 두면
+#     「대조군이 있다」가 **정반대 성질의 변이로만 증명된다**(룬드 `#184` 리뷰).
 _wide="$_T/wide.sh"
-for f in $_targets; do
-    python3 - "$f" "$_wide" <<'PY' 2>/dev/null
+_mutate() {  # $1=원본 $2=산출 $3=종류(cat|noexit)
+python3 - "$1" "$2" "$3" <<'PY' 2>/dev/null
 import re, sys
-s = open(sys.argv[1], encoding="utf-8").read()
-s2, n = re.subn(r"-h\|--help\).*?;;",
-                "-h|--help)   cat \"${BASH_SOURCE[0]}\"; exit 0 ;;",
-                s, count=1, flags=re.S)
-open(sys.argv[2], "w", encoding="utf-8").write(s2 if n else "")
+src, dst, kind = sys.argv[1], sys.argv[2], sys.argv[3]
+s = open(src, encoding="utf-8").read()
+if kind == "cat":
+    s2, n = re.subn(r"-h\|--help\).*?;;",
+                    "-h|--help)   cat \"${BASH_SOURCE[0]}\"; exit 0 ;;",
+                    s, count=1, flags=re.S)
+else:
+    # 범위의 «종료 조건»만 없앤다 — 나머지는 그대로 두는 최소 변이
+    s2, n = re.subn(r"\{exit\}", "{next}", s, count=1)
+open(dst, "w", encoding="utf-8").write(s2 if n else "")
 PY
-    if [ ! -s "$_wide" ] || ! bash -n "$_wide" 2>/dev/null; then
-        note "$f — 넓히는 변이 심기가 구문을 깼다(이 축을 못 쟀다)"
-        continue
-    fi
-    bash "$_wide" --help > "$_hf" 2>&1
-    _wleaks="$(_leak_of "$_wide" "$_hf" | tail -n +2)"
-    if [ -n "$_wleaks" ]; then
-        ok "$f — help 를 파일 전체로 넓히니 ⑥ 이 빨개진다"
-    else
-        bad "$f — 파일 전체를 뱉어도 ⑥ 이 초록이다. ⑥ 은 아무것도 안 지킨다" "샘 탐지" "없음"
-    fi
+}
+for f in $_targets; do
+    for _k in cat noexit; do
+        _mutate "$f" "$_wide" "$_k"
+        if [ ! -s "$_wide" ] || ! bash -n "$_wide" 2>/dev/null; then
+            note "$f — 변이 «$_k» 를 못 심었다(이 축을 못 쟀다)"
+            continue
+        fi
+        bash "$_wide" --help > "$_hf" 2>&1
+        _wn="$(command grep -c '' "$_hf" || true)"; _wn="${_wn:-0}"
+        _wleaks="$(_leak_of "$_wide" "$_hf" | tail -n +2)"
+        if [ -n "$_wleaks" ]; then
+            ok "$f — 변이 «$_k» (help ${_wn}줄) 에 ⑥ 이 빨개진다"
+        else
+            bad "$f — 변이 «$_k» 로 help 가 ${_wn}줄이 됐는데 ⑥ 이 초록이다" "샘 탐지" "없음"
+        fi
+    done
 done
 
 echo
