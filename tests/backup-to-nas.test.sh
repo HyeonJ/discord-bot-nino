@@ -571,6 +571,41 @@ else
   teardown
 fi
 
+# ⑬ **데몬 커밋은 저자를 참칭하지 않는다** — 무엇을 삼켰는지 본문에 열거한다
+#    🔴 왜: `add -A` 는 편집 중인 것까지 구분 없이 가져가서, 사람이 만든 변경이
+#    「정기 백업」이라는 남의 메시지 밑으로 들어간다. 내용 유실은 없지만 **장부가 거짓**이 된다
+#    — `log -S` 로 유래를 찾으면 메시지가 아무것도 안 말한다.
+#    실물: `5603d67` 이 한 세션의 편집 5건(신규 파일 포함)을 통째로 삼켰다.
+#    🔑 「안 삼킨다」로 고치면 백업이 죽는다(그 시간 두 번째 사본이 없다) ⇒ **담되 적는다.**
+setup; init_git_repo
+echo "본문-A" >> "$ROOT/auto-memory/MEMORY.md"
+printf '새 파일\n' > "$ROOT/auto-memory/새로-생긴-메모.md"
+run_backup BACKUP_FORCE_HOUR=09 >/dev/null
+BODY="$(git -C "$ROOT/auto-memory" log -1 --format='%B')"
+
+if printf '%s' "$BODY" | grep -q 'MEMORY.md' && printf '%s' "$BODY" | grep -q '새로-생긴-메모.md'; then
+  ok "삼킨 파일이 커밋 본문에 «열거»된다 (수정 + 신규 둘 다)"
+else
+  bad "커밋 본문이 무엇을 삼켰는지 안 말한다" "$BODY"
+fi
+
+# 🔑 열거만으로는 부족하다 — 읽는 쪽이 그걸 «데몬이 쓸어담은 것»으로 알아야 한다.
+#    안 그러면 목록이 「이 커밋의 저자가 한 일」로 읽혀서 장부가 더 정교하게 거짓말한다.
+if printf '%s' "$BODY" | grep -q '저자를 말하지 않는다'; then
+  ok "저자 미상이라고 «적혀» 있다 (목록이 저자 주장으로 안 읽힌다)"
+else
+  bad "목록만 있고 「저자 미상」 표시가 없다" "$BODY"
+fi
+
+# 🔑 신규 파일은 `git status` 축과 `diff --cached` 축이 갈리는 자리다 —
+#    목록을 `add` «앞»에서 뽑으면 이 케이스가 조용히 빠진다. 상태 문자까지 본다.
+if printf '%s' "$BODY" | grep -qE '^A[[:space:]]+새로-생긴-메모\.md'; then
+  ok "신규 파일이 «A» 상태로 잡힌다 (add 뒤 --cached 로 뽑았다는 증거)"
+else
+  bad "신규 파일의 상태 문자가 없다 — 목록을 add 앞에서 뽑았을 수 있다" "$BODY"
+fi
+teardown
+
 echo
 echo "=== 결과: $pass pass / $fail fail / 판정 불가 $unk ==="
 [[ $fail -eq 0 ]] || exit 1
