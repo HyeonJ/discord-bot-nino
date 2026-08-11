@@ -272,16 +272,16 @@ for f in $_targets; do
     for _k in cat noexit; do
         _mutate "$f" "$_wide" "$_k"
         if [ ! -s "$_wide" ] || ! bash -n "$_wide" 2>/dev/null; then
-            note "$f — 변이 «$_k» 를 못 심었다(이 축을 못 쟀다)"
+            note "$f — 변이 «${_k}» 를 못 심었다(이 축을 못 쟀다)"
             continue
         fi
         bash "$_wide" --help > "$_hf" 2>&1
         _wn="$(command grep -c '' "$_hf" || true)"; _wn="${_wn:-0}"
         _wleaks="$(_leak_of "$_wide" "$_hf" | tail -n +2)"
         if [ -n "$_wleaks" ]; then
-            ok "$f — 변이 «$_k» (help ${_wn}줄) 에 ⑥ 이 빨개진다"
+            ok "$f — 변이 «${_k}» (help ${_wn}줄) 에 ⑥ 이 빨개진다"
         else
-            bad "$f — 변이 «$_k» 로 help 가 ${_wn}줄이 됐는데 ⑥ 이 초록이다" "샘 탐지" "없음"
+            bad "$f — 변이 «${_k}» 로 help 가 ${_wn}줄이 됐는데 ⑥ 이 초록이다" "샘 탐지" "없음"
         fi
     done
 done
