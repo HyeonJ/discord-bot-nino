@@ -83,9 +83,24 @@ git -c init.defaultBranch=main init -q --bare "$ROOT/origin.git"
   && git remote add origin "$ROOT/origin.git" && git push -q -u origin main ) || true
 
 # gh 스텁: 호출을 기록하고, 열린 PR 여부를 GH_STUB_PR_OPEN 으로 조종한다
+#
+# 🔴 **실물 `gh` 는 «cwd 가 레포 안»이 아니면 죽는다** — 이 스텁이 그걸 안 흉내내서
+#   10일간 「PR 생성을 시도했다」가 초록인 채로 **운영에선 0건**이었다(실측 2026-08-11:
+#   `logs/sync-claude-config.log` — `OK: PR 생성` **0회** / `WARN: PR 생성 실패` **14회**,
+#   08-01 21:30 부터 전부 `failed to run git: fatal: not a git repository`).
+#   🔑 **스텁이 실물의 «실패 양식»을 못 흉내내면 그 축은 시험 밖이다.** 좌변이
+#     「gh 를 «불렀나»」였고 실물이 죽는 자리는 「gh 가 «되나»」였다.
+#   실물 확인(같은 날, 세 갈래): 비레포 cwd → rc=1 · 레포 cwd → rc=0 · `-R o/r` → rc=0.
 cat > "$ROOT/gh" <<'GHEOF'
 #!/bin/bash
 echo "$*" >> "$GH_CALLS"
+# 실물 gh 와 같은 전제: cwd 가 git 워크트리 안이거나 `-R` 이 명시돼야 한다.
+if ! printf '%s\n' "$@" | grep -qx -- '-R'; then
+  if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "failed to run git: fatal: not a git repository (or any of the parent directories): .git" >&2
+    exit 1
+  fi
+fi
 case "$1 $2" in
   "pr list") [ "${GH_STUB_PR_OPEN:-0}" = 1 ] && echo 42; exit 0 ;;
   "pr create") echo "https://example.invalid/pr/99"; exit 0 ;;
@@ -95,16 +110,25 @@ GHEOF
 chmod +x "$ROOT/gh"
 SYNC_BRANCH=chore/claude-config-sync
 
+# 🔴 **cron 의 cwd 로 돈다 — 레포 «밖»이다.** 시험이 레포 안에서 부르면 스크립트가
+#   cwd 에 기대는 것을 **공짜로 얻어** 그 의존이 안 보인다(실제로 그래서 10일 안 보였다).
+#   크론은 `cd` 없이 돌아 cwd 가 `$HOME` 이고, `$HOME` 은 git 레포가 아니다.
+NOREPO="$ROOT/norepo"; mkdir -p "$NOREPO"
 run_git() {  # git 단계까지 도는 실행 (gh 스텁 + sync worktree 주입)
-  BOT_DIR="$ROOT/repo" CLAUDE_DIR="$ROOT/live" CONFIG_DIR="$ROOT/repo/claude-config" \
-  LOG_FILE="$ROOT/repo/logs/sync.log" GH_BIN="$ROOT/gh" GH_CALLS="$ROOT/gh-calls.log" \
-  SYNC_WORKTREE="$ROOT/sync-wt" GH_STUB_PR_OPEN="${GH_STUB_PR_OPEN:-0}" bash "$SCRIPT" 2>&1
+  ( cd "$NOREPO" || exit 1
+    BOT_DIR="$ROOT/repo" CLAUDE_DIR="$ROOT/live" CONFIG_DIR="$ROOT/repo/claude-config" \
+    LOG_FILE="$ROOT/repo/logs/sync.log" GH_BIN="$ROOT/gh" GH_CALLS="$ROOT/gh-calls.log" \
+    SYNC_WORKTREE="$ROOT/sync-wt" GH_STUB_PR_OPEN="${GH_STUB_PR_OPEN:-0}" bash "$SCRIPT" 2>&1 )
 }
 main_commits() { git -C "$GITREPO" rev-list --count main; }
 branch_commits() { git -C "$ROOT/origin.git" rev-list --count "$SYNC_BRANCH" 2>/dev/null || echo 0; }
 
 before_main="$(main_commits)"
 printf '# demo v3\n' > "$ROOT/live/skills/demo/SKILL.md"
+# 🔑 **이 실행이 낸 줄만 본다.** 로그는 누적이라 앞 절(gh 를 «안» 주입한 실행)의 WARN 이
+#   섞이고, 그러면 좌변이 「이 실행이 실패했나」가 아니라 「언젠가 실패한 적 있나」가 된다.
+_log0="$(command grep -c '' "$ROOT/repo/logs/sync.log" 2>/dev/null || true)"; _log0="${_log0:-0}"
+since_run() { tail -n +$((_log0 + 1)) "$ROOT/repo/logs/sync.log" 2>/dev/null; }
 out="$(run_git)"; rc=$?
 [ "$rc" -eq 0 ] && ok "종료코드 0" || bad "종료코드 $rc — 중간에 죽었다" "$out"
 grep -q 'committed' "$ROOT/repo/logs/sync.log" \
@@ -127,6 +151,14 @@ git -C "$ROOT/origin.git" show "$SYNC_BRANCH:claude-config/skills/demo/SKILL.md"
 echo "⑧ PR 이 없으면 만들고, 있으면 또 만들지 않는다"
 grep -q 'pr create' "$ROOT/gh-calls.log" 2>/dev/null && ok "PR 생성을 시도했다" \
   || bad "PR 을 만들지 않았다 — 커밋만 브랜치에 쌓이면 아무도 안 본다" "$(cat "$ROOT/gh-calls.log" 2>/dev/null)"
+# 🔴 **「불렀다」와 「됐다」는 다른 축이다.** 위 단언만 두면 gh 가 매번 죽어도 초록이다 —
+#   실물에서 정확히 그랬다(호출 14회 · 성공 0회 · 10일). ⇒ 결과를 따로 잰다.
+since_run | grep -q 'OK: PR 생성' && ok "PR 생성이 «성공»했다" \
+  || bad "PR 생성이 실패했다 — 시도만으론 아무도 안 본다" "성공 로그" "$(since_run | grep -E 'PR' | tail -2)"
+since_run | grep -q 'WARN: gh pr list 실패' \
+  && bad "PR 상태 조회가 실패했다 — 판정 불가라 브랜치가 옛 베이스에 계속 쌓인다" "조회 성공" \
+         "$(since_run | grep 'pr list' | tail -1)" \
+  || ok "PR 상태 조회가 «성공»했다 (판정 불가로 안 빠진다)"
 : > "$ROOT/gh-calls.log"
 printf '# demo v4\n' > "$ROOT/live/skills/demo/SKILL.md"
 GH_STUB_PR_OPEN=1 run_git >/dev/null
