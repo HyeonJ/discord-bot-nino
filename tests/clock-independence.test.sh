@@ -138,6 +138,7 @@ echo "③ 전수 — 훅을 부르는 시험은 시각을 박는다"
 HOOK_BASE="darren-mention-guard.sh"
 EXEMPT="clock-independence.test.sh"   # 이 파일 자신은 «일부러» 안 박고 찌른다
 MISSING=""
+UNKNOWN_FILES=""
 for f in "$SCRIPT_DIR"/*.test.sh; do
   b="$(basename "$f")"
   case " $EXEMPT " in *" $b "*) continue ;; esac
@@ -147,13 +148,27 @@ for f in "$SCRIPT_DIR"/*.test.sh; do
   #   머리 핀을 지워도 뒤 블록들이 각자 `DARREN_NOW_EPOCH=` 를 쓰므로 그 좌변은 여전히 참이다.
   #   ⇒ 좌변을 **«순서»**로 옮긴다: **첫 «훅 호출»보다 첫 «시각 박기»가 앞에 있나.**
   #   그게 정확히 사고의 자리다(머리 블록이 안 박힌 채 훅을 부른다).
-  _inv="$(grep -n 'bash "\$HOOK"' "$f" | head -1 | cut -d: -f1)"
+  # 🔴 **좌변이 «둘»이라 그 사이가 샌다** (룬드 `#175` 리뷰 곁가지, 새 파일 셋으로 재현):
+  #   대상은 **파일명 언급**(`$HOOK_BASE`)으로 고르는데 호출은 **`bash "$HOOK"` 리터럴**로 찾는다.
+  #   ⇒ 직접 경로로 부르거나 변수명이 다른 호출은 **대상으로 뽑히고 호출은 «없음»**이 돼서
+  #     아래 `continue` 에 **조용히 면제**됐다 — 시각을 안 박았는데도.
+  #   🔑 처방은 좌변을 «넓히는» 게 아니라 **못 잰 것을 «판정 불가»로 내는 것**이다.
+  #     넓히면 다음 꼴이 또 오고, 그 다음도 무음이다. 판정 불가는 **시끄럽다**.
+  #   🔸 그리고 이 판불은 **줄어들 수 있다**(꼴을 등재하거나 그 파일을 고치면 없어진다) —
+  #     `#0811-37`「구조적으로 안 줄어드는 판정 불가는 설계 실수」의 **반대편**이라 걸리지 않는다.
+  _inv="$(grep -nE 'bash[[:space:]]+"?\$\{?[A-Za-z_][A-Za-z0-9_]*\}?"?|bash[[:space:]]+[^|]*'"$HOOK_BASE" "$f" \
+          | head -1 | cut -d: -f1)"
   # 🔴 **좌변이 「그 이름이 나오나」면 «주석»이 먼저 걸린다** — 실제로 걸렸다(이 파일 22행이
   #   그 함정을 «설명하는» 주석인데 변이가 그걸로 통과했다). ⇒ **줄머리 대입만** 센다.
   #   같은 병을 오늘 세 번째 본다(비ASCII 가드 오탐 · 룬드 픽스처 · 여기) — 축은 늘
   #   **「말하는 줄」과 「하는 줄」**이다.
   _pin="$(grep -nE '^[[:space:]]*(export[[:space:]]+)?DARREN_NOW_EPOCH=' "$f" | head -1 | cut -d: -f1)"
-  [ -n "$_inv" ] || continue                       # 참조만 하고 안 부르면 대상 아님
+  if [ -z "$_inv" ]; then
+    # ⚠️ 「참조만 하고 안 부른다」와 「부르는데 내가 그 꼴을 모른다」가 **여기서 같은 화면**이다.
+    #   접으면 후자가 무음이 되므로 **판정 불가**로 낸다. 사람이 보고 둘 중 하나로 가른다.
+    UNKNOWN_FILES="${UNKNOWN_FILES}${b} "
+    continue
+  fi
   if [ -z "$_pin" ] || [ "$_pin" -gt "$_inv" ]; then
     MISSING="${MISSING}${b}(호출 ${_inv}행 · 박기 ${_pin:-없음}) "
   fi
@@ -162,6 +177,9 @@ if [ -z "$MISSING" ]; then
   ok "훅을 부르는 시험 전부가 «첫 호출보다 먼저» 시각을 박는다 (면제: $EXEMPT)"
 else
   bad "첫 훅 호출 «앞»에 시각을 안 박은 시험이 있다 — 그 구간은 벽시계에 끌려간다" "$MISSING"
+fi
+if [ -n "$UNKNOWN_FILES" ]; then
+  unknown "훅을 «언급»하는데 호출 꼴을 못 찾았다 — 참조만인지 내가 모르는 꼴인지 안 갈린다: $UNKNOWN_FILES"
 fi
 
 echo ""
