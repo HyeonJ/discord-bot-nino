@@ -56,7 +56,13 @@ fi
 DISCORD_SEND="${DISCORD_SEND:-$BOT_DIR/src/discord-send}"
 ALERT_CHANNEL="${CHECK_AUTH_CHANNEL:-현인-업무}"
 ALERT_INTERVAL="${CHECK_AUTH_ALERT_INTERVAL:-3600}"     # 같은 경보 재발송 간격
-EXPIRY_GRACE="${CHECK_AUTH_EXPIRY_GRACE:-1800}"         # 만료 직후 이 시간은 "갱신 중"으로 본다
+# 🔴 600 인 이유 — 옛 값 1800(30분)은 **20분짜리 만료를 통째로 삼켰다**(2026-08-12 05:46~06:07
+#   실물: 전용 감시가 한 번도 안 울었고 로그도 expiry=ok. 실제로 운 것은 사용량 체커가 «우연히»
+#   401 을 맞은 부수 효과뿐이라, 그게 없었으면 그 20분은 아무 데도 안 남았다).
+#   축은 「무음이냐 갱신 중 오보냐」라 **Ⅲ** — Darren 승인 2026-08-12 `M:4oqv`(「조용히 안 오는 쪽이
+#   시끄럽게 틀리는 쪽보다 나쁘다」를 이 자리에도 적용). ⚠️ 임의로 되돌리지 말 것.
+#   계약은 상수가 아니라 시험이 잡는다 — `tests/check-auth.test.sh` 「20분 만료는 알린다」.
+EXPIRY_GRACE="${CHECK_AUTH_EXPIRY_GRACE:-600}"          # 만료 직후 이 시간은 "갱신 중"으로 본다
 MENTION="${CHECK_AUTH_MENTION:-<@353914579929268226>}"
 
 mkdir -p "$STATE_DIR" 2>/dev/null || true
