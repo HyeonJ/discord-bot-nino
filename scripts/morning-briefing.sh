@@ -59,6 +59,14 @@ CLI_GUARD_ON_REJECT=cli_guard_reject_log
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/cli-guard-boot.sh"
 TODO_TOP="${TODO_TOP:-3}"                 # 상위 몇 개를 읽어줄지
 STALE_DAYS="${STALE_DAYS:-3}"             # 며칠 이상 안 바뀌면 그 사실을 덧붙인다
+
+# 📮 「형이 정할 것」 — 세션 시작 절차만 읽던 목록을 매일 내보낸다.
+# 🔴 왜: 이 목록은 memory/current-tasks.md 에만 살고, 그걸 읽는 것은 **세션 시작 때뿐**이다.
+#   세션이 길게 붙어 있으면 며칠씩 안 나온다(실물 2026-08-11 재검: 끝난 항목이 6시간 넘게
+#   목록에 남아 있었고 아무도 지운 사람이 없었다). Darren 승인 2026-08-12 `M:4oqv`.
+# ⚠️ 좌변은 「## 📮 」 줄이다 — 🤝(룬드 몫)는 **안** 센다. 수신자가 다르다.
+PENDING_FILE="${PENDING_FILE:-$BOT_DIR/memory/current-tasks.md}"
+PENDING_TOP="${PENDING_TOP:-3}"
 DRIFT_HEARTBEAT="${DRIFT_HEARTBEAT:-$BOT_DIR/logs/core-drift.heartbeat}"
 # cron 은 `15 * * * *` = **매시 1회**. 임계 2시간은 곧 "두 번 연속 놓쳐야 경고" 다 —
 # 1회 실패로는 안 울린다(단일 blip 오탐 방지 · health-checker 디바운스와 같은 이유).
@@ -177,6 +185,32 @@ todo_section() {
     tail="${tail:+$tail · }목록 갱신일 못 읽음"
   fi
   [[ -n "$tail" ]] && printf '       (%s)\n' "$tail"
+}
+
+# ── 📮 승인 대기 ─────────────────────────────────────────────────────────────
+# 규약은 할 일 섹션과 같다 — **확인된 빈 상태는 조용**하고 **못 읽은 것은 시끄럽다.**
+# 🔑 이 목록이 낡아 있는 것 자체가 매일 보이는 게 값이다(지운 사람이 없으면 계속 뜬다).
+pending_section() {
+  if [[ ! -f "$PENDING_FILE" ]]; then
+    echo "⚠️ 승인 대기 못 읽음 — $PENDING_FILE 없음"
+    return
+  fi
+
+  # bash 3.2 호환 — mapfile 금지, 배열 `+=` 금지 (위 할 일 섹션과 같은 이유)
+  local items=() total line
+  while IFS= read -r line; do
+    items[${#items[@]}]="$line"
+  done < <(grep '^## 📮 ' "$PENDING_FILE" 2>/dev/null | sed 's/^## 📮 //')
+  total="${#items[@]}"
+  (( total > 0 )) || return   # 확인된 빈 상태 → 줄을 뺀다
+
+  echo "📮 형이 정할 것 ${total}건"
+  local i
+  for (( i = 0; i < total && i < PENDING_TOP; i++ )); do
+    printf '       %s\n' "${items[$i]}"
+  done
+  local rest=$(( total - PENDING_TOP ))
+  (( rest > 0 )) && printf '       (외 %d건)\n' "$rest"
 }
 
 # ── 코어 드리프트 감시 하트비트 ──────────────────────────────────────────────
@@ -347,7 +381,9 @@ $(todo_section)
 
 $(drift_heartbeat_section)
 
-$(unreviewed_pr_section)"
+$(unreviewed_pr_section)
+
+$(pending_section)"
 
 # 섹션이 빠지면서 생긴 3줄 이상의 빈 줄을 정리한다(내용이 없는 건 티 안 나야 한다)
 MSG="$(printf '%s\n' "$MSG" | cat -s)"

@@ -59,10 +59,29 @@ run() {  # run <TODO_FILE> <WEATHER_JSON> [DRIFT_HEARTBEAT] — 항상 --dry-run
   TODO_FILE="$1" WEATHER_JSON="$2" \
     DRIFT_HEARTBEAT="${3:-$ROOT/hb-fresh}" \
     PR_LIST_CMD="${PR_LIST_CMD:-$ROOT/pr-none}" \
+    PENDING_FILE="${PENDING_FILE:-$ROOT/pending-none.md}" \
     DISCORD_SEND="$ROOT/should-not-be-called" \
     bash "$SCRIPT" --dry-run 2>"$ROOT/stderr"
 }
 printf '%s rc=0\n' "$(date '+%Y-%m-%d %H:%M:%S')" > "$ROOT/hb-fresh"
+# 🔴 기본값은 «없는 파일»이 아니라 «존재하는 빈 파일»이라야 한다 — 없는 파일을 가리키면
+#    앞쪽 시험 전부가 "승인 대기 못 읽음" 경고를 달고 나온다(위 pr-none 이 밟은 그 자리).
+printf '# current tasks\n\n## 상태\n아무것도 대기 없음\n' > "$ROOT/pending-none.md"
+cat > "$ROOT/pending-3.md" <<'PMD'
+# current tasks
+
+## 📮 Darren 승인 대기 — 검증 6권 래핑 해제
+본문 아무거나
+
+## 📮 Darren 께 물을 것 — check-auth 유예
+본문
+
+## 📮 Darren 께 보냄 — 답 대기
+본문
+
+## 🤝 이건 승인 대기가 아니다 (룬드 몫)
+본문
+PMD
 
 # 스텁 만들기 — `run()` 의 기본 스텁(pr-none)은 **여기서** 만들어야 한다.
 # ⚠️ 처음엔 ⑪ 구간에서 만들었다가 앞쪽 시험이 전부 "PR 못 읽음" 경고를 달고 나왔고,
@@ -480,6 +499,43 @@ grep -q 'usage:' <<<"$g_out" && ok "  → 사용법을 stdout 으로 낸다" || 
 src_out="$(bash -c 'source "$1" 2>&1; echo "SOURCED_RC=$?"' _ "$SCRIPT" --아무거나 2>&1)"
 grep -q 'SOURCED_RC=0' <<<"$src_out" && ok "🔴 source 해도 인자 파싱이 안 돈다 (부작용 0)" \
   || bad "source 시 부작용" "SOURCED_RC=0" "$src_out"
+
+echo "── ⑫ 📮 승인 대기 — «세션이 안 돌아도» 매일 나온다 ──"
+#
+# 🔴 왜: 📮 목록은 memory/current-tasks.md 에만 살고 그걸 읽는 것은 **세션 시작 절차뿐**이다.
+#   세션이 길게 붙어 있으면 며칠씩 안 나온다 — 실물로 끝난 항목이 6시간, 다른 건 하루를 넘겼고
+#   **아무도 지운 사람이 없었다**(2026-08-11 재검 「8건 중 6건」).
+# 🔑 룬드 브리핑 구멍(*「이미 해둔 걸 묻는다」*)의 **부호 반대판**이다 — 그의 것은 시끄럽고
+#   내 것은 **안 묻는다(무음)**. Darren 기준으로 무음이 더 나쁘다 ⇒ 칸을 만든다.
+# ⚠️ 좌변은 「## 📮 」 줄이다. 🤝(룬드 몫)는 **안** 센다 — 수신자가 다르다.
+out="$(PENDING_FILE="$ROOT/pending-3.md" run "$ROOT/todo.md" "$ROOT/weather.json")"
+grep -q '형이 정할 것 3건' <<<"$out" && ok "📮 건수를 낸다 (🤝 는 안 센다)" \
+  || bad "📮 건수" "형이 정할 것 3건" "$out"
+grep -q '검증 6권 래핑 해제' <<<"$out" && ok "제목을 읽어준다" \
+  || bad "📮 제목" "검증 6권 래핑 해제" "$out"
+
+# 확인된 빈 상태 → 섹션을 뺀다(무음 = 없음). 이 규약은 할 일 섹션과 같다.
+out="$(run "$ROOT/todo.md" "$ROOT/weather.json")"
+grep -q '형이 정할 것' <<<"$out" && bad "0건인데 줄이 나온다" "줄 없음" "$out" \
+  || ok "0건이면 섹션을 통째로 뺀다"
+
+# 🔴 그러나 «못 읽은 것»은 빈 상태와 갈라야 한다 — 이게 없으면 파일이 사라져도 조용하다.
+out="$(PENDING_FILE="$ROOT/no-such-pending.md" run "$ROOT/todo.md" "$ROOT/weather.json")"
+grep -q '승인 대기 못 읽음' <<<"$out" && ok "🔴 파일 부재는 시끄럽다 (빈 상태와 안 뭉친다)" \
+  || bad "부재 무음 금지" "승인 대기 못 읽음" "$out"
+
+# 상위 N 개만 읽고 나머지는 「외 N건」 — 목록이 길어져도 브리핑이 안 부푼다
+# ⚠️ 좌변을 «출력 전체»로 두면 항진명제다 — 할 일 픽스처가 4건이라 TODO_TOP=3 이
+#    「외 1건」을 «이미» 내고 있었다(첫 판이 그래서 구현 없이 초록이었다).
+#    ⇒ 📮 줄 «이후»로 잘라서 본다.
+out="$(PENDING_FILE="$ROOT/pending-3.md" PENDING_TOP=2 run "$ROOT/todo.md" "$ROOT/weather.json")"
+blk="$(sed -n '/형이 정할 것/,$p' <<<"$out")"
+grep -q '외 1건' <<<"$blk" && ok "상위 N 초과는 「외 N건」으로 접는다" \
+  || bad "외 N건(📮 블록 안)" "외 1건" "$out"
+# 대조군 — 같은 좌변을 «구현 없는» 0건 판에 대면 빨개져야 한다(항진명제 재발 방지)
+blk0="$(sed -n '/형이 정할 것/,$p' <<<"$(run "$ROOT/todo.md" "$ROOT/weather.json")")"
+[[ -z "$blk0" ]] && ok "0건이면 그 블록 자체가 없다 (위 단언의 대조군)" \
+  || bad "0건 대조군" "빈 블록" "$blk0"
 
 echo
 echo "  통과 $pass · 실패 $fail"
