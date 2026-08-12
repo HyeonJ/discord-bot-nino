@@ -13,6 +13,19 @@ TMUX_SESSION="${TMUX_SESSION:-nino}"
 FLUSH_LOG="${FLUSH_LOG:-$BOT_DIR/logs/outbox-flush.log}"
 # 주입 경로를 «주입 가능»하게 둔다 — 시험이 진짜 tmux 를 때리지 않게(코어 계약 ⑨와 같은 자리).
 INJECT_CMD="${INJECT_CMD:-}"
+# 🔴 `--dry-run` — 세고 로그만 남기고 «주입하지 않는다».
+#   실물 2026-08-12 09:53·09:54: 이 스크립트를 «진짜 대기함으로 확인»하려고 돌렸더니 그대로 내
+#   세션에 주입됐고, 그중 하나는 버그판이라 **틀린 수(12건)가 «지시»로 도착**했다.
+#   🔑 확인이 계기를 만들면, 계기의 주어를 크론으로 옮겨놓은 것이 확인할 때마다 «나»로 되돌아온다.
+#   🔑 dry 회차는 로그에서 `DRY` 로 갈린다 — 안 그러면 이 로그의 본업(「안 울렸다 ↔ 안 돌았다」)이
+#     「내가 시험한 것 ↔ 크론이 돈 것」에서 다시 무너진다.
+DRY=0
+for a in "$@"; do
+  case "$a" in
+    --dry-run) DRY=1 ;;
+    *) echo "알 수 없는 인자: $a (쓸 수 있는 것: --dry-run)" >&2; exit 2 ;;
+  esac
+done
 
 mkdir -p "$(dirname "$FLUSH_LOG")" 2>/dev/null || true
 stamp() { date '+%Y-%m-%dT%H:%M:%S%z'; }
@@ -42,8 +55,12 @@ PENDING="$(awk '
   END { print (items > 0) ? items : (body > 0 ? 1 : 0) }
 ' "$OUTBOX_FILE")"
 
-echo "$(stamp) pending=$PENDING" >> "$FLUSH_LOG"
+echo "$(stamp) pending=$PENDING$( ((DRY)) && echo " DRY" )" >> "$FLUSH_LOG"
 (( PENDING > 0 )) || exit 0   # 확인된 빈 상태 → 조용
+if (( DRY )); then
+  echo "[dry-run] 주입 안 함 — pending=$PENDING"
+  exit 0
+fi
 
 MSG="📮 놀이터 발신 시각이야 — memory/outbox-botplayground.md 에 ${PENDING}건 쌓여 있어. 하나로 묶어서 봇-놀이터에 보내고 대기함을 비워줘."
 if [[ -n "$INJECT_CMD" ]]; then

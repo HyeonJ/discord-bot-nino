@@ -58,5 +58,22 @@ mk '- 하나'; run >/dev/null 2>&1
 grep -q 'pending=1' "$R/log" 2>/dev/null && ok "건수를 로그에 남긴다" \
   || bad "건수 로그" "pending=1" "$(cat "$R/log" 2>/dev/null)"
 
+echo "── ⑤ 🔴 «검증 실행»이 실물을 쏘면 안 된다 (--dry-run) ──"
+# 실물: 09:53·09:54 에 이 스크립트를 «진짜 파일로 확인»하려고 돌렸더니 그대로 내 세션에 주입됐다.
+#   그중 하나는 버그판이라 **틀린 수(12건)가 «지시»로 도착**했다. 확인이 계기를 만들면 안 된다.
+# 🔑 그리고 dry 회차는 로그에서 «갈려야» 한다 — 안 그러면 이 로그의 본업(「안 울렸다 ↔ 안 돌았다」를
+#   가르는 것)이 「내가 시험한 것 ↔ 크론이 돈 것」에서 다시 무너진다.
+mk '- 하나'; : > "$R/injected"; : > "$R/log"
+OUTBOX_FILE="$R/outbox.md" INJECT_CMD="$R/inject" FLUSH_LOG="$R/log" bash "$S" --dry-run >/dev/null 2>&1
+rc=$?
+[[ ! -s "$R/injected" ]] && ok "--dry-run 은 주입하지 않는다" || bad "dry 인데 주입" "0건" "$(cat "$R/injected")"
+[[ "$rc" -eq 0 ]] && ok "--dry-run 은 rc=0 (확인은 실패가 아니다)" || bad "dry rc" "0" "rc=$rc"
+grep -q 'pending=1 DRY' "$R/log" 2>/dev/null && ok "dry 회차는 로그에서 실회차와 갈린다" \
+  || bad "dry 표지" "pending=1 DRY" "$(cat "$R/log" 2>/dev/null)"
+# 대조군 — 같은 픽스처를 dry 없이 돌리면 주입되고 표지가 없다
+: > "$R/injected"; : > "$R/log"; run >/dev/null 2>&1
+[[ -s "$R/injected" ]] && ! grep -q 'DRY' "$R/log" && ok "대조군: dry 없으면 주입되고 표지도 없다" \
+  || bad "대조군" "주입 있음 · DRY 없음" "$(cat "$R/log" 2>/dev/null)"
+
 echo; echo "  통과 $pass · 실패 $fail"
 [[ "$fail" -eq 0 ]]
