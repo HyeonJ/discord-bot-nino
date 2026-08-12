@@ -24,7 +24,11 @@ if [[ ! -f "$OUTBOX_FILE" ]]; then
   exit 1
 fi
 
-# 「## 대기 중」 이후의 실질 항목만 센다 — 플레이스홀더·빈 줄·주석은 항목이 아니다.
+# 「## 대기 중」 이후의 실질 «항목»을 센다.
+# 🔴 «줄»을 세면 안 된다 — 첫 실사용에서 항목 2건이 `pending=12` 로 나왔다(줄을 세고 「N건」이라
+#   불렀다). 시험 픽스처가 전부 «한 줄짜리 항목»이라 줄 수와 항목 수가 같아 **이 축을 안 쟀다**.
+# 🔑 항목의 단위는 `### ` 제목이다. 제목 없이 본문만 있으면 **한 건**으로 센다
+#   (형식을 안 지킨 것을 0건으로 접으면 그 건이 조용히 사라진다 — 부재는 조용하다).
 PENDING="$(awk '
   /^## 대기 중/ { on = 1; next }
   /^## / { on = 0 }
@@ -32,9 +36,10 @@ PENDING="$(awk '
     line = $0
     gsub(/^[ \t]+|[ \t]+$/, "", line)
     if (line == "" || line == "(비어 있음)" || line ~ /^>/) next
-    n++
+    if (line ~ /^### /) { items++; next }
+    body++
   }
-  END { print n + 0 }
+  END { print (items > 0) ? items : (body > 0 ? 1 : 0) }
 ' "$OUTBOX_FILE")"
 
 echo "$(stamp) pending=$PENDING" >> "$FLUSH_LOG"

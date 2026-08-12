@@ -23,6 +23,17 @@ run >/dev/null 2>&1
 grep -q '놀이터' "$R/injected" 2>/dev/null && ok "주입문에 무엇을 하라는지가 들어 있다" \
   || bad "주입문 내용" "놀이터 언급" "$(cat "$R/injected" 2>/dev/null)"
 
+echo "── ①-b 🔴 «항목»을 센다 — 줄이 아니다 (첫 실사용에서 2건이 12로 나왔다) ──"
+# 옛 픽스처는 전부 «한 줄짜리 항목»이라 줄 수와 항목 수가 같았다 ⇒ 이 축을 하나도 안 쟀다.
+#   경계를 재는 픽스처가 없으면 좌변이 틀려도 초록이다(같은 날 check-auth 에서 밟은 그것).
+printf '# 대기함\n\n## 대기 중\n\n### 1. 첫 건\n- 줄 하나\n- 줄 둘\n- 줄 셋\n\n### 2. 둘째 건\n- 줄 하나\n' > "$R/outbox.md"
+: > "$R/injected"
+run >/dev/null 2>&1
+grep -q 'pending=2' "$R/log" 2>/dev/null && ok "여러 줄 항목 둘 → pending=2 (줄 수 8이 아니다)" \
+  || bad "항목 수" "pending=2" "$(tail -1 "$R/log" 2>/dev/null)"
+grep -q '2건' "$R/injected" 2>/dev/null && ok "주입문의 「N건」도 항목 수다" \
+  || bad "주입문 건수" "2건" "$(cat "$R/injected" 2>/dev/null)"
+
 echo "── ② 🔴 빈 상태는 조용하다 (확인된 빈 상태 ≠ 실패) ──"
 mk '(비어 있음)'; : > "$R/injected"
 run >/dev/null 2>&1
