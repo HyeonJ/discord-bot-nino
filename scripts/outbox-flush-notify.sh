@@ -66,12 +66,23 @@ MSG="📮 놀이터 발신 시각이야 — memory/outbox-botplayground.md 에 $
 # 🔴 주입 실패를 «삼키지» 않는다 — 이 도구의 존재 이유가 「안 울렸다 ↔ 안 돌았다」를 가르는
 #   것인데, 마지막 단계가 조용히 실패하면 그 구별이 정확히 거기서 사라진다.
 #   (룬드 `4425734` 좌변: `2>/dev/null` 은 실패를 «뒤 명령의 에러»로 미뤄 원인을 못 가르게 한다.)
+# 🔴 `tmux send-keys` 를 «직접» 부르지 않는다 — 코어 `tmux-send.sh` 가 닫아둔 구멍을 다시 연다.
+#   실물 2026-08-12 18:00: 직접 호출이 rc=0 을 냈는데 텍스트가 **입력창에 92분 앉아 있다가**
+#   19:32 릴레이의 Enter 에 «붙어서» 제출됐다(한 user 레코드에 둘이 구분자 없이 이어짐).
+#   코어가 이미 갖고 있던 것: 텍스트와 `C-m` 을 «따로» + 컴포저 대기 + 입력창 잔류 검사 후 재전송.
+# 🔑 그래서 좌변이 `rc` 면 안 된다 — rc 는 「tmux 에 넣었다」지 「컴포저가 삼켰다」가 아니다.
+# 🔑 폴백으로 raw 를 두지 않는다(「필수면 기본값 대신 에러」) — 폴백이 곧 방금 샌 경로다.
+TMUX_SEND="${TMUX_SEND:-$HOME/yaksu-bot-core-live/tmux-send.sh}"
 if [[ -n "$INJECT_CMD" ]]; then
   "$INJECT_CMD" "$MSG"; inject_rc=$?
+elif [[ -x "$TMUX_SEND" ]]; then
+  # `--pane` 을 명시한다 — 안 주면 `TMUX_SESSION` 과 `TMUX_SEND_PANE` 두 변수가 서로를 오염시킨다.
+  err="$("$TMUX_SEND" "$MSG" --pane "$TMUX_SESSION:0.0" 2>&1)"; inject_rc=$?
+  [[ -n "$err" ]] && echo "$(stamp) tmux-send-stderr: $err" >> "$FLUSH_LOG"
 else
-  escaped="${MSG//\'/\'\\\'\'}"
-  err="$(tmux send-keys -t "$TMUX_SESSION" -- "$escaped" C-m 2>&1)"; inject_rc=$?
-  [[ -n "$err" ]] && echo "$(stamp) tmux-stderr: $err" >> "$FLUSH_LOG"
+  echo "$(stamp) INJECT-FAIL rc=3 no-injector=$TMUX_SEND pending=$PENDING" >> "$FLUSH_LOG"
+  echo "⚠️ 주입기 없음: $TMUX_SEND — 대기 ${PENDING}건이 «알려지지 않았다»" >&2
+  exit 3
 fi
 if (( inject_rc != 0 )); then
   echo "$(stamp) INJECT-FAIL rc=$inject_rc pending=$PENDING" >> "$FLUSH_LOG"

@@ -90,5 +90,38 @@ grep -q 'INJECT-FAIL' "$R/log" 2>/dev/null && ok "주입 실패가 로그에 남
 grep -q 'INJECT-FAIL' "$R/log" && bad "대조군" "표지 없음" "$(cat "$R/log")" \
   || ok "대조군: 주입 성공이면 실패 표지가 없다"
 
+echo "── ⑦ 🔴 주입은 코어 «tmux-send.sh» 를 탄다 (raw send-keys 금지) ──"
+# 실물 2026-08-12 18:00: raw `send-keys "$MSG" C-m` 이 rc=0 을 냈는데 텍스트가 입력창에
+#   92분 앉아 있다가 다음 주입의 Enter 에 «붙어서» 제출됐다. rc 는 「tmux 에 넣었다」지
+#   「컴포저가 삼켰다」가 아니다. 코어 래퍼는 C-m 을 따로 보내고 잔류를 검사한다.
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@" > "%s/tsargv"\n' "$R" > "$R/tmux-send"
+chmod +x "$R/tmux-send"
+mk '- 하나'; : > "$R/log"; rm -f "$R/tsargv"
+OUTBOX_FILE="$R/outbox.md" INJECT_CMD= TMUX_SEND="$R/tmux-send" TMUX_SESSION=testses \
+  FLUSH_LOG="$R/log" bash "$S" >/dev/null 2>&1
+rc=$?
+[[ "$rc" -eq 0 ]] && [[ -s "$R/tsargv" ]] && ok "INJECT_CMD 없으면 tmux-send.sh 를 탄다" \
+  || bad "래퍼 미사용" "tsargv 생성 · rc=0" "rc=$rc argv=$(cat "$R/tsargv" 2>/dev/null)"
+# 🔑 `--pane` 을 «명시»해야 TMUX_SESSION 과 TMUX_SEND_PANE 이 서로를 오염시킬 경로가 없다
+grep -qx -- '--pane' "$R/tsargv" 2>/dev/null && grep -qx -- 'testses:0.0' "$R/tsargv" 2>/dev/null \
+  && ok "--pane 이 세션에서 «유도»돼 전달된다 (하드코딩 아님)" \
+  || bad "--pane 누락" "--pane testses:0.0" "$(cat "$R/tsargv" 2>/dev/null)"
+
+# 🔴 폴백으로 raw 를 두지 않는다 — 폴백이 곧 방금 «샌» 경로다. 없으면 «시끄럽게» 실패한다
+: > "$R/log"
+err="$(OUTBOX_FILE="$R/outbox.md" INJECT_CMD= TMUX_SEND="$R/no-such-injector" \
+  FLUSH_LOG="$R/log" bash "$S" 2>&1 >/dev/null)"
+rc=$?
+[[ "$rc" -ne 0 ]] && grep -q 'INJECT-FAIL' "$R/log" && [[ -n "$err" ]] \
+  && ok "주입기 부재 = rc≠0 + 로그 + stderr (조용한 폴백 없음)" \
+  || bad "주입기 부재가 조용하다" "rc≠0 · INJECT-FAIL · stderr" "rc=$rc err=$err log=$(cat "$R/log")"
+
+# 대조군 — INJECT_CMD 가 있으면 래퍼는 «안» 탄다 (시험이 진짜 tmux 를 못 때린다)
+rm -f "$R/tsargv"; : > "$R/log"
+OUTBOX_FILE="$R/outbox.md" INJECT_CMD="$R/inject" TMUX_SEND="$R/tmux-send" \
+  FLUSH_LOG="$R/log" bash "$S" >/dev/null 2>&1
+[[ ! -e "$R/tsargv" ]] && [[ -s "$R/injected" ]] && ok "대조군: INJECT_CMD 가 래퍼보다 우선한다" \
+  || bad "우선순위" "래퍼 미호출 · INJECT_CMD 호출" "tsargv=$([[ -e "$R/tsargv" ]] && echo 있음 || echo 없음)"
+
 echo; echo "  통과 $pass · 실패 $fail"
 [[ "$fail" -eq 0 ]]
