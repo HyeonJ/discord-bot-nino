@@ -67,6 +67,7 @@ STALE_DAYS="${STALE_DAYS:-3}"             # 며칠 이상 안 바뀌면 그 사�
 # ⚠️ 좌변은 「## 📮 」 줄이다 — 🤝(룬드 몫)는 **안** 센다. 수신자가 다르다.
 PENDING_FILE="${PENDING_FILE:-$BOT_DIR/memory/current-tasks.md}"
 PENDING_TOP="${PENDING_TOP:-3}"
+PENDING_TITLE_MAX="${PENDING_TITLE_MAX:-50}"   # 문자 수(바이트 아님)
 DRIFT_HEARTBEAT="${DRIFT_HEARTBEAT:-$BOT_DIR/logs/core-drift.heartbeat}"
 # cron 은 `15 * * * *` = **매시 1회**. 임계 2시간은 곧 "두 번 연속 놓쳐야 경고" 다 —
 # 1회 실패로는 안 울린다(단일 blip 오탐 방지 · health-checker 디바운스와 같은 이유).
@@ -197,20 +198,61 @@ pending_section() {
   fi
 
   # bash 3.2 호환 — mapfile 금지, 배열 `+=` 금지 (위 할 일 섹션과 같은 이유)
+  # 🔴 «절»이 아니라 «항목»을 센다 — `## 📮 승인 대기 — 8건 중 6건` 은 여섯 건을 담은 «그릇»인데
+  #   제목 하나라 「1건」이 된다. 오늘 아침 outbox 에서 밟은 「줄 vs 항목」의 절-판이고 방향만
+  #   반대다(과소계수). 🔑 두 계수기의 규칙을 같게 둔다 — 하위 `### ` 가 있으면 그것들이 항목이고,
+  #   없으면 그 절 자체가 한 건이다(형식 미준수를 0건으로 접으면 그 건이 조용히 사라진다).
   local items=() total line
   while IFS= read -r line; do
     items[${#items[@]}]="$line"
-  done < <(grep '^## 📮 ' "$PENDING_FILE" 2>/dev/null | sed 's/^## 📮 //')
+  #   ⚠️ 항목 꼴은 실물을 보고 정했다 — 내 첫 판은 `### ` 만 셌는데 실물은 **번호 목록**이고
+  #     번호가 «음수»부터 시작한다(`-2.` `-1.` `0.` `1.`). 픽스처가 실물을 안 닮으면 초록이 거짓이다.
+  #   🔴 **끝난 항목(`~~취소선~~`)은 뺀다** — 절 머리 표지는 「그 절의 «첫 사건»이 끝났나」만 말하고
+  #     항목마다 상태가 다르다(08-12 실측: 「끝남」 표시 절 31개 중 13개가 안에 산 항목을 품고 있었다).
+  #   ✅ 이 좌변이 사람이 센 값을 재현한다 — 실물 절 머리의 「8건 중 6건」과 정확히 일치.
+  done < <(awk '
+    /^## / { if (on && n == 0 && title != "") print title; on = 0; n = 0; title = "" }
+    /^## 📮 / { on = 1; n = 0; title = $0; sub(/^## 📮 +/, "", title); next }
+    on && (/^### / || /^-?[0-9]+\. /) {
+      line = $0
+      sub(/^### +/, "", line); sub(/^-?[0-9]+\. +/, "", line)
+      n++
+      if (line ~ /^~~/) next
+      print line
+    }
+    END { if (on && n == 0 && title != "") print title }
+  ' "$PENDING_FILE" 2>/dev/null)
   total="${#items[@]}"
   (( total > 0 )) || return   # 확인된 빈 상태 → 줄을 뺀다
 
   echo "📮 형이 정할 것 ${total}건"
-  local i
+  # 🔴 제목이 «문단 통째»인 항목이 있다 — 실물 첫 건은 300자가 넘어 브리핑에서 못 읽는다.
+  #   ⚠️ 바이트로 자르면 한글이 깨진다. bash 부분문자열은 이 로케일(C.UTF-8)에서 **문자 단위**다
+  #     (실측: `${x:0:5}` = 15바이트 = 5자).
+  local i line
   for (( i = 0; i < total && i < PENDING_TOP; i++ )); do
-    printf '       %s\n' "${items[$i]}"
+    line="${items[$i]}"
+    (( ${#line} > PENDING_TITLE_MAX )) && line="${line:0:$PENDING_TITLE_MAX}…"
+    printf '       %s\n' "$line"
   done
   local rest=$(( total - PENDING_TOP ))
   (( rest > 0 )) && printf '       (외 %d건)\n' "$rest"
+  pending_unmarked_warn
+}
+
+# 🔴 표지 «밖»은 정의상 관측되지 않고, 그 미탐이 «조용하다» — 위 블록에 뭔가는 뜨므로
+#   「0건」이라는 신호가 없다(룬드 절37 ⑤, `dazebug/assistant` 75e855f).
+# 🔑 좌변을 «표현 꼴의 열거»로 넓히지 않는다 — 꼴은 열린 집합이라 새 표현이 계속 나온다(내 판별식).
+#   대신 **「결정 대기처럼 읽히는데 📮 가 없는 절」의 수**를 낸다. 이건 allowlist 가 아니라
+#   **나그 줄**이라 오탐이 나도 「표지를 붙여라」로 끝난다 — 막지 않으므로 가드를 안 죽인다.
+# ⚠️ 닫힌 절(✅)은 뺀다. 끝난 것까지 매일 세면 재촉이 되고, 재촉은 읽히지 않는다.
+pending_unmarked_warn() {
+  local n
+  n="$(grep -E '^## ' "$PENDING_FILE" 2>/dev/null \
+       | grep -E '승인 대기|답 대기|결정 대기|정할 것|⏸️' \
+       | grep -vE '📮|✅' | wc -l | tr -d ' ')"
+  (( n > 0 )) && printf '       ⚠️ 📮 표지 없는 결정 대기 절 %d개 — 표지를 붙이거나 닫아줘\n' "$n"
+  return 0
 }
 
 # ── 코어 드리프트 감시 하트비트 ──────────────────────────────────────────────

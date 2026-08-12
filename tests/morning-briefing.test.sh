@@ -537,6 +537,64 @@ blk0="$(sed -n '/형이 정할 것/,$p' <<<"$(run "$ROOT/todo.md" "$ROOT/weather
 [[ -z "$blk0" ]] && ok "0건이면 그 블록 자체가 없다 (위 단언의 대조군)" \
   || bad "0건 대조군" "빈 블록" "$blk0"
 
+echo "── ⑫-b 🔴 «그릇»이 1건으로 세어지면 안 된다 (절 vs 항목) ──"
+# 실물: `## 📮 Darren 승인 대기 — 8건 중 6건` 은 여섯 건을 담은 그릇인데 제목 하나라 「1건」이 된다.
+#   오늘 아침 outbox 에서 밟은 「줄 vs 항목」의 «절 vs 항목» 판이다 — 방향만 반대(과소계수).
+cat > "$ROOT/pending-nested.md" <<'EOM'
+## 📮 승인 대기 모음 — 5건 중 3건
+-1. ~~끝난 것 하나~~ ✅ 머지됨
+0. ~~끝난 것 둘~~ ✅ 이미 들어가 있었다
+1. 웹훅 수리
+2. 백업 데몬
+3. 단위 결정
+## 📮 단독 건 — 하위 제목 없음
+- 본문만 있다
+EOM
+out="$(PENDING_FILE="$ROOT/pending-nested.md" run "$ROOT/todo.md" "$ROOT/weather.json" 2>/dev/null)"
+echo "$out" | sed -n '/형이 정할 것/,$p' | grep -q '4건' \
+  && ok "산 항목 3 + 단독 1 = 4건 (절 수 2 도, 전체 항목 5 도 아니다)" \
+  || bad "그릇 계수" "4건" "$(echo "$out" | sed -n '/형이 정할 것/,$p')"
+
+echo "── ⑫-c 🔴 표지 «밖»은 조용하다 — 그래서 시끄럽게 만든다 ──"
+# 룬드 절37 ⑤: 조회 좌변을 표지에 걸면 그 표지가 아닌 항목은 «관측 자체가 없다».
+#   그리고 미탐이 조용하다 — 무언가는 출력되므로 「0건」이라는 신호가 없다.
+# 🔑 좌변을 «표현 꼴의 열거»로 넓히지 않는다(꼴은 열린 집합 — 내 판별식). 대신 «표지 없음»을 센다.
+cat > "$ROOT/pending-unmarked.md" <<'EOM'
+## 📮 잡히는 것
+### 1. 하나
+## ⏸️ MEMORY.md 압축 — 게이트로 보류
+## 🔒 승인 대기 — 한 곳에 모음
+## ✅ 닫힌 것 — Darren 승인 M:xxxx
+EOM
+out="$(PENDING_FILE="$ROOT/pending-unmarked.md" run "$ROOT/todo.md" "$ROOT/weather.json" 2>/dev/null)"
+echo "$out" | grep -q '📮 표지 없는' \
+  && ok "표지 없는 결정 대기 절이 있으면 «시끄럽다»" \
+  || bad "무음 미탐" "표지 없음 경고" "$out"
+echo "$out" | grep -q '2개' \
+  && ok "닫힌 절(✅)은 안 센다 — 재촉이 되면 가드가 죽는다" \
+  || bad "닫힘 제외" "2개" "$out"
+out="$(PENDING_FILE="$ROOT/pending-nested.md" run "$ROOT/todo.md" "$ROOT/weather.json" 2>/dev/null)"
+echo "$out" | grep -q '📮 표지 없는' \
+  && bad "대조군" "경고 없음" "$out" \
+  || ok "대조군: 표지 밖이 없으면 경고도 없다"
+
+echo "── ⑫-d 🔴 긴 제목은 «문자» 단위로 자른다 (바이트로 자르면 한글이 깨진다) ──"
+python3 - "$ROOT/pending-long.md" <<'EOM'
+import sys, io
+io.open(sys.argv[1], "w", encoding="utf-8").write("## 📮 " + "가"*200 + "\n")
+EOM
+out="$(PENDING_FILE="$ROOT/pending-long.md" run "$ROOT/todo.md" "$ROOT/weather.json" 2>/dev/null)"
+blk="$(echo "$out" | sed -n '/형이 정할 것/,$p' | sed -n '2p')"
+echo "$blk" | grep -q '…' && ok "긴 제목은 잘리고 말줄임이 붙는다" || bad "자름" "…" "$blk"
+# 🔴 깨지지 않았나 — 바이트로 잘랐으면 마지막 글자가 깨져 U+FFFD 나 불완전 바이트가 남는다
+python3 - "$blk" <<'EOM'
+import sys
+s = sys.argv[1]
+bad = [c for c in s if c not in "가…" and not c.isspace()]
+sys.exit(1 if bad else 0)
+EOM
+[[ $? -eq 0 ]] && ok "잘린 자리에 깨진 바이트가 없다 (문자 단위 확인)" || bad "한글 깨짐" "가…만 남음" "$blk"
+
 echo
 echo "  통과 $pass · 실패 $fail"
 [[ "$fail" -eq 0 ]]
