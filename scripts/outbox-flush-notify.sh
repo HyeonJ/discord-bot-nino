@@ -63,9 +63,18 @@ if (( DRY )); then
 fi
 
 MSG="📮 놀이터 발신 시각이야 — memory/outbox-botplayground.md 에 ${PENDING}건 쌓여 있어. 하나로 묶어서 봇-놀이터에 보내고 대기함을 비워줘."
+# 🔴 주입 실패를 «삼키지» 않는다 — 이 도구의 존재 이유가 「안 울렸다 ↔ 안 돌았다」를 가르는
+#   것인데, 마지막 단계가 조용히 실패하면 그 구별이 정확히 거기서 사라진다.
+#   (룬드 `4425734` 좌변: `2>/dev/null` 은 실패를 «뒤 명령의 에러»로 미뤄 원인을 못 가르게 한다.)
 if [[ -n "$INJECT_CMD" ]]; then
-  "$INJECT_CMD" "$MSG"
+  "$INJECT_CMD" "$MSG"; inject_rc=$?
 else
   escaped="${MSG//\'/\'\\\'\'}"
-  tmux send-keys -t "$TMUX_SESSION" -- "$escaped" C-m 2>/dev/null
+  err="$(tmux send-keys -t "$TMUX_SESSION" -- "$escaped" C-m 2>&1)"; inject_rc=$?
+  [[ -n "$err" ]] && echo "$(stamp) tmux-stderr: $err" >> "$FLUSH_LOG"
+fi
+if (( inject_rc != 0 )); then
+  echo "$(stamp) INJECT-FAIL rc=$inject_rc pending=$PENDING" >> "$FLUSH_LOG"
+  echo "⚠️ 주입 실패 rc=$inject_rc — 대기 ${PENDING}건이 «알려지지 않았다»" >&2
+  exit "$inject_rc"
 fi

@@ -75,5 +75,20 @@ grep -q 'pending=1 DRY' "$R/log" 2>/dev/null && ok "dry 회차는 로그에서 �
 [[ -s "$R/injected" ]] && ! grep -q 'DRY' "$R/log" && ok "대조군: dry 없으면 주입되고 표지도 없다" \
   || bad "대조군" "주입 있음 · DRY 없음" "$(cat "$R/log" 2>/dev/null)"
 
+echo "── ⑥ 🔴 주입이 «실패»하면 조용하면 안 된다 (룬드 4425734 좌변) ──"
+# 이 도구의 존재 이유가 「안 울렸다 ↔ 안 돌았다」를 가르는 것인데, 마지막 단계가
+#   `2>/dev/null` 로 실패를 삼키면 그 구별이 정확히 거기서 사라진다.
+printf '#!/usr/bin/env bash\nexit 3\n' > "$R/inject-fail"; chmod +x "$R/inject-fail"
+mk '- 하나'; : > "$R/log"
+OUTBOX_FILE="$R/outbox.md" INJECT_CMD="$R/inject-fail" FLUSH_LOG="$R/log" bash "$S" >/dev/null 2>&1
+rc=$?
+grep -q 'INJECT-FAIL' "$R/log" 2>/dev/null && ok "주입 실패가 로그에 남는다" \
+  || bad "주입 실패 무음" "INJECT-FAIL rc=3" "$(cat "$R/log" 2>/dev/null)"
+[[ "$rc" -ne 0 ]] && ok "주입 실패는 rc≠0 (크론이 알 수 있다)" || bad "주입 실패 rc" "≠0" "rc=$rc"
+# 대조군 — 성공하면 그 표지가 «안» 뜬다
+: > "$R/log"; run >/dev/null 2>&1
+grep -q 'INJECT-FAIL' "$R/log" && bad "대조군" "표지 없음" "$(cat "$R/log")" \
+  || ok "대조군: 주입 성공이면 실패 표지가 없다"
+
 echo; echo "  통과 $pass · 실패 $fail"
 [[ "$fail" -eq 0 ]]
