@@ -74,10 +74,17 @@ chmod +x "$WORK/bin/discord-send"
 #   🔑 refresh 가 정상이면 **mtime + 8h ≈ expiresAt** 이다(2026-07-30 실측).
 #      이 픽스처가 그 두 상태를 갈라준다 — 안 갈리면 "정상인데 경보" 를 못 잡는다.
 creds() {
-  local left="$1" anchor="${2:-yes}" f="$WORK/creds-$RANDOM.json"
+  local left="$1" anchor="${2:-yes}" rleft="${3:-}" f="$WORK/creds-$RANDOM.json"
   local exp_ms; exp_ms=$(( ( $(date +%s) + left ) * 1000 ))
-  printf '{"claudeAiOauth":{"accessToken":"x","refreshToken":"y","expiresAt":%d,"subscriptionType":"max"}}' \
-    "$exp_ms" > "$f"
+  # 🔑 $3 을 «안 주면» `refreshTokenExpiresAt` 필드가 아예 없다 — 그게 기존 픽스처의 꼴이고
+  #    새 규칙의 «엄격한 기본값»(증명 못 하면 알린다)이 걸리는 자리다.
+  if [ -n "$rleft" ]; then
+    printf '{"claudeAiOauth":{"accessToken":"x","refreshToken":"y","expiresAt":%d,"refreshTokenExpiresAt":%d,"subscriptionType":"max"}}' \
+      "$exp_ms" "$(( ( $(date +%s) + rleft ) * 1000 ))" > "$f"
+  else
+    printf '{"claudeAiOauth":{"accessToken":"x","refreshToken":"y","expiresAt":%d,"subscriptionType":"max"}}' \
+      "$exp_ms" > "$f"
+  fi
   if [ "$anchor" = yes ]; then
     set_mtime "$f" "$(( exp_ms / 1000 - 28800 ))"    # 만료 - 8시간 = 발급 시각
   else
@@ -422,5 +429,64 @@ printf '%s' "$g_out" | grep -q 'usage:' && ok "  → 사용법을 stdout 으로 
 echo
 # 🔑 형식을 러너 정규식(`통과 ?[0-9]+`)에 맞춘다 — 안 맞으면 `⚠️건수 미상` 이 되고,
 #    그러면 **0개를 쟀어도 초록**이라 시험이 사라진 것을 아무도 모른다(2026-07-30 실측).
+# ══════════════════════════════════════════════════════════════════════════════
+# 🔴 2026-08-13 — `accessToken` 만료는 «사람을 부를 일»이 아니다
+#
+# 실물: 하루 세 번(06:20·14:45·15:45) 「사람이 `/login` 해야 함」이 갔고 **셋 다 오탐**이었다.
+#   `accessToken` 은 만료돼도 «쓰는 순간» `refreshToken` 으로 갱신된다(lazy refresh) —
+#   06:32·15:46 에 프로세스 재시작도 사람 개입도 없이 갱신됐다(파일 mtime 이 내 첫 호출과 일치).
+# 🔑 가르는 값은 «지속 시간»이 아니라 **`refreshToken` 이 살아 있나**다. 그런데 이 도구는
+#   그 필드를 **한 번도 안 봤다** ⇒ 「사람이 필요한 상태」와 「쓰면 낫는 상태」가 구조적으로 안 갈렸다.
+# ══════════════════════════════════════════════════════════════════════════════
+echo "── ⑮ accessToken 만료 + refreshToken 살아 있음 = 사람을 «안» 부른다"
+C="$(creds -7200 no 2246400)"          # access 2시간 전 만료 · refresh 26일 남음
+run "$C"
+if grep -q '만료' "$SENT_LOG" 2>/dev/null; then
+  bad "오탐 — 사람을 불렀다" "발송 없음" "$(cat "$SENT_LOG")"
+else
+  ok "발송 없음 (쓰면 낫는 상태라 사람이 할 일이 없다)"
+fi
+grep -q 'expiry=lazy' "$LOGF" && ok "로그에 expiry=lazy 로 «남는다»(무음이 아니라 기록)"   || bad "expiry=lazy 기록" "있음" "$(cat "$LOGF")"
+
+echo "── ⑯ 🔴 대조군 — refreshToken «도» 만료면 사람을 부른다"
+C="$(creds -7200 no -600)"             # 둘 다 만료
+run "$C"
+grep -q '만료' "$SENT_LOG" 2>/dev/null && ok "대조군: 진짜 로그인 필요 → 발송"   || bad "대조군이 안 울었다" "발송 있음" "$(cat "$SENT_LOG")"
+grep -q 'expiry=stale' "$LOGF" && ok "대조군: expiry=stale"   || bad "expiry=stale" "있음" "$(cat "$LOGF")"
+
+echo "── ⑰ 🔴 필드가 «없으면» 엄격한 쪽 — 증명 못 하는 것을 «낫는다»로 접지 않는다"
+C="$(creds -7200 no)"                  # refreshTokenExpiresAt 필드 자체가 없다
+run "$C"
+grep -q '만료' "$SENT_LOG" 2>/dev/null && ok "필드 부재 = 옛 동작 유지(발송)"   || bad "필드 부재를 lazy 로 접었다" "발송 있음" "$(cat "$SENT_LOG")"
+grep -q 'refresh-expiry-unknown' "$LOGF" && ok "왜 엄격했는지가 로그에 남는다"   || bad "사유 미기록" "refresh-expiry-unknown" "$(cat "$LOGF")"
+
+echo "── ⑱ 🔴 문안이 «관측»과 «처방»을 가른다"
+# 🔑 실물: 내 알림이 「사람이 /login 해야 함」을 «사실»처럼 실어서 룬드가 그걸 관측으로 읽고
+#    자기 갈래 «정의»를 바꿨다(그의 3ec50e6 자기 정정). 접두 `[감시]` 는 「누가 말했나」만 가른다.
+C="$(creds -7200 no -600)"
+run "$C"
+body="$(cat "$SENT_LOG")"
+case "$body" in
+  *"관측:"*) ok "본문에 «관측:» 이 있다" ;;
+  *) bad "관측 라벨 없음" "관측:" "$body" ;;
+esac
+case "$body" in
+  *"처방(추정):"*) ok "본문에 «처방(추정):» 이 있다" ;;
+  *) bad "처방 라벨 없음" "처방(추정):" "$body" ;;
+esac
+# 🔴 대조군 — 라벨만 붙이고 처방이 관측 줄에 남아 있으면 안 갈린 것이다
+obs="$(printf '%s\n' "$body" | sed -n 's/.*관측: *\(.*\)처방(추정):.*/\1/p')"
+# 🔴 좌변이 비면 아래가 «상수 참»이 된다 — 추출 자체를 먼저 단언한다.
+#    (오늘 아침 pr-precheck 에서 깨진 픽스처가 «가짜 초록»을 낸 것과 같은 자리)
+if [ -z "$obs" ]; then
+  bad "대조군 좌변이 비었다 — 이 축을 «못 쟀다»" "관측 줄 추출 성공" "본문: $body"
+else
+  case "$obs" in
+    *"/login"*) bad "처방이 «관측» 줄에 섞였다" "관측 줄에 /login 없음" "$obs" ;;
+    *) ok "대조군: «관측» 줄에 처방이 안 섞였다 (${#obs}자 검사)" ;;
+  esac
+fi
+
+
 echo "  통과 $pass · 실패 $fail"
 [ "$fail" -eq 0 ]

@@ -187,27 +187,58 @@ else
     rm -f "$LAST_ALERT_FILE" 2>/dev/null || true
 fi
 
+# 🔑 「증명 못 하는 것」은 «낫는다»로 안 접는다 — 필드가 없으면 엄격한 쪽(사람을 부른다)이다.
+#   그러면 목록이 낡아도 «좁아지는 쪽»으로 실패한다.
+refresh_alive() {
+    case "${RREMAIN:-na}" in
+        ''|na|*[!0-9-]*) NOTE="${NOTE:+$NOTE,}refresh-expiry-unknown"; return 1 ;;
+        *) [[ $RREMAIN -gt 0 ]] ;;
+    esac
+}
+refresh_state_ko() {
+    case "${RREMAIN:-na}" in
+        ''|na|*[!0-9-]*) echo "만료 여부 미상" ;;
+        *) if [[ $RREMAIN -gt 0 ]]; then echo "유효(${RREMAIN}초 남음)"; else echo "도 만료됨"; fi ;;
+    esac
+}
+
 # ── ② 만료 후 미갱신 ─────────────────────────────────────────────────────────
 if [[ -f "$CREDENTIALS" ]]; then
-    REMAIN="$(python3 - "$CREDENTIALS" <<'PYEOF' 2>/dev/null || echo na
+    # 🔴 두 수를 «같이» 읽는다 — `accessToken` 만 보면 「사람이 필요한 상태」와
+    #    「쓰면 낫는 상태」가 구조적으로 안 갈린다(2026-08-13 오탐 3회의 원인).
+    _both="$(python3 - "$CREDENTIALS" <<'PYEOF' 2>/dev/null || echo "na na"
 import sys, json, time
 try:
-    d = json.load(open(sys.argv[1]))
-    print(int(d["claudeAiOauth"]["expiresAt"] / 1000 - time.time()))
+    d = json.load(open(sys.argv[1]))["claudeAiOauth"]
+    r = d.get("refreshTokenExpiresAt")
+    print(int(d["expiresAt"] / 1000 - time.time()),
+          int(r / 1000 - time.time()) if r else "na")
 except Exception:
-    print("na")
+    print("na na")
 PYEOF
 )"
+    REMAIN="${_both%% *}"; RREMAIN="${_both##* }"
     case "$REMAIN" in
         ''|na|*[!0-9-]*)
             EXPIRY=unknown; NOTE="${NOTE:+$NOTE,}credentials-unreadable" ;;
         *)
-            if [[ $REMAIN -lt $(( -EXPIRY_GRACE )) ]]; then
+            if [[ $REMAIN -lt $(( -EXPIRY_GRACE )) ]] && refresh_alive; then
+                # 🔑 `accessToken` 만 만료 — «쓰는 순간» 갱신된다(lazy refresh). 사람이 할 일이 없다.
+                #   실측 2026-08-13: 06:32·15:46 두 번 다 재시작·사람 개입 «없이» 갱신됐고
+                #   갱신 시각이 내 첫 API 호출과 초 단위로 일치했다.
+                # 🔴 그래도 «무음»이 아니라 «기록»이다 — 부재는 조용해서 아무도 안 본다.
+                EXPIRY=lazy
+                rm -f "$LAST_EXPIRY_FILE" 2>/dev/null || true
+            elif [[ $REMAIN -lt $(( -EXPIRY_GRACE )) ]]; then
                 EXPIRY=stale
                 if should_alert "$LAST_EXPIRY_FILE" "$ALERT_INTERVAL"; then
                     # ⚠️ 호출부가 **둘**이다(로그아웃·여기). 한 자리만 고치면 다른 자리가 남고,
                     #    같은 계약이 여러 자리에 있으면 **한 자리만 덮고도 초록**이 된다(시험 ⑭).
-                    if notify "$MENTION 니노 토큰이 $(( -REMAIN / 60 ))분 전에 만료됐는데 갱신이 안 되고 있어! tmux attach -t nino 후 /login 해줘"; then
+                    # 🔴 «관측»과 «처방»을 문안에서 가른다 — 안 가르면 받는 쪽이 처방을 관측으로 읽는다.
+                    #   실물 2026-08-13: 이 알림의 「사람이 /login 해야 함」을 룬드가 «관측»으로 읽고
+                    #   자기 갈래 «정의»를 바꿨다(그의 3ec50e6 자기 정정).
+                    #   🔑 `[감시]` 접두는 「누가 말했나」만 가르지 「관측인가 판정인가」는 안 가른다.
+                    if notify "$MENTION 관측: 니노 accessToken 이 $(( -REMAIN / 60 ))분 전에 만료됨 · refreshToken $(refresh_state_ko) · 헬스체크 verdict=$VERDICT\n처방(추정): tmux attach -t nino 후 /login"; then
                         mark_alert "$LAST_EXPIRY_FILE"
                         ALERT="${ALERT}+$(sent_label expiry)"
                     else
