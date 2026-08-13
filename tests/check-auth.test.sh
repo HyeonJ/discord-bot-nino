@@ -487,6 +487,57 @@ else
   esac
 fi
 
+echo "── ⑲ 🔴 «로그아웃» 경로 알림도 관측/처방을 가른다 (룬드 #204 리뷰 ②)"
+# 🔑 이 시험이 있어야 하는 이유가 그 PR 자신에 적혀 있었다 — 「호출부가 «둘»이다. 한 자리만
+#    고치면 다른 자리가 남고, 같은 계약이 여러 자리에 있으면 «한 자리만 덮고도 초록»이 된다」.
+#    그 주석을 써놓고 `:173` 을 안 고쳤다. ⇒ 주석은 검사가 아니다.
+C="$(creds 3600 yes 999999)"           # 토큰은 멀쩡 — 로그아웃 축만 본다
+run "$C" FAKE_CLAUDE_OUT="$LOGGED_OUT"
+body="$(cat "$SENT_LOG")"
+case "$body" in
+  *"관측:"*) ok "로그아웃 알림에 «관측:» 이 있다" ;;
+  *) bad "로그아웃 경로에 관측 라벨 없음" "관측:" "$body" ;;
+esac
+case "$body" in
+  *"처방(추정):"*) ok "로그아웃 알림에 «처방(추정):» 이 있다" ;;
+  *) bad "로그아웃 경로에 처방 라벨 없음" "처방(추정):" "$body" ;;
+esac
+# 🔴 대조군 — ⑱ 과 같은 형태. 좌변이 비면 «상수 참»이 되므로 추출을 먼저 단언한다.
+obs="$(printf '%s\n' "$body" | sed -n 's/.*관측: *\(.*\)처방(추정):.*/\1/p')"
+if [ -z "$obs" ]; then
+  bad "대조군 좌변이 비었다 — 이 축을 «못 쟀다»" "관측 줄 추출 성공" "본문: $body"
+else
+  case "$obs" in
+    *"/login"*) bad "처방이 «관측» 줄에 섞였다" "관측 줄에 /login 없음" "$obs" ;;
+    *) ok "대조군: 로그아웃 «관측» 줄에 처방이 안 섞였다 (${#obs}자 검사)" ;;
+  esac
+fi
+
+echo "── ⑳ 🔴 정적 전수 — «새 호출부»가 생겨도 잡힌다 (⑲ 만으로는 다음 자리가 또 샌다)"
+# 🔑 ⑲ 는 «지금 있는 두 자리»를 재고, 이건 «앞으로 생길 자리»를 잰다. 룬드 지적의 근본은
+#    「한 자리만 덮고도 초록」이라 좌변이 «전수»여야 한다 — 그래서 동적 시험 옆에 정적 전수를 둔다.
+# 🔴 판별식: 이건 checklist(밖이 «무검사» = 조용하다)라 좌변이 닫혀 있어야 한다.
+#    ⇒ 리터럴 호출은 라벨을 «재고», 변수 호출은 «판정 불가»로 시끄럽게 낸다(안 재고 넘기지 않는다).
+lit=0; nolabel=0; unmeasured=0
+while IFS= read -r line; do
+  case "$line" in
+    *'notify "'*)
+      lit=$((lit+1))
+      case "$line" in *"관측:"*) : ;; *) nolabel=$((nolabel+1)); echo "     라벨 없음: $line" ;; esac ;;
+    *) unmeasured=$((unmeasured+1)); echo "     판정 불가(변수 인자): $line" ;;
+  esac
+done < <(command grep -nE '(^|[^_[:alnum:]])notify ' "$CHECK" | command grep -v 'notify() *{')
+# 🔴 좌변이 0 이면 이 시험은 «항진명제»다 — 분모부터 단언한다(오늘 아침 pr-precheck 과 같은 자리).
+if [ "$lit" -eq 0 ] && [ "$unmeasured" -eq 0 ]; then
+  bad "좌변이 비었다 — notify 호출을 «못 찾았다»" "호출 ≥ 1건" "grep 결과 0건 (좌변·도구·분모를 다 의심할 것)"
+else
+  [ "$nolabel" -eq 0 ] \
+    && ok "리터럴 notify 호출 ${lit}건 전부 «관측:» 라벨 보유" \
+    || bad "라벨 없는 호출부가 남았다" "0건" "${nolabel}건 / 리터럴 ${lit}건"
+  [ "$unmeasured" -eq 0 ] \
+    && ok "대조군: 변수 인자 호출 0건 — 전수를 «다» 쟀다" \
+    || bad "판정 불가 호출부" "0건" "${unmeasured}건 — 문안이 코드 밖이라 이 시험이 못 잰다"
+fi
 
 echo "  통과 $pass · 실패 $fail"
 [ "$fail" -eq 0 ]

@@ -170,7 +170,10 @@ esac
 
 if [[ "$VERDICT" == "logged_out" ]]; then
     if should_alert "$LAST_ALERT_FILE" "$ALERT_INTERVAL"; then
-        if notify "$MENTION Claude Code 인증이 만료됐어! tmux attach -t nino 후 /login 해줘"; then
+        # 🔴 «만료됐어» 는 추정이었다 — `loggedIn:false` 는 만료·로그아웃·자격증명 손상을 «안 가른다».
+        #   관측(무엇을 봤나)과 처방(무엇을 하라)을 라벨로 가른다. 아래 :241 과 같은 계약이고,
+        #   이 자리가 그때 «빠져 있었다»(룬드 #204 리뷰 ② — 「한 자리만 덮고도 초록」의 실물).
+        if notify "$MENTION 관측: 니노 인증 상태가 「로그아웃」이야 · 헬스체크 verdict=${VERDICT}\n처방(추정): tmux attach -t nino 후 /login"; then
             mark_alert "$LAST_ALERT_FILE"
             ALERT="$(sent_label sent)"
         else
