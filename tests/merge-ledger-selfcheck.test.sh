@@ -20,6 +20,16 @@ CI_YML="$BOT_DIR/.github/workflows/ci.yml"
 pass=0; fail=0; skip=0
 ok()  { echo "  ✅ $1"; pass=$((pass + 1)); }
 bad() { echo "  ❌ $1"; fail=$((fail + 1)); [ -n "${2:-}" ] && echo "     want: $2"; [ -n "${3:-}" ] && echo "     got:  $3"; }
+# 🔴 판정 불가는 «세되 rc 를 안 바꾼다» — 이 파일의 rc 는 끝의 `[ "$fail" -eq 0 ]` 하나다.
+#   왜 rc=2 가 아닌가: 코어 러너가 rc=2 를 받으면 `add_unmeasured "$name"` 으로 이 **파일 전체**를
+#   판정 불가 이름 집합에 넣고(run-tests.sh:214·227), 그 수가 원장 「판정 불가」 칸이 된다.
+#   그런데 축⑥ 의 꼬리는 **머지 직후엔 거의 항상 ≥1** 이라(직전 머지가 아직 원장에 없다)
+#   판불이 11→12 로 «영구히» 올라간다 ⇒ 정상 모드 조건(「판불이 안 늘었다」)이 깨져 동결,
+#   그리고 동결 사전식은 **실패 0 · 판불 증가**를 못 줄여 «어떤 PR 도 못 들어간다».
+#   🔑 CLAUDE.md 가 그 교착을 막으려고 뒷가지를 만든 바로 그 상태를, 이 칸이 «만들» 뻔했다.
+#   ⇒ 원장 절의 처방 문구 「판정 불가로 출력(실패 아님 · rc=2)」에서 **rc=2 는 취소한다.**
+#      시끄럽게 만드는 데 필요한 것은 «출력»이고, rc 는 게이트 입력이라 다른 물건이다.
+und() { echo "  ⛔ $1"; skip=$((skip + 1)); [ -n "${2:-}" ] && echo "     $2"; }
 
 # 🔴 축을 «파이썬 한 곳»에 둔다 — 본 검사와 아래 🧪 역사 대조군이 **같은 코드**를 써야
 #   대조군이 「이 검사가 그때 잡았을까」를 실제로 답한다. 사본이 둘이면 그 답이 흐려진다.
@@ -28,6 +38,10 @@ cat > "$AXES" <<'PYEOF'
 import json, os, re, subprocess, sys
 
 src = sys.argv[1]          # "<ref>:<path>" 또는 파일 경로
+# argv[2] = 꼬리 우변(ref). 주면 축⑥(마지막 행 «이후»의 머지)을 잰다. 안 주면 «안 잰다».
+#   🔴 기본을 「안 잰다」로 둔 이유: ⑤ 의 변이 파일에서도 꼬리가 같이 흔들리면
+#      「어느 축이 물었는지 갈린다」가 깨진다. 축은 하나씩 흔든다.
+tail_ref = sys.argv[2] if len(sys.argv) > 2 else None
 if ":" in src and not os.path.exists(src):
     r = subprocess.run(["git", "show", src], capture_output=True, text=True)
     if r.returncode != 0:
@@ -100,10 +114,25 @@ rec = {r["pr"] for r in rows}
 out["commits"]  = len(log.stdout.splitlines())
 out["missing"]  = sorted(seen - rec)               # 머지됐는데 행이 없다
 out["phantom"]  = sorted(rec - seen)               # 행은 있는데 그 구간의 머지가 아니다
+
+# 축⑥ — 꼬리. [마지막 행 머지 .. tail_ref] 는 축① 의 «분모 밖»이라 위에서 한 번도 안 세어진다.
+#   🔴 이건 실패가 아니다 — 「아직 안 적었을 뿐」과 「빠뜨렸다」를 구별할 수가 없다.
+#      그래서 수만 낸다. 판정은 사람이 한다.
+if tail_ref:
+    t = subprocess.run(["git", "log", "--first-parent", "--format=%s", f"{last}..{tail_ref}"],
+                       capture_output=True, text=True)
+    if t.returncode != 0:
+        out["tail_err"] = f"git log 실패: {t.stderr.strip()[:120]}"
+    else:
+        out["tail"] = sorted({int(m.group(1)) for l in t.stdout.splitlines()
+                              if (m := re.search(r"\(#(\d+)\)\s*$", l))})
 print(json.dumps(out, ensure_ascii=False))
 PYEOF
 
-axes() { python3 "$AXES" "$1"; }
+axes() { python3 "$AXES" "$@"; }
+# 🔑 꼬리의 우변 — CI 에선 PR 브랜치 HEAD 다. PR 자신의 커밋은 아직 `(#N)` 이 안 붙어서
+#   («squash 머지가 붙인다») 정규식에 안 걸린다 ⇒ 좌변이 저절로 «머지된 것»으로 좁혀진다.
+TAIL_REF="${LEDGER_TAIL_REF:-HEAD}"
 # 🔴 `-c '…'`(홑따옴표)다 — `-c "…"` 는 우리 계약 위반이고 코어 pitfalls lint 가 문다.
 #   ⚠️ 여기선 `python3 - <<'PY'` 로 못 바꾼다: stdin 이 이미 파이프에 쓰이므로 그게 축④ 자신이다.
 jq_() { printf '%s' "$1" | python3 -c 'import json,sys;print(json.load(sys.stdin).get(sys.argv[1],""))' "$2"; }
@@ -121,7 +150,7 @@ fi
 
 echo
 echo "── ① 없는 행 · ② 낡은 행 · ③ 복붙 ──"
-J="$(axes "$LEDGER")"
+J="$(axes "$LEDGER" "$TAIL_REF")"
 ERR="$(jq_ "$J" err)"
 if [ -n "$ERR" ]; then
     bad "원장을 못 읽었다 — 「행이 없다」와 「형식이 바뀌었다」를 «실패»로 낸다" "행 ≥ 2" "$ERR"
@@ -147,6 +176,25 @@ else
         # 🔸 반대 방향도 본다 — 번호 오타·다른 레포 행이 섞이면 여기 걸린다.
         [ "$PHANTOM" = "[]" ] && ok "  → 반대 방향도 0 — 구간 밖 PR 번호가 섞이지 않았다" \
                               || bad "축① 행은 있는데 그 구간의 머지가 아니다" "[]" "$PHANTOM"
+    fi
+
+    # ── ⑥ 꼬리 — 축① 의 «분모 밖»을 세서 낸다 ──────────────────────────────────
+    # 🔴 왜 필요한가: 축① 구간은 [첫 행 .. 마지막 행]이라 **마지막 행 이후의 머지는 구조적으로
+    #   안 잡힌다.** 그리고 빠지는 것은 **언제나 꼬리**다(2026-08-14 기준 네 번 반복).
+    #   자기참조라 스스로 못 빠져나온다 — 꼬리를 다 적으면 걸릴 게 없고, 덜 적으면 그 나머지가
+    #   또 꼬리다. 처방을 「다음엔 잊지 말자」로 적어서 **네 번 다 안 들었다.**
+    # 🔑 이 칸이 하는 일은 «판정»이 아니라 «수를 보이게 하는 것»이다. 「아직 안 적었을 뿐」과
+    #   「빠뜨렸다」는 여기서 원리적으로 구별이 안 되므로 실패로 세면 헛빨간불이 된다.
+    TAIL="$(jq_ "$J" tail)"; TAIL_ERR="$(jq_ "$J" tail_err)"
+    if [ -n "$TAIL_ERR" ]; then
+        und "축⑥ 꼬리를 못 쟀다 — $TAIL_ERR" "우변=$TAIL_REF"
+    elif [ -z "$TAIL" ]; then
+        und "축⑥ 꼬리를 «안» 쟀다 — 축①이 못 돌면 꼬리도 못 돈다(얕은 클론 등)" "우변=$TAIL_REF"
+    elif [ "$TAIL" = "[]" ]; then
+        ok "축⑥ 꼬리 0 — 마지막 행 이후의 머지가 없다"
+    else
+        und "축⑥ **꼬리 $TAIL 이 원장에 아직 없다** — 「안 적었을 뿐」인지 「빠뜨렸다」인지는 여기선 못 가른다" \
+            "다음 원장 PR 에 이 번호들을 넣으면 축①의 분모 안으로 들어온다 (우변=$TAIL_REF)"
     fi
 
     BROKEN="$(jq_ "$J" broken)"; NOPREV="$(jq_ "$J" noprev)"
@@ -189,6 +237,26 @@ else
       && ok "🧪 축③ 은 그때 «0» 이었다 — 음성도 맞는다(오탐 아님)" \
       || bad "🧪 축③ 역사 대조군 불일치" "[]" "$HD"
 fi
+
+echo
+echo "── ⑥🧪 꼬리 대조군 — 두 끝을 «고정 sha» 로 박아 낡지 않게 한다 ──"
+# 🔑 축⑥ 은 라이브에선 보통 0 이 아니라서 «늘 시끄러운 칸»과 구별이 안 된다.
+#   ⇒ 같은 코드로 **양성 하나 · 음성 하나**를 고정 좌변에서 만든다. 둘 다 고정 sha 라 안 낡는다.
+#   음성이 없으면 「항상 뭔가 낸다」와 구별이 0 이고, 양성이 없으면 「항상 0 을 낸다」와 구별이 0 이다.
+JT="$(axes "$BEFORE_168" 605c882)"
+TP="$(jq_ "$JT" tail)"
+[ "$TP" = "[161, 162, 163, 164, 165, 168]" ] \
+  && ok "🧪 양성 — #159 까지 적힌 원장 + 우변 605c882 → 꼬리 여섯을 정확히 집는다" \
+  || bad "🧪 축⑥ 양성 대조군 불일치" "[161, 162, 163, 164, 165, 168]" "$TP"
+# 🔸 음성 — 우변을 «마지막 행 자신»으로 두면 구간이 비어 꼬리는 0 이어야 한다.
+JN="$(axes "$BEFORE_168" f8ef631)"
+[ "$(jq_ "$JN" tail)" = "[]" ] \
+  && ok "🧪 음성 — 우변이 마지막 행 sha 면 꼬리 0 (늘 시끄러운 칸이 아니다)" \
+  || bad "🧪 축⑥ 음성 대조군 불일치" "[]" "$(jq_ "$JN" tail)"
+# 🔴 ⑤ 의 변이 파일이 꼬리에 «안» 흔들리는지 — 축을 하나씩 흔든다는 전제 자신을 잰다.
+[ -z "$(jq_ "$(axes "$LEDGER")" tail)" ] \
+  && ok "🧪 우변을 안 주면 축⑥ 은 «안 잰다» — ⑤ 의 변이가 꼬리를 흔들지 않는다" \
+  || bad "🧪 우변 없이도 꼬리가 계산된다 — ⑤ 에서 축이 섞인다" "빈 값" "$(jq_ "$(axes "$LEDGER")" tail)"
 
 echo
 echo "── ⑤ 🧪 변이 — 축③ 의 «양성»은 여기서 만든다(역사에 표본이 없다) ──"
