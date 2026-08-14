@@ -120,6 +120,55 @@ grep -q "C 새로운 것" "$ROOT/sent.txt" && ok "새 항목 포함" || bad "새
 grep -q "A 항목" "$ROOT/sent.txt" && bad "이미 알린 항목을 또 보냈다" "$(cat "$ROOT/sent.txt")" \
   || ok "기존 항목은 다시 안 보낸다"
 
+echo "④-a 🔴 **등급이 바뀐 것은 「새 항목」이 아니라 «전이»다** (2026-08-14 실사고)"
+# 🔴 실물: 인덱스를 32.3KB → 24.8KB 로 **줄였더니** 안정 키가 `idx-bytes:over` → `idx-bytes:warn`
+#   으로 바뀌었고, 「새 항목만」 diff 가 그걸 **새 항목**으로 읽어 경보를 냈다. **좋아졌는데 울었다.**
+#   그리고 메시지가 「인덱스 용량 80% 초과」뿐이라 **나빠져서 온 건지 좋아져서 온 건지 구별이 0**이었다.
+# 🔑 등급을 «키»에 넣은 것 자체는 «설계»다 — 빼면 `500줄`/`1000줄` 이 같은 키가 되어
+#   **한도를 넘어서는 순간이 조용해진다**(⑤-a 주석의 그 자리). ⇒ 고칠 것은 키가 아니라 **메시지의 방향**이다.
+kitems "idx-bytes:over|🚨 인덱스 용량 한도 초과 (32KB/25KB)" "cascade-pending|캐스케이드 대기"; rc_is 1
+out="$(run)"
+kitems "idx-bytes:warn|인덱스 용량 80% 초과 (24KB/25KB)" "cascade-pending|캐스케이드 대기"; rc_is 1
+out="$(run)"
+grep -q "24KB/25KB" "$ROOT/sent.txt" && ok "  → 바뀐 항목 자체는 알린다(무음이 답은 아니다)" \
+  || bad "  → 전이를 통째로 삼켰다" "$(cat "$ROOT/sent.txt")"
+grep -qE 'idx-bytes:over.*→|→.*idx-bytes:warn|전이|↘|↗' "$ROOT/sent.txt" \
+  && ok "🔑 «어디서 왔는지»가 본문에 있다 — 좋아진 건지 나빠진 건지 갈린다" \
+  || bad "🔴 방향이 없다 — 「좋아져서 운 것」과 「나빠져서 운 것」의 글자가 같다" "$(cat "$ROOT/sent.txt")"
+
+echo "④-b 🔴 **진짜 새 항목은 «전이»로 오해되면 안 된다** (④-a 의 오탐 축)"
+# 🔑 ④-a 만 있으면 「아무거나 →로 꾸민다」로도 통과한다. 형제 키가 «없던» 것은 그냥 새 항목이어야 한다.
+kitems "cascade-pending|캐스케이드 대기"; rc_is 1
+out="$(run)"
+kitems "cascade-pending|캐스케이드 대기" "docsize:500줄 초과:new.md|500줄 초과: new.md (512줄)"; rc_is 1
+out="$(run)"
+grep -q "new.md" "$ROOT/sent.txt" && ok "  → 새 항목을 알린다" \
+  || bad "  → 새 항목을 놓쳤다" "$(cat "$ROOT/sent.txt")"
+grep -q '→' "$ROOT/sent.txt" \
+  && bad "🔴 형제가 없는데 «전이»로 꾸몄다 — 없는 좌변을 지어냈다" "$(cat "$ROOT/sent.txt")" \
+  || ok "🔑 형제 키가 없으면 방향을 «안» 붙인다 (지어내지 않는다)"
+
+echo "④-c 🔑 **«주어»가 다르면 형제가 아니다** — 접두사만 보면 남의 전이로 묶인다"
+# 🔴 `docsize:🚨 1000줄 초과:A.md` 와 `docsize:500줄 초과:B.md` 는 접두사가 같지만 **다른 파일**이다.
+#   접두사만으로 짝을 지으면 A 가 사라지고 B 가 생겼을 때 「A → B」라는 **없는 전이**를 만든다.
+kitems "docsize:🚨 1000줄 초과:A.md|🚨 1000줄 초과: A.md (1200줄)"; rc_is 1
+out="$(run)"
+kitems "docsize:500줄 초과:B.md|500줄 초과: B.md (700줄)"; rc_is 1
+out="$(run)"
+grep -q "B.md" "$ROOT/sent.txt" && ok "  → B 를 알린다" || bad "  → B 를 놓쳤다" "$(cat "$ROOT/sent.txt")"
+grep -q 'A\.md.*→\|→.*A\.md' "$ROOT/sent.txt" \
+  && bad "🔴 다른 파일끼리 «전이»로 묶었다 — 주어를 안 봤다" "$(cat "$ROOT/sent.txt")" \
+  || ok "🔑 주어(마지막 칸)가 다르면 형제로 안 묶는다"
+
+echo "④-d ✅ **같은 주어의 등급 변화는 «전이»다** (④-c 의 양성 — 없으면 ④-c 가 항진명제)"
+kitems "docsize:500줄 초과:A.md|500줄 초과: A.md (700줄)"; rc_is 1
+out="$(run)"
+kitems "docsize:🚨 1000줄 초과:A.md|🚨 1000줄 초과: A.md (1200줄)"; rc_is 1
+out="$(run)"
+grep -q '→' "$ROOT/sent.txt" \
+  && ok "🔑 같은 파일의 500→1000 은 전이로 잡는다 (등급이 «올라간» 쪽도 방향이 보인다)" \
+  || bad "🔴 같은 주어인데 전이로 안 묶었다 — ④-c 가 항진명제였다" "$(cat "$ROOT/sent.txt")"
+
 echo "⑤ 🔑 개수가 같아도 **항목이 바뀌면** 알린다 (개수만 보면 놓치는 자리)"
 items "A 항목" "B 항목" "D 교체된 것"; rc_is 1
 out="$(run)"
