@@ -99,9 +99,20 @@ git -C "$BOT_DIR" fetch -q origin 2>/dev/null || log "WARN: git fetch 실패 (�
 #    **reset --hard** 하므로, 판정 불가를 none 으로 읽으면 이미 push 한 커밋을 버리려 하고
 #    push 는 non-FF 로 거부돼 **원격이 조용히 안 갱신된다**(시험이 이걸 잡았다).
 #    모르면 버리지 않는다 = 쌓는다.
+# 🔴 **`gh` 는 «cwd 가 레포 안»이라야 돈다 — 크론은 `cd` 없이 돌아 cwd 가 `$HOME` 이다.**
+#    이 파일의 `git` 은 전부 `git -C "$BOT_DIR"` 로 자리를 «명시»하는데 **`gh` 만 안 했고**,
+#    그래서 08-01 21:30 부터 10일간 `pr list`·`pr create` 가 **한 번도 안 됐다**
+#    (실측: `OK: PR 생성` 0회 / `WARN: PR 생성 실패` 14회 / `WARN: gh pr list 실패` 17회,
+#     전부 `failed to run git: fatal: not a git repository`).
+#    🔑 **같은 처방이 한 함수 옆에 이미 있었는데 「git」이라는 «이름»에 걸려 안 건너왔다**
+#      — `rc-pipe-guard` 의 `git_subcommand` 건과 같은 축이다(`#183`).
+#    ⚠️ 결과가 조용했다: 커밋·push 는 «되므로» 로그가 절반은 OK 다. 브랜치는 자라고
+#      **PR 만 없어서**, 「사본이 둘인데 한쪽이 리뷰 없이 흐른다」가 성립해 있었다.
+gh_here() { ( cd "$BOT_DIR" && "$GH_BIN" "$@" ); }
+
 PR_STATE=unknown
 if command -v "$GH_BIN" >/dev/null 2>&1; then
-    if pr_nums="$("$GH_BIN" pr list --head "$SYNC_BRANCH" --state open --json number -q '.[].number' 2>/dev/null)"; then
+    if pr_nums="$(gh_here pr list --head "$SYNC_BRANCH" --state open --json number -q '.[].number' 2>/dev/null)"; then
         if printf '%s' "$pr_nums" | grep -q '[0-9]'; then PR_STATE=open; else PR_STATE=none; fi
     else
         log "WARN: gh pr list 실패 — PR 상태 판정 불가(브랜치를 초기화하지 않는다)"
@@ -162,7 +173,7 @@ fi
 if [[ "$PR_STATE" == open ]]; then
     log "OK: 열린 PR 에 커밋 추가 (새 PR 안 만듦)"
 elif command -v "$GH_BIN" >/dev/null 2>&1; then
-    if url="$("$GH_BIN" pr create --base main --head "$SYNC_BRANCH" \
+    if url="$(gh_here pr create --base main --head "$SYNC_BRANCH" \
             --title "chore: claude-config 동기화 (라이브 → tracked)" \
             --body "$(printf '%s\n' \
                 'sync-claude-config.sh cron 이 모은 라이브 설정(스킬·훅·settings) 변경이다.' \
