@@ -21,6 +21,9 @@
     "jest": "^30.0.0"
   },
   "jest": {
+    "testMatch": [
+      "**/tests/*.test.js"
+    ],
     "testPathIgnorePatterns": [
       "/node_modules/",
       "/tests/vault-audit\\.test\\.js$",
