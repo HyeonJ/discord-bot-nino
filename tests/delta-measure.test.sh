@@ -23,7 +23,20 @@ SCRIPT="$BOT/scripts/delta-measure.sh"
 
 pass=0; fail=0; skip=0
 ok()   { echo "  ✅ $1"; pass=$((pass + 1)); }
-bad()  { echo "  ❌ $1"; fail=$((fail + 1)); [ -n "${2:-}" ] && printf '%s\n' "$2" | sed 's/^/     /'; }
+# 🔴 «두 꼴»을 받는다: bad "설명" "출력"  ·  bad "설명" "기대" "실제"
+#   옛 판은 `$3` 을 «안 읽어서** 3인자 호출 9곳의 «실제값»이 통째로 버려졌다. 더 나빴던 건
+#   `$2`(기대값)를 출력인 양 찍어서 — `bad "rc" "2" "$rc"` 가 rc=7 일 때도 화면에 `2` 를 냈다.
+#   그건 «통과 조건»이라 읽는 사람이 「맞는데 왜 빨갛지」로 간다.
+#   🔑 **초록일 때는 이 결함이 절대 안 보인다** — 빨개지는 순간에만 드러나는데
+#     그 순간이 정보가 가장 필요한 순간이다(룬드 `#218` 리뷰 ②).
+bad()  {
+  echo "  ❌ $1"; fail=$((fail + 1))
+  if [ "$#" -ge 3 ]; then
+    printf '     기대: %s\n     실제: %s\n' "$2" "$3"
+  elif [ -n "${2:-}" ]; then
+    printf '%s\n' "$2" | sed 's/^/     /'
+  fi
+}
 und()  { echo "  ⛔ $1"; skip=$((skip + 1)); }
 
 [ -f "$SCRIPT" ] || { echo "❌ 없음: $SCRIPT"; exit 1; }
@@ -64,6 +77,21 @@ if printf '%s\n' "$h" | grep -qx '── 결과: 통과 10 · 실패 0 · 판정
   ok "하네스 자기검사 — 요약 줄이 러너 정본 형식과 «글자까지» 같다"
 else
   bad "하네스 자기검사 — 요약 줄 형식이 다르다(도구가 못 읽으면 시험이 대상을 안 잰다)" "$h"
+fi
+
+# 🔴 **`bad()` 자신도 검사한다** — 이 결함은 «초록일 때» 절대 안 보인다.
+#   서브셸에서 부르므로 `fail` 카운터는 안 올라간다.
+hb="$( bad "자기검사(무시)" "2" "7" 2>&1 )"
+if printf '%s\n' "$hb" | grep -q '실제: 7' && printf '%s\n' "$hb" | grep -q '기대: 2'; then
+  ok "하네스 자기검사 — bad() 3인자에서 «기대와 실제가 둘 다» 찍힌다"
+else
+  bad "하네스 자기검사 — bad() 가 실제값을 버린다(빨간 순간에 정보가 사라진다)" "$hb"
+fi
+hb2="$( bad "자기검사(무시)" "출력본문" 2>&1 )"
+if printf '%s\n' "$hb2" | grep -q '출력본문'; then
+  ok "하네스 자기검사 — bad() 2인자 옛 꼴도 그대로 산다(①~⑥이 쓴다)"
+else
+  bad "하네스 자기검사 — 2인자 호환이 깨졌다" "$hb2"
 fi
 
 echo
@@ -154,8 +182,8 @@ out="$(run 1 1)"; rc=$?
 printf '%s\n' "$out" | grep -qx 'DELTA_VERDICT=flaky-head' \
   && ok "🔴 head 두 회차가 다르면 표지가 «flaky-head»" \
   || bad "🔴 흔들림을 «진짜 회귀»로 승격시켰다 — 이 절이 생긴 실물이 그 자리다" "$out"
-[ "$rc" -eq 2 ] && ok "  → rc=2 (real 도 clean 도 아니다 — 못 쟀다)" || bad "rc" "2" "$rc"
-[ "$(runs)" -eq 4 ] && ok "  → 회차 4 (base 둘 · head 둘)" || bad "회차" "4" "$(runs)"
+[ "$rc" -eq 2 ] && ok "  → rc=2 (real 도 clean 도 아니다 — 못 쟀다)" || bad "⑦ flaky-head 는 rc=2 여야 한다" "2" "$rc"
+[ "$(runs)" -eq 4 ] && ok "  → 회차 4 (base 둘 · head 둘)" || bad "⑦ 회차는 4 여야 한다 (base 둘 · head 둘)" "4" "$(runs)"
 printf '%s\n' "$out" | grep -q 'flaky-one' && ok "  → 흔들린 항목을 이름으로 짚는다" \
   || bad "항목 미표시" "flaky-one" "$out"
 
@@ -165,7 +193,7 @@ out="$(run 1 1)"; rc=$?
 printf '%s\n' "$out" | grep -qx 'DELTA_VERDICT=real' \
   && ok "🧪 head 가 «안정적으로» 나쁘면 여전히 real — 회귀 탐지가 안 죽었다" \
   || bad "🧪 real 을 삼켰다 — 수리가 원래 기능을 껐다" "$out"
-[ "$rc" -eq 1 ] && ok "  → rc=1" || bad "rc" "1" "$rc"
+[ "$rc" -eq 1 ] && ok "  → rc=1" || bad "⑦양성 진짜 델타는 rc=1 이어야 한다" "1" "$rc"
 
 echo
 echo "⑧ 🔴 checkout 안전 — 시험이 여태 «이 경로를 통째로» 안 봤다(전부 --no-checkout 이었다)"
@@ -188,7 +216,7 @@ if [ -d "$GR/.git" ]; then
   now="$( cd "$GR" && git symbolic-ref -q --short HEAD || echo '<detached>' )"
   [ "$now" = main ] && ok "🔴 끝나면 «원래 ref»로 돌아온다 (main)" \
     || bad "ref 를 안 되돌렸다 — 작업트리를 가리키는 크론·서비스가 같이 끌려다닌다" "main" "$now"
-  [ "$rc" -eq 0 ] && ok "  → 그러면서 판정은 정상으로 낸다 (rc=0)" || bad "rc" "0" "$rc"
+  [ "$rc" -eq 0 ] && ok "  → 그러면서 판정은 정상으로 낸다 (rc=0)" || bad "⑧ ref 복귀 뒤 판정은 rc=0 이어야 한다" "0" "$rc"
 
   # 🔴 더러운 트리 — checkout 이 덮거나 거부한다. «시작하기 전에» 막는다
   ( cd "$GR" && echo dirty >> f.txt )
@@ -204,6 +232,65 @@ if [ -d "$GR/.git" ]; then
 else
   und "git 레포 픽스처를 못 세웠다 — checkout 축을 못 쟀다(0 으로 접지 않는다)"
   und "  (같은 이유로 더러운 트리 축도 못 쟀다)"
+fi
+
+echo
+echo "⑨ 🔴 --no-checkout 의 「델타 0」은 «안 늘었다»가 아니라 «안 갈랐다» — 표지가 말해야 한다"
+# 🔴 룬드 `#218` 리뷰 ①: 같은 인자에 «플래그 하나만» 더하면 빨강이 초록으로 뒤집히는데
+#   출력에도 표지에도 그 사실이 없었다. 「없다」와 「0」을 접는 것과 같은 병이고,
+#   이 도구 머리말이 그 병을 «자기 논거로» 적어두고 있었다.
+# 🔑 좌변은 «트리 내용»으로 답을 정하는 러너다 — 회차 스텁으로는 «ref 를 갈랐나»를 원리적으로 못 잰다.
+cat > "$ROOT/tree-runner.sh" <<'TR'
+#!/usr/bin/env bash
+c="$(cat f.txt 2>/dev/null || echo none)"
+if [ "$c" = head ]; then
+  echo "── 결과: 통과 31 · 실패 2 · 판정 불가 0"
+  echo "   실패: calendar-tool broken-by-head"
+else
+  echo "── 결과: 통과 32 · 실패 1 · 판정 불가 0"
+  echo "   실패: calendar-tool"
+fi
+TR
+chmod +x "$ROOT/tree-runner.sh"
+
+GR2="$ROOT/repo2"
+( mkdir -p "$GR2" && cd "$GR2" && git init -q -b main \
+  && git config user.email t@t && git config user.name t \
+  && echo base > f.txt && git add f.txt && git commit -q -m base \
+  && git checkout -q -b feat && echo head > f.txt && git commit -q -am head \
+  && git checkout -q main ) >/dev/null 2>&1
+
+if [ -d "$GR2/.git" ]; then
+  trun() { bash "$SCRIPT" --repo-dir "$GR2" --base main --head feat \
+                --cmd "bash $ROOT/tree-runner.sh" "$@" 2>&1; }
+
+  outA="$(trun)"; rcA=$?
+  outB="$(trun --no-checkout)"; rcB=$?
+
+  # ⓐ 진짜로 갈랐을 때 — 델타가 «보여야» 한다 (이 절이 항진명제가 아니라는 양성 대조군)
+  [ "$rcA" -eq 1 ] && ok "🧪 ⓐ checkout 모드는 진짜 델타를 본다 (rc=1)" \
+    || bad "⑨ⓐ checkout 모드에서 델타를 못 봤다 — 이 절의 대조군이 죽는다" "1" "$rcA"
+  printf '%s\n' "$outA" | grep -qx 'DELTA_SCOPE=ref' \
+    && ok "  → 표지 DELTA_SCOPE=ref" || bad "⑨ⓐ 범위 표지" "DELTA_SCOPE=ref" "$outA"
+
+  # ⓑ 플래그 하나로 초록이 된다 — 그런데 «그 사실이 표지에 있다»
+  [ "$rcB" -eq 0 ] && ok "ⓑ --no-checkout 은 같은 트리라 델타가 0 이다 (rc=0)" \
+    || bad "⑨ⓑ rc" "0" "$rcB"
+  printf '%s\n' "$outB" | grep -qx 'DELTA_SCOPE=no-checkout' \
+    && ok "🔴 → 표지가 «안 갈랐다»를 말한다 (DELTA_SCOPE=no-checkout)" \
+    || bad "⑨ⓑ 범위 표지가 침묵한다 — clean 이 「안 늘었다」로 읽힌다" "DELTA_SCOPE=no-checkout" "$outB"
+  printf '%s\n' "$outB" | grep -q '안 갈랐다' \
+    && ok "  → 산문에도 말한다 (표지만 고치면 산문 읽는 사람은 계속 속는다)" \
+    || bad "⑨ⓑ 산문 미표시" "「안 갈랐다」 문구" "$outB"
+
+  # 🔑 **이 절의 핵심 좌변** — 두 판정이 «같은 필드»로 구별 가능한가
+  sA="$(printf '%s\n' "$outA" | sed -n 's/^DELTA_SCOPE=//p')"
+  sB="$(printf '%s\n' "$outB" | sed -n 's/^DELTA_SCOPE=//p')"
+  [ -n "$sA" ] && [ -n "$sB" ] && [ "$sA" != "$sB" ] \
+    && ok "🔑 플래그가 판정을 뒤집을 때 «범위 표지»도 같이 갈린다 — 인용하는 쪽이 그 자리에서 갈 수 있다" \
+    || bad "⑨ 범위가 두 모드에서 구별되지 않는다" "서로 다른 값" "ⓐ=$sA ⓑ=$sB"
+else
+  und "⑨ git 픽스처를 못 세웠다 — 범위 표지 축을 못 쟀다(0 으로 접지 않는다)"
 fi
 
 echo

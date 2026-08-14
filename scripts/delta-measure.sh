@@ -17,6 +17,10 @@
 #
 # 🔸 이 도구가 «판정하지 않는 것»: 머지해도 되나 · 그 실패가 정당한가. 그건 리뷰와 원장이 한다.
 #    여기서 내는 것은 **「이 diff 가 세 축을 늘렸나」** 하나뿐이다.
+#    ⚠️ **그리고 「델타 0 인 회차의 흔들림」도 판정하지 않는다** — 델타가 0 이면 재측정을 «안 하므로»
+#       「양쪽이 안정적으로 같다」와 「둘 다 우연히 같았다」를 못 가른다. 🔑 온도(⑦)는 «1회차가 더 나쁘다»는
+#       단조 방향이 있어 수렴으로 닫히는데 **흔들림은 방향이 없어서** 유한 회차로는 못 닫는다.
+#       ⇒ 못 막으니 **여기 적고 그 질문을 이 도구에 안 던진다**(룬드 `#218` 리뷰 ④).
 #
 # 사용법:
 #   scripts/delta-measure.sh --base <ref> --head <ref> --cmd '<러너 명령>'
@@ -34,9 +38,15 @@
 #      ref 를 옮기는 동안 **운영이 같이 옮겨 다닌다**(2026-08-14 실물).
 #
 # rc: 0 안 늘었다 · 1 늘었다 · 2 판정 불가(0 으로 안 접는다)
-# 표지: 마지막 줄에 `DELTA_VERDICT=clean|real|warm-contaminated|flaky-head`
+# 표지: 마지막 두 줄에 `DELTA_SCOPE=ref|no-checkout` 과 `DELTA_VERDICT=clean|real|warm-contaminated|flaky-head`
 #   — 판정은 «산문»이 아니라 여기서 읽는다
 #   🔑 `flaky-head` = head 두 회차가 «달랐다». 이 diff 의 효과와 흔들림을 못 가르므로 **판정하지 않는다**(rc=2).
+#   🔴 **`DELTA_SCOPE` 가 «따로» 있는 이유 — `--no-checkout` 이면 base·head 가 «같은 트리»에서 돌아
+#      델타가 «항상» 0 이다.** 그때의 `clean` 은 「안 늘었다」가 아니라 **「안 갈랐다」**인데,
+#      한 필드에 접으면 그 둘이 구별되지 않는다(플래그 하나가 빨강을 초록으로 뒤집는데 표지가 침묵).
+#      🔑 이건 이 파일 아래 *「요약 줄이 없으면 0 이 아니라 판정 불가다」*와 **같은 병**이고,
+#         룬드가 `#218` 리뷰 ①에서 «심어서» 실증했다(ⓐ checkout=real rc=1 / ⓑ no-checkout=clean rc=0).
+#      ⇒ 처방은 «막는 것»이 아니라 **말하게 하는 것**이다 — 한 필드는 한 축에만 답한다.
 set -uo pipefail
 
 BASE=""; HEAD_REF=""; CMD=""; REPO_DIR="."; NO_CHECKOUT=0
@@ -64,6 +74,9 @@ done
 [ -n "$BASE" ]     || die "--base 가 없다"
 [ -n "$HEAD_REF" ] || die "--head 가 없다"
 [ -n "$CMD" ]      || die "--cmd 가 없다 — 무엇을 돌릴지 이 도구는 «유도하지 않는다»"
+
+# 🔴 «범위»는 판정과 다른 축이다 — 여기서 한 번 정하고 표지·산문 양쪽이 같은 값을 쓴다.
+if [ "$NO_CHECKOUT" -eq 1 ]; then SCOPE=no-checkout; else SCOPE=ref; fi
 
 # ── 🔴 체크아웃 안전 (첫 실사용에서 둘 다 밟았다, 2026-08-14 `#219` 델타 측정) ──────────
 # ① **원래 ref 를 안 되돌렸다** — 성공해도 head 에 detached 로 남고, 중단되면 «중간 ref»에 남는다.
@@ -100,14 +113,30 @@ measure() {  # $1=라벨 → 전역 M_FAIL·M_UNK·M_SET
   M_FAIL="$(printf '%s\n' "$sum" | sed -E 's/.*실패 ([0-9]+).*/\1/')"
   M_UNK="$(printf '%s\n'  "$sum" | sed -E 's/.*판정 불가 ([0-9]+).*/\1/')"
   # 실패«집합» — 수가 같아도 항목이 바뀌면 다른 것이다(「A 빠지고 B 유입」이 수로는 안 보인다)
-  M_SET="$(printf '%s\n' "$out" | sed -n 's/^[[:space:]]*실패:[[:space:]]*//p' \
+  # 🔴 요약 줄은 `tail -1`(마지막 회차)인데 집합만 «전부» 긁으면 둘이 «다른 회차»를 가리킨다 —
+  #   그리고 이 도구의 판정 좌변이 바로 그 집합이다. `--cmd` 가 자유 문자열이라 러너가 두 번
+  #   도는 명령(`a && b`·하위 러너)이 가능하고, `tail -1` 을 쓴 것 자체가 그 가능성을 인정한 것이다.
+  #   ⇒ 범위를 맞춘다(룬드 `#218` 리뷰 ③).
+  M_SET="$(printf '%s\n' "$out" | sed -n 's/^[[:space:]]*실패:[[:space:]]*//p' | tail -1 \
            | tr ' ' '\n' | sed '/^$/d' | LC_ALL=C sort | tr '\n' ' ')"
   M_SET="${M_SET% }"
 }
 
 say_axes() { printf '   %-10s 실패 %s [%s] · 판불 %s\n' "$1" "$M_FAIL" "${M_SET:-없음}" "$M_UNK"; }
 
+# 🔴 판정은 «두 줄»로 낸다 — 범위(무엇을 갈랐나)와 판정(늘었나)은 «다른 축»이다.
+#   한 필드에 접으면 `--no-checkout` 의 `clean`(=안 갈랐다)이 진짜 `clean`(=안 늘었다)과 구별되지 않는다.
+say_verdict() {
+  echo "DELTA_SCOPE=$SCOPE"
+  echo "DELTA_VERDICT=$1"
+}
+
 echo "🔬 델타 측정 — base=$BASE · head=$HEAD_REF"
+# 🔴 사람이 읽는 쪽에도 «범위»를 말한다 — 표지만 고치면 산문을 읽는 사람은 여전히 속는다.
+if [ "$NO_CHECKOUT" -eq 1 ]; then
+  echo "   ⚠️ **범위 = no-checkout** — base·head 를 «같은 트리»에서 잰다. 이 모드의 「델타 0」은"
+  echo "      「안 늘었다」가 «아니라» **「안 갈랐다」**다. ref 델타가 필요하면 이 플래그를 뺀다."
+fi
 
 measure "base(1회차)" "$BASE";     B1_F="$M_FAIL"; B1_U="$M_UNK"; B1_S="$M_SET"
 M_FAIL="$B1_F" M_UNK="$B1_U" M_SET="$B1_S"; say_axes "base①"
@@ -171,7 +200,7 @@ echo
 if [ "$FLAKY_HEAD" -eq 1 ]; then
     echo "⛔ **판정 불가** — head 두 회차가 달라 이 diff 의 효과를 못 가른다"
     echo "   차이가 난 항목만 따로 여러 번 돌려 «흔들리는지»부터 본다."
-    echo "DELTA_VERDICT=flaky-head"
+    say_verdict flaky-head
     exit 2
 fi
 if [ "$RC" -eq 0 ]; then
@@ -189,8 +218,8 @@ fi
 #   같은 회차에 *「«개선»으로 읽혔다」*라는 설명문도 `grep -q '개선'` 에 걸렸다.
 #   🔑 둘 다 **도구가 옳고 시험의 좌변이 틀린** 경우다 — 산문은 «설명»을 담으므로 반대말이 섞인다.
 #   ⇒ 기계가 읽는 자리를 따로 만든다. 사람용 산문은 위에 그대로 둔다(하나가 둘을 겸하면 또 샌다).
-if   [ "$CONTAMINATED" -eq 1 ]; then echo "DELTA_VERDICT=warm-contaminated"
-elif [ "$RC" -eq 0 ];            then echo "DELTA_VERDICT=clean"
-else                                  echo "DELTA_VERDICT=real"
+if   [ "$CONTAMINATED" -eq 1 ]; then say_verdict warm-contaminated
+elif [ "$RC" -eq 0 ];            then say_verdict clean
+else                                  say_verdict real
 fi
 exit "$RC"
