@@ -431,6 +431,83 @@ GUARD_ENV="" gr --help
 [ "$(g_sends)" -eq 0 ] && ok "--help 는 발송 0건" || bad "help 발송" "0건" "$(g_sends)건"
 printf '%s' "$g_out" | grep -q 'usage:' && ok "  → 사용법을 stdout 으로 낸다" || bad "usage 출력" "usage: 줄" "$g_out"
 
+echo "── ⑰ 🔴 stale 을 «탐침»으로 가른다 — idle 만료와 갱신 고장은 다른 것이다 ──"
+#
+# 🔴 왜 생겼나 (2026-08-14, Darren 이 세서 알려줬다):
+#   *「너 만료 안됐는데 이 알림 하루에 한번씩 꼭 오는거같아」* — 11일에 6번, **전부 verdict=ok**.
+#   오늘 건은 **25초** 차이였다: 경보 16:15:07 · 자격증명 파일 갱신 16:15:32.
+#   기전 — `accessToken` 갱신은 **«호출할 때»** 돈다. 세션이 조용하면 `expiresAt` 은 과거인 채
+#   남고, 옛 판정은 그걸 「갱신이 안 되고 있다」로 읽었다. ⇒ **idle 이 사고로 오독됐다.**
+#
+# 🔴 순진한 수리(「refreshTokenExpiresAt 가 미래면 무해」)는 **쓰면 안 된다** — 룬드 8시간 27분
+#   먹통 때 그의 파일엔 refreshToken 이 **있는데 안 쓰이고 있었다**(2026-07-30 실측).
+#   그 조건이면 그 사고를 「무해」라 불렀을 것이다. **있음 ≠ 쓰임.**
+#
+# ✅ 그래서 좌변이 «필드»가 아니라 «호출»이다: stale 이면 한 번 찔러보고 **파일을 다시 읽는다.**
+#   판정은 탐침의 rc 가 아니라 **「expiresAt 이 미래로 갔나」** — 우리가 실제로 신경 쓰는 그 상태다.
+#   🔑 부수 효과가 처방이다: 찌르는 행위가 갱신을 시켜서 **진단이 곧 수리**다.
+
+# 탐침용 가짜: 호출 횟수를 세고, PROBE_REFRESH=1 이면 자격증명을 «실제로» 갱신한다
+cat > "$WORK/bin/claude-probe" <<'STUB'
+#!/bin/bash
+PROBE=0
+for a in "$@"; do [ "$a" = "-p" ] && PROBE=1; done
+if [ "$PROBE" = 1 ]; then
+  echo probe >> "$PROBE_LOG"
+  [ "${PROBE_RC:-0}" != 0 ] && exit "$PROBE_RC"
+  if [ "${PROBE_REFRESH:-0}" = 1 ]; then
+    python3 -c 'import sys,json,time;p=sys.argv[1];d=json.load(open(p));d["claudeAiOauth"]["expiresAt"]=int((time.time()+28800)*1000);json.dump(d,open(p,"w"))' "$PROBE_CREDS"
+  fi
+  exit 0
+fi
+printf '%s' "${FAKE_CLAUDE_OUT:-}"; exit "${FAKE_CLAUDE_RC:-0}"
+STUB
+chmod +x "$WORK/bin/claude-probe"
+
+probe_run() {   # $1=creds · $2=PROBE_REFRESH · $3=PROBE_RC
+  PROBE_LOG="$WORK/probe-$RANDOM.log"; : > "$PROBE_LOG"
+  run "$1" CLAUDE_BIN="$WORK/bin/claude-probe" FAKE_CLAUDE_OUT="$LOGGED_IN" \
+      PROBE_LOG="$PROBE_LOG" PROBE_CREDS="$1" PROBE_REFRESH="$2" PROBE_RC="${3:-0}"
+}
+probes() { nlines "$PROBE_LOG"; }
+
+# ⓐ 오늘의 실물 — stale 인데 탐침이 갱신시킨다 ⇒ **안 울린다**
+C="$(creds -3600 no)"
+probe_run "$C" 1
+[ "$(nlines "$SENT_LOG")" = 0 ] && ok "🔴 갱신되면 «안» 울린다 (Darren 이 센 6건이 이 자리다)" \
+  || bad "idle 만료 오보" "0건" "$(nlines "$SENT_LOG")건 — 거짓 경보가 그대로다"
+[ "$(probes)" = 1 ] && ok "  → 탐침을 «한 번» 돌았다" || bad "탐침 횟수" "1" "$(probes)"
+grep -q 'expiry=refreshed' "$LOGF" && ok "  🔑 로그가 stale 과 갈라 적는다 (expiry=refreshed)" \
+  || bad "판정 표지" "expiry=refreshed" "$(grep -o 'expiry=[a-z_]*' "$LOGF" | tail -1)"
+
+# ⓑ 🔴 회귀 방지 — 탐침 후에도 미갱신이면 **진짜다.** 룬드 8시간 27분이 이 가지다
+C="$(creds -3600 no)"
+probe_run "$C" 0
+[ "$(nlines "$SENT_LOG")" = 1 ] && ok "🔴 탐침해도 안 갱신되면 «울린다» (룬드 8h27m 회귀 방지)" \
+  || bad "진짜 사고 무음" "1건" "$(nlines "$SENT_LOG")건 — 수리가 사고를 삼켰다"
+grep -q 'expiry=stale' "$LOGF" && ok "  → expiry=stale 로 남는다" \
+  || bad "stale 표지" "expiry=stale" "$(grep -o 'expiry=[a-z_]*' "$LOGF" | tail -1)"
+
+# ⓒ 🔴 탐침이 «죽어도» 무해로 새면 안 된다 — Darren Ⅲ(「조용히 안 오는 쪽이 더 나쁘다」) 보존
+C="$(creds -3600 no)"
+probe_run "$C" 0 9
+[ "$(nlines "$SENT_LOG")" = 1 ] && ok "🔴 탐침이 실패해도 «무해»로 접지 않는다 (시끄러운 쪽으로 실패)" \
+  || bad "탐침 실패 삼킴" "1건" "$(nlines "$SENT_LOG")건 — 탐침 고장이 감지기를 껐다"
+# 🔑 이게 «판정을 탐침 rc 가 아니라 파일 상태»로 두는 이유다 — rc 를 믿으면 이 가지가 뒤집힌다
+
+# ⓓ 🔑 비용 — stale 이 «아니면» 탐침을 아예 안 돈다 (이 스크립트는 5분마다 돈다)
+C="$(creds 3600)"
+probe_run "$C" 1
+[ "$(probes)" = 0 ] && ok "🔑 정상일 땐 탐침 0회 — 5분마다 도는 자리에 비용을 안 넣는다" \
+  || bad "불필요한 탐침" "0" "$(probes)회"
+[ "$(nlines "$SENT_LOG")" = 0 ] && ok "  → 발송도 0건" || bad "정상인데 발송" "0건" "$(nlines "$SENT_LOG")건"
+
+# ⓔ 🧪 ⓐ의 «양성» — 같은 픽스처에서 갱신만 끄면 판정이 뒤집힌다(ⓐ가 항진명제가 아니다)
+C="$(creds -3600 no)"; probe_run "$C" 1; A="$(nlines "$SENT_LOG")"
+C="$(creds -3600 no)"; probe_run "$C" 0; B="$(nlines "$SENT_LOG")"
+[ "$A" != "$B" ] && ok "🧪 갱신 여부 하나로 판정이 갈린다 ($A ↔ $B) — ⓐ가 항진명제가 아니다" \
+  || bad "판정이 안 갈린다" "다른 값" "둘 다 ${A}건 — 탐침이 아무것도 안 재고 있다"
+
 echo
 # 🔑 형식을 러너 정규식(`통과 ?[0-9]+`)에 맞춘다 — 안 맞으면 `⚠️건수 미상` 이 되고,
 #    그러면 **0개를 쟀어도 초록**이라 시험이 사라진 것을 아무도 모른다(2026-07-30 실측).

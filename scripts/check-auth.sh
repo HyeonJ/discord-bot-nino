@@ -194,8 +194,23 @@ else
 fi
 
 # ── ② 만료 후 미갱신 ─────────────────────────────────────────────────────────
-if [[ -f "$CREDENTIALS" ]]; then
-    REMAIN="$(python3 - "$CREDENTIALS" <<'PYEOF' 2>/dev/null || echo na
+# 🔴 **만료됐다 ≠ 고장났다** (2026-08-14, Darren 이 세서 알려줬다: 11일에 6번, 전부 `verdict=ok`).
+#    `accessToken` 갱신은 **«호출할 때»** 돈다 ⇒ 세션이 조용하면 `expiresAt` 은 과거인 채 남는다.
+#    옛 판정은 그걸 「갱신이 안 되고 있다」로 읽어 **idle 을 사고로 오독**했다.
+#    실물: 경보 16:15:07 · 자격증명 파일 갱신 16:15:32 — **25초 차이로 틀렸다**(그 갱신을 시킨 건
+#    Darren 의 항의 메시지였다. 항의한 행위가 항의 대상을 지웠다).
+#
+# 🔴 **순진한 수리를 쓰지 않는다** — 「`refreshTokenExpiresAt` 가 미래면 무해」로 두면
+#    룬드의 8시간 27분 먹통을 「무해」라 부른다. 그때 그의 파일엔 refreshToken 이 **있는데
+#    안 쓰이고 있었다**(2026-07-30 실측). **있음 ≠ 쓰임.**
+#
+# ✅ 그래서 좌변이 «필드»가 아니라 «호출»이다 — stale 이면 한 번 찔러보고 **파일을 다시 읽는다.**
+#    🔑 판정은 탐침의 rc 가 **아니라** 「`expiresAt` 이 미래로 갔나」다. 우리가 실제로 신경 쓰는
+#      상태를 직접 보므로, 탐침이 네트워크·한도로 죽어도 **시끄러운 쪽으로 실패**한다
+#      (Darren Ⅲ 08-12 `M:4oqv`: 「조용히 안 오는 쪽이 시끄럽게 틀리는 쪽보다 나쁘다」 보존).
+#    🔑 부수 효과가 처방이다 — 찌르는 행위가 갱신을 시켜 **진단이 곧 수리**다.
+read_remaining() {   # 자격증명의 남은 초. 못 읽으면 na
+    python3 - "$CREDENTIALS" <<'PYEOF' 2>/dev/null || echo na
 import sys, json, time
 try:
     d = json.load(open(sys.argv[1]))
@@ -203,12 +218,48 @@ try:
 except Exception:
     print("na")
 PYEOF
-)"
+}
+
+# 🔸 비용은 **stale 가지에서만** 든다(실측 11일에 6회). 5분마다 도는 자리에 안 넣는다.
+# 🔸 모델 이름은 여기 안 적는다 — `config/models.sh` 가 유일한 자리다(사본이 둘이면 한쪽만 낡는다).
+PROBE_TIMEOUT="${CHECK_AUTH_PROBE_TIMEOUT:-60}"
+probe_refresh() {
+    local model="${NINO_MODEL_HAIKU:-}"
+    [[ -z "$model" && -r "$BOT_DIR/config/models.sh" ]] && . "$BOT_DIR/config/models.sh"
+    model="${NINO_MODEL_HAIKU:-claude-haiku-4-5-20251001}"
+    # ⚠️ `timeout` 이 없으면 «걸어두지 않고» 그냥 돈다 — 없다고 탐침을 건너뛰면
+    #    그 환경에서 이 수리가 통째로 사라진다(조용한 회귀).
+    # 🔴 `< /dev/null` 필수 — 없으면 *"no stdin data received in 3s"* 로 **3초를 버리고**
+    #    cron 에서 stdin 이 파이프면 더 오래 매달린다(실측 08-14: 그 경고와 함께 15.8초).
+    if command -v timeout >/dev/null 2>&1; then
+        timeout "$PROBE_TIMEOUT" "$CLAUDE_BIN" -p ok --model "$model" >/dev/null 2>&1 </dev/null
+    else
+        "$CLAUDE_BIN" -p ok --model "$model" >/dev/null 2>&1 </dev/null
+    fi
+    return 0   # 🔴 rc 는 «판정에 안 쓴다» — 판정은 아래에서 파일을 다시 읽어 한다
+}
+
+if [[ -f "$CREDENTIALS" ]]; then
+    REMAIN="$(read_remaining)"
     case "$REMAIN" in
         ''|na|*[!0-9-]*)
             EXPIRY=unknown; NOTE="${NOTE:+$NOTE,}credentials-unreadable" ;;
         *)
+            PROBED=0
             if [[ $REMAIN -lt $(( -EXPIRY_GRACE )) ]]; then
+                probe_refresh
+                PROBED=1
+                REMAIN="$(read_remaining)"
+            fi
+            if [[ ! $REMAIN =~ ^-?[0-9]+$ ]]; then
+                # 🔴 탐침 뒤에 파일이 안 읽히면 «무해»가 아니라 **못 쟀다**. 0 으로 접지 않는다.
+                EXPIRY=unknown; NOTE="${NOTE:+$NOTE,}credentials-unreadable-after-probe"
+            elif [[ $REMAIN -ge $(( -EXPIRY_GRACE )) ]]; then
+                # 🔑 「원래 정상」과 「탐침이 되살렸다」를 **갈라 적는다** — 같은 `ok` 로 접으면
+                #   *「탐침이 실제로 값을 하고 있나」*를 로그에서 영영 못 센다(무음의 조건).
+                if [[ $PROBED -eq 1 ]]; then EXPIRY=refreshed; else EXPIRY=ok; fi
+                rm -f "$LAST_EXPIRY_FILE" 2>/dev/null || true
+            else
                 EXPIRY=stale
                 if should_alert "$LAST_EXPIRY_FILE" "$ALERT_INTERVAL"; then
                     # ⚠️ 호출부가 **둘**이다(로그아웃·여기). 한 자리만 고치면 다른 자리가 남고,
@@ -223,9 +274,6 @@ PYEOF
                 else
                     ALERT="${ALERT}+expiry_skip"
                 fi
-            else
-                EXPIRY=ok
-                rm -f "$LAST_EXPIRY_FILE" 2>/dev/null || true
             fi ;;
     esac
 else
