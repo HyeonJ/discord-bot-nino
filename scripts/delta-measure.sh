@@ -29,8 +29,14 @@
 #     --no-checkout         git checkout 을 «안» 한다 (시험·이미 체크아웃된 트리용)
 #     -h, --help            이 도움말 (범위는 손이 아니라 «파일»이 정한다)
 #
+#   ⚠️ checkout 모드는 **깨끗한 트리**를 요구하고, 끝나거나 죽으면 **원래 ref 로 되돌린다**.
+#      되돌리기가 예의가 아니라 안전인 이유: 크론·서비스가 작업트리 파일을 직접 가리키면
+#      ref 를 옮기는 동안 **운영이 같이 옮겨 다닌다**(2026-08-14 실물).
+#
 # rc: 0 안 늘었다 · 1 늘었다 · 2 판정 불가(0 으로 안 접는다)
-# 표지: 마지막 줄에 `DELTA_VERDICT=clean|real|warm-contaminated` — 판정은 «산문»이 아니라 여기서 읽는다
+# 표지: 마지막 줄에 `DELTA_VERDICT=clean|real|warm-contaminated|flaky-head`
+#   — 판정은 «산문»이 아니라 여기서 읽는다
+#   🔑 `flaky-head` = head 두 회차가 «달랐다». 이 diff 의 효과와 흔들림을 못 가르므로 **판정하지 않는다**(rc=2).
 set -uo pipefail
 
 BASE=""; HEAD_REF=""; CMD=""; REPO_DIR="."; NO_CHECKOUT=0
@@ -58,6 +64,23 @@ done
 [ -n "$BASE" ]     || die "--base 가 없다"
 [ -n "$HEAD_REF" ] || die "--head 가 없다"
 [ -n "$CMD" ]      || die "--cmd 가 없다 — 무엇을 돌릴지 이 도구는 «유도하지 않는다»"
+
+# ── 🔴 체크아웃 안전 (첫 실사용에서 둘 다 밟았다, 2026-08-14 `#219` 델타 측정) ──────────
+# ① **원래 ref 를 안 되돌렸다** — 성공해도 head 에 detached 로 남고, 중단되면 «중간 ref»에 남는다.
+#    ⚠️ 실물이 특히 나빴다: 내 크론이 `scripts/check-auth.sh` 를 **작업트리에서 직접** 읽어서,
+#      이 도구가 ref 를 옮기는 동안 **운영이 같이 옮겨 다닌다.** 되돌리기는 예의가 아니라 안전이다.
+# ② **더러운 트리를 안 봤다** — 수정된 tracked 파일이 있으면 checkout 이 덮거나 거부한다.
+# 🔑 시험이 이 축을 통째로 못 봤다 — 전부 `--no-checkout` 으로 돌아서 **checkout 경로가 미검사**였다.
+if [ "$NO_CHECKOUT" -eq 0 ]; then
+    ORIG_REF="$( cd "$REPO_DIR" && git symbolic-ref -q --short HEAD || git -C "$REPO_DIR" rev-parse HEAD )"
+    [ -n "$ORIG_REF" ] || die "원래 ref 를 못 읽었다 — 되돌릴 자리를 모르면 체크아웃을 시작하지 않는다"
+    DIRTY="$( cd "$REPO_DIR" && git status --porcelain --untracked-files=no )"
+    [ -z "$DIRTY" ] || die "작업트리에 «커밋 안 된 수정»이 있다 — checkout 이 그걸 덮거나 거부한다.
+   커밋하거나 stash 한 뒤에 다시 부른다. (미추적 파일은 세지 않는다)
+$(printf '%s\n' "$DIRTY" | head -5 | sed 's/^/     /')"
+    restore_ref() { ( cd "$REPO_DIR" && git checkout -q "$ORIG_REF" ) 2>/dev/null || true; }
+    trap restore_ref EXIT INT TERM
+fi
 
 # ── 한 회차 ────────────────────────────────────────────────────────────────
 # 🔴 좌변은 코어 러너의 «정본 형식»이다: `── 결과: 통과 N · 실패 N · 판정 불가 N` + `   실패: a b c`
@@ -94,7 +117,7 @@ M_FAIL="$H_F"  M_UNK="$H_U"  M_SET="$H_S";  say_axes "head "
 # ── 온도 검사 ──────────────────────────────────────────────────────────────
 # 🔑 델타가 «있어 보일 때만» base 를 다시 돌린다. 러너는 분 단위라 항상 3회는 비싸고,
 #   델타 0 이면 오염이 있어도 결론이 안 바뀐다(양쪽이 같은 온도로 수렴한 것).
-BL_F="$B1_F"; BL_U="$B1_U"; BL_S="$B1_S"; WARMED=0; CONTAMINATED=0
+BL_F="$B1_F"; BL_U="$B1_U"; BL_S="$B1_S"; WARMED=0; CONTAMINATED=0; FLAKY_HEAD=0
 if [ "$H_F" != "$B1_F" ] || [ "$H_U" != "$B1_U" ] || [ "$H_S" != "$B1_S" ]; then
     measure "base(2회차)" "$BASE";  B2_F="$M_FAIL"; B2_U="$M_UNK"; B2_S="$M_SET"
     M_FAIL="$B2_F" M_UNK="$B2_U" M_SET="$B2_S"; say_axes "base②"
@@ -106,6 +129,22 @@ if [ "$H_F" != "$B1_F" ] || [ "$H_U" != "$B1_U" ] || [ "$H_S" != "$B1_S" ]; then
         echo "   ⇒ **2회차를 좌변으로** 삼는다. 1회차와 비교했으면 이 diff 가 «개선»으로 읽혔다."
     fi
     BL_F="$B2_F"; BL_U="$B2_U"; BL_S="$B2_S"
+
+    # 🔴 **head 도 두 번 잰다** — 첫 실사용에서 이 구멍을 밟았다(2026-08-14, `#219` 델타):
+    #   head 가 «한 회차»에만 `mdweb-link-guard` 로 빨갰고 base 두 회차는 깨끗해서
+    #   이 도구가 `DELTA_VERDICT=real` 을 냈다. head 를 두 번 더 재니 **둘 다 깨끗**했다
+    #   — 원격 의존(live md-web)이 그 회차에만 흔들린 것이다.
+    # 🔑 옛 판은 «base 가 차가웠나»만 물었다. 그건 대칭이 아니다 — **head 가 운이 나빴나**도
+    #   같은 값으로 물어야 한다. 한쪽만 두 번 재면 나머지 한쪽의 흔들림이 «진짜»로 승격된다.
+    # 🔴 갈리면 «real 도 clean 도 아니다 — 못 쟀다»(rc=2). 어느 쪽으로 접어도 거짓이 된다.
+    measure "head(2회차)" "$HEAD_REF"; H2_F="$M_FAIL"; H2_U="$M_UNK"; H2_S="$M_SET"
+    M_FAIL="$H2_F" M_UNK="$H2_U" M_SET="$H2_S"; say_axes "head②"
+    if [ "$H2_F" != "$H_F" ] || [ "$H2_U" != "$H_U" ] || [ "$H2_S" != "$H_S" ]; then
+        FLAKY_HEAD=1
+        echo "🔴 **head 가 회차마다 다르다** — 이 diff 의 효과와 «흔들림»을 못 가른다."
+        echo "   1회차 실패 [$H_S] · 2회차 실패 [$H2_S]"
+        echo "   ⇒ 판정하지 않는다. 흔들리는 시험을 먼저 고정하거나, 그 항목을 빼고 다시 잰다."
+    fi
 fi
 
 # ── 판정 ───────────────────────────────────────────────────────────────────
@@ -127,6 +166,14 @@ if [ -n "$PLAT_BASE" ] && [ -n "$PLAT_HEAD" ] && [ "$PLAT_HEAD" -gt "$PLAT_BASE"
 fi
 
 echo
+# 🔴 head 가 흔들리면 «판정을 안 한다» — ✅/❌ 어느 쪽으로 적어도 거짓이다.
+#   이 가지를 안 두면 아래 ❌ 문구가 흔들림을 «회귀»라고 이름 붙인다(실물이 그랬다).
+if [ "$FLAKY_HEAD" -eq 1 ]; then
+    echo "⛔ **판정 불가** — head 두 회차가 달라 이 diff 의 효과를 못 가른다"
+    echo "   차이가 난 항목만 따로 여러 번 돌려 «흔들리는지»부터 본다."
+    echo "DELTA_VERDICT=flaky-head"
+    exit 2
+fi
 if [ "$RC" -eq 0 ]; then
     echo "✅ **델타 0** — 실패집합·판정 불가·platform 등재 셋 다 안 늘었다"
     [ "$WARMED" -eq 1 ] && echo "   🔸 좌변은 base «2회차» 값이다(온도를 맞췄다)"

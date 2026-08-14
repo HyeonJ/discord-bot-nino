@@ -49,7 +49,7 @@ FAKE
 chmod +x "$ROOT/fake-runner.sh"
 
 scripted() { printf '%s\n' "$@" > "$ROOT/scripted.txt"; : > "$ROOT/n.txt"; }
-runs()     { cat "$ROOT/n.txt" 2>/dev/null || echo 0; }
+runs()     { local n; n="$(cat "$ROOT/n.txt" 2>/dev/null)"; printf '%s\n' "${n:-0}"; }
 run() {
   FAKE_SCRIPTED="$ROOT/scripted.txt" FAKE_N="$ROOT/n.txt" \
   bash "$SCRIPT" --no-checkout --base BASE --head HEAD \
@@ -79,10 +79,10 @@ printf '%s\n' "$out" | grep -q '델타 0' && ok "「델타 0」이라 말한다"
 echo
 echo "② 🔴 **온도 오염** — base 1회차만 나쁘다. 그대로 비교하면 «개선»으로 읽힌다"
 # 실물 재현: base(냉) 29/4 → head 32/1 → base(온) 32/1
-scripted "29|4|alarm calendar deco mail|0" "32|1|calendar-tool|0" "32|1|calendar-tool|0"
+scripted "29|4|alarm calendar deco mail|0" "32|1|calendar-tool|0" "32|1|calendar-tool|0" "32|1|calendar-tool|0"
 out="$(run 1 1)"; rc=$?
-[ "$(runs)" -eq 3 ] && ok "🔑 델타가 «있어» 보이면 base 를 다시 돌린다 (회차 3)" \
-                    || bad "base 를 다시 안 돌렸다 — 오염을 못 가른다" "회차=$(runs)"
+[ "$(runs)" -eq 4 ] && ok "🔑 델타가 «있어» 보이면 base·head 를 «둘 다» 다시 돌린다 (회차 4)" \
+                    || bad "재실행이 빠졌다 — 오염·흔들림을 못 가른다" "회차=$(runs)"
 printf '%s\n' "$out" | grep -qx 'DELTA_VERDICT=warm-contaminated' \
   && ok "🔴 표지가 «warm-contaminated» 다" \
   || bad "🔴 오염을 통과시켰다 — 이 도구의 존재 이유가 그 자리다" "$out"
@@ -96,7 +96,7 @@ printf '%s\n' "$out" | grep -qx 'DELTA_VERDICT=clean' \
 
 echo
 echo "③ 진짜 델타(실패 늘어남)는 «오염이 아니라»고 가려준다"
-scripted "32|1|calendar-tool|0" "31|2|calendar-tool newly-broken|0" "32|1|calendar-tool|0"
+scripted "32|1|calendar-tool|0" "31|2|calendar-tool newly-broken|0" "32|1|calendar-tool|0" "31|2|calendar-tool newly-broken|0"
 out="$(run 1 1)"; rc=$?
 [ "$rc" -eq 1 ] && ok "rc=1 (진짜 회귀)" || bad "rc=$rc — 회귀를 통과시켰다" "$out"
 printf '%s\n' "$out" | grep -q 'newly-broken' && ok "  → 늘어난 항목을 이름으로 짚는다" \
@@ -108,7 +108,7 @@ printf '%s\n' "$out" | grep -qx 'DELTA_VERDICT=real' \
 echo
 echo "③-b 🧪 ③의 «양성» — 같은 입력에서 base 2회차만 흔들면 오염으로 뒤집힌다"
 # 🔑 없으면 ③은 항진명제다(어떤 구현이든 '온도 오염' 을 안 찍기만 하면 통과한다).
-scripted "32|1|calendar-tool|0" "31|2|calendar-tool newly-broken|0" "31|2|calendar-tool newly-broken|0"
+scripted "32|1|calendar-tool|0" "31|2|calendar-tool newly-broken|0" "31|2|calendar-tool newly-broken|0" "31|2|calendar-tool newly-broken|0"
 out="$(run 1 1)"; rc=$?
 printf '%s\n' "$out" | grep -qx 'DELTA_VERDICT=warm-contaminated' \
   && ok "🧪 base 2회차가 head 와 같아지면 표지가 뒤집힌다 — ③은 항진명제가 아니다" \
@@ -138,9 +138,73 @@ out="$(run 2 1)"; rc=$?
 echo
 echo "⑥ 판정 불가 증가도 잡는다 — 「실패를 판불로 밀기」가 여기서 막힌다"
 # 🔸 델타가 «있어» 보이므로 도구가 base 를 다시 돌린다 ⇒ 스텁도 3회차를 줘야 한다.
-scripted "32|1|calendar-tool|0" "31|0||2" "32|1|calendar-tool|0"
+scripted "32|1|calendar-tool|0" "31|0||2" "32|1|calendar-tool|0" "31|0||2"
 out="$(run 1 1)"; rc=$?
 [ "$rc" -eq 1 ] && ok "실패 1→0 인데 판불 0→2 면 rc=1" || bad "rc=$rc — 실패를 판불로 민 것을 통과시켰다" "$out"
+
+echo
+echo "⑦ 🔴 head 도 «두 번» 잰다 — 한쪽만 두 번 재면 나머지 흔들림이 «진짜»로 승격된다"
+# 🔴 첫 실사용에서 밟았다(2026-08-14, `#219` 델타): head 가 «한 회차»에만 `mdweb-link-guard` 로
+#   빨갰고 base 두 회차는 깨끗해서 이 도구가 `real` 을 냈다. head 를 두 번 더 재니 둘 다 깨끗했다
+#   — 원격 의존(live md-web)이 그 회차에만 흔들린 것이다.
+# 🔑 옛 판은 «base 가 차가웠나»만 물었다. 그건 대칭이 아니다.
+# 회차: base① → head① → base② → head②
+scripted "32|1|calendar-tool|0" "31|2|calendar-tool flaky-one|0" "32|1|calendar-tool|0" "32|1|calendar-tool|0"
+out="$(run 1 1)"; rc=$?
+printf '%s\n' "$out" | grep -qx 'DELTA_VERDICT=flaky-head' \
+  && ok "🔴 head 두 회차가 다르면 표지가 «flaky-head»" \
+  || bad "🔴 흔들림을 «진짜 회귀»로 승격시켰다 — 이 절이 생긴 실물이 그 자리다" "$out"
+[ "$rc" -eq 2 ] && ok "  → rc=2 (real 도 clean 도 아니다 — 못 쟀다)" || bad "rc" "2" "$rc"
+[ "$(runs)" -eq 4 ] && ok "  → 회차 4 (base 둘 · head 둘)" || bad "회차" "4" "$(runs)"
+printf '%s\n' "$out" | grep -q 'flaky-one' && ok "  → 흔들린 항목을 이름으로 짚는다" \
+  || bad "항목 미표시" "flaky-one" "$out"
+
+# 🧪 ⑦의 «양성» — head 두 회차가 «같으면» 그대로 real 이다(⑦이 real 을 통째로 삼키지 않는다)
+scripted "32|1|calendar-tool|0" "31|2|calendar-tool newly-broken|0" "32|1|calendar-tool|0" "31|2|calendar-tool newly-broken|0"
+out="$(run 1 1)"; rc=$?
+printf '%s\n' "$out" | grep -qx 'DELTA_VERDICT=real' \
+  && ok "🧪 head 가 «안정적으로» 나쁘면 여전히 real — 회귀 탐지가 안 죽었다" \
+  || bad "🧪 real 을 삼켰다 — 수리가 원래 기능을 껐다" "$out"
+[ "$rc" -eq 1 ] && ok "  → rc=1" || bad "rc" "1" "$rc"
+
+echo
+echo "⑧ 🔴 checkout 안전 — 시험이 여태 «이 경로를 통째로» 안 봤다(전부 --no-checkout 이었다)"
+# 🔑 결함 둘이 여기 살아 있었다: ①원래 ref 를 안 되돌린다 ②더러운 트리를 안 본다.
+#   ⚠️ 되돌리기는 예의가 아니라 «안전»이다 — 내 크론이 작업트리의 `scripts/check-auth.sh` 를
+#     직접 읽어서, ref 를 옮기는 동안 **운영이 같이 옮겨 다닌다**(2026-08-14 실물).
+GR="$ROOT/gitrepo"; mkdir -p "$GR"
+( cd "$GR" && git init -q -b main && git config user.email t@t && git config user.name t \
+  && echo base > f.txt && git add f.txt && git commit -q -m base \
+  && git checkout -q -b feat && echo head > f.txt && git commit -q -am head \
+  && git checkout -q main ) >/dev/null 2>&1
+if [ -d "$GR/.git" ]; then
+  grun() {   # 진짜 레포에서 checkout 모드로 돈다
+    FAKE_SCRIPTED="$ROOT/scripted.txt" FAKE_N="$ROOT/n.txt" \
+    bash "$SCRIPT" --repo-dir "$GR" --base main --head feat \
+         --cmd "bash $ROOT/fake-runner.sh" 2>&1
+  }
+  scripted "32|1|calendar-tool|0" "32|1|calendar-tool|0"
+  out="$(grun)"; rc=$?
+  now="$( cd "$GR" && git symbolic-ref -q --short HEAD || echo '<detached>' )"
+  [ "$now" = main ] && ok "🔴 끝나면 «원래 ref»로 돌아온다 (main)" \
+    || bad "ref 를 안 되돌렸다 — 작업트리를 가리키는 크론·서비스가 같이 끌려다닌다" "main" "$now"
+  [ "$rc" -eq 0 ] && ok "  → 그러면서 판정은 정상으로 낸다 (rc=0)" || bad "rc" "0" "$rc"
+
+  # 🔴 더러운 트리 — checkout 이 덮거나 거부한다. «시작하기 전에» 막는다
+  ( cd "$GR" && echo dirty >> f.txt )
+  scripted "32|1|calendar-tool|0" "32|1|calendar-tool|0"
+  out="$(grun)"; rc=$?
+  [ "$rc" -eq 2 ] && ok "🔴 커밋 안 된 수정이 있으면 rc=2 로 «시작을 거절»한다" \
+    || bad "더러운 트리에서 그냥 돌았다" "rc=2" "rc=$rc"
+  [ "$(runs)" -eq 0 ] && ok "  🔑 거절이면 러너를 «한 번도» 안 돌린다 (부작용 0)" \
+    || bad "거절인데 돌았다" "0회" "$(runs)회"
+  printf '%s\n' "$out" | grep -q 'f.txt' && ok "  → 무엇이 더러운지 이름으로 짚는다" \
+    || bad "파일명 미표시" "f.txt" "$out"
+  ( cd "$GR" && git checkout -q -- f.txt )
+else
+  und "git 레포 픽스처를 못 세웠다 — checkout 축을 못 쟀다(0 으로 접지 않는다)"
+  und "  (같은 이유로 더러운 트리 축도 못 쟀다)"
+fi
 
 echo
 printf '  통과 %d · 실패 %d · 판정 불가 %d\n' "$pass" "$fail" "$skip"
