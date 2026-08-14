@@ -34,6 +34,34 @@ grep -q 'pending=2' "$R/log" 2>/dev/null && ok "여러 줄 항목 둘 → pendin
 grep -q '2건' "$R/injected" 2>/dev/null && ok "주입문의 「N건」도 항목 수다" \
   || bad "주입문 건수" "2건" "$(cat "$R/injected" 2>/dev/null)"
 
+echo "── ①-c 🔴 «실사용 형식»(불렛 항목)을 센다 — 픽스처가 제목형 뿐이라 이 축이 통째로 안 재졌다 ──"
+# 🔑 실물 2026-08-14: 실사용 파일엔 항목이 `- **제목**` 불렛으로 쌓이는데 좌변이 `### ` 뿐이라
+#   items=0 → body>0 → **항상 1**. 3건이 `pending=1` 로 나왔고 «조용했다».
+#   그리고 outbox 머리말은 `###` 를 «쓰지 말라»고 한다(08-13, 하위 제목이 별도 항목으로 세어져서)
+#   ⇒ 두 규칙이 서로를 무효화하고 있었다. 좌변은 「최상위 항목이냐」여야 한다.
+printf '# 대기함\n\n## 대기 중\n\n- **첫 건**\n  - 본문 하나\n  - 본문 둘\n\n- **둘째 건**\n  - 본문 하나\n\n- **셋째 건**\n  - 본문 하나\n' > "$R/outbox.md"
+: > "$R/injected"; : > "$R/log"
+run >/dev/null 2>&1
+grep -q 'pending=3' "$R/log" 2>/dev/null && ok "불렛 항목 셋 → pending=3 (하위 불렛은 본문)" \
+  || bad "실사용 형식 항목 수" "pending=3" "$(tail -1 "$R/log" 2>/dev/null)"
+
+echo "── ①-d 🔴 두 형식이 섞이면 «구별 불가»다 — 접되 «시끄럽게» ──"
+# 🔑 제목형 문서에서는 «제목 아래 본문»도 들여쓰지 않은 `- ` 로 쓴다 ⇒ 「항목 불렛」과
+#   「본문 불렛」이 같은 모양이라 **원리적으로 못 가른다**. 그래서 문서 단위로 접는데,
+#   조용히 접으면 그게 바로 이 버그(항상 1)의 재발이다 ⇒ 로그에 표지를 남긴다.
+printf '# 대기함\n\n## 대기 중\n\n### 옛 형식 건\n- 본문\n\n- **새 형식 건**\n  - 본문\n' > "$R/outbox.md"
+: > "$R/log"
+run >/dev/null 2>&1
+grep -q 'MIXED-FORMAT' "$R/log" 2>/dev/null && ok "섞이면 로그에 MIXED-FORMAT 표지가 남는다" \
+  || bad "혼합 감지" "MIXED-FORMAT 표지" "$(tail -1 "$R/log" 2>/dev/null)"
+
+echo "── ①-e 대조군: 안 섞였으면 표지가 «없다» ──"
+printf '# 대기함\n\n## 대기 중\n\n- **첫 건**\n  - 본문\n' > "$R/outbox.md"
+: > "$R/log"
+run >/dev/null 2>&1
+grep -q 'MIXED-FORMAT' "$R/log" 2>/dev/null && bad "표지 오탐" "표지 없음" "$(tail -1 "$R/log" 2>/dev/null)" \
+  || ok "불렛형만 있으면 표지가 안 붙는다 (표지가 항진명제가 아니다)"
+
 echo "── ② 🔴 빈 상태는 조용하다 (확인된 빈 상태 ≠ 실패) ──"
 mk '(비어 있음)'; : > "$R/injected"
 run >/dev/null 2>&1
