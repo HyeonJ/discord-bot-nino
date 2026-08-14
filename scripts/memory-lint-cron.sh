@@ -188,6 +188,27 @@ if [ -f "$STATE" ]; then
   fi
 fi
 
+# 🔑 **키의 «주어»** — 등급을 뺀 정체. `첫칸:등급:주어` 면 `첫칸\x1f주어`, 칸이 2 이하면 첫 칸.
+#   🔴 구분자를 `:` 로 쓰면 안 된다 — 주어(파일명)에 `:` 가 들어오는 날 **다른 키가 같은 주어로 뭉친다**.
+#      `\x1f`(Unit Separator)는 키에 못 들어온다(lint 가 사람 읽는 문자열로 키를 만든다).
+key_subject() {  # $1=키
+  case "$1" in
+    *:*:*) printf '%s\x1f%s\n' "${1%%:*}" "${1##*:}" ;;
+    *)     printf '%s\n' "${1%%:*}" ;;
+  esac
+}
+# 표준입력의 키 목록에서 «$1 과 주어가 같은» 키 하나를 낸다(없으면 빈 문자열).
+# 🔸 여럿이면 첫 번째만 — 한 주어에 등급 키가 둘 이상 «동시에» 사는 건 lint 계약상 없다.
+key_sibling() {  # $1=키 · stdin=후보 키 목록
+  local want; want="$(key_subject "$1")"
+  while IFS= read -r _c; do
+    [ -n "$_c" ] || continue
+    [ "$_c" = "$1" ] && continue
+    if [ "$(key_subject "$_c")" = "$want" ]; then printf '%s\n' "$_c"; return 0; fi
+  done
+  return 0
+}
+
 # prev 조회 — 연관배열을 안 쓴다(bash 3.2 에 없다. 룬드 맥이 그 판이고 공유 코어 후보다).
 prev_field() {  # $1=키 $2=필드번호(1=first_seen 2=last_notified)
   printf '%s\n' "$PREV" | awk -F'\t' -v k="$1" -v f="$2" '$3 == k { print $f; exit }'
@@ -206,8 +227,26 @@ if [ "$MIGRATED" -eq 0 ]; then
       _i=$((_i + 1))
       _k="$(printf '%s\n' "$KEYS" | sed -n "${_i}p")"
       if ! printf '%s\n' "$PREV_KEYS" | grep -qxF -- "$_k"; then
-          NEW_LINES="${NEW_LINES}${_l}
+          # 🔴 **「새 항목」과 «전이»를 가른다** (2026-08-14 실사고).
+          #   인덱스를 32.3KB → 24.8KB 로 **줄였더니** 키가 `idx-bytes:over` → `idx-bytes:warn`
+          #   으로 바뀌었고, 이 diff 가 그걸 **새 항목**으로 읽어 경보를 냈다 — **좋아졌는데 울었다.**
+          #   메시지는 「인덱스 용량 80% 초과」뿐이라 **나빠져서 온 건지 좋아져서 온 건지 구별이 0**이었다.
+          # 🔑 **등급을 «키»에 넣은 것 자체는 «설계»다** — 빼면 `500줄 초과`/`1000줄 초과` 가 같은
+          #   키가 되어 **한도를 넘어서는 순간이 조용해진다**(위 ⑤-a 주석의 그 자리).
+          #   ⇒ 고칠 것은 키가 아니라 **메시지에 «어디서 왔는지»를 적는 것**이다. 등급은 그대로 둔다.
+          # 🔴 **짝은 «접두사»가 아니라 «주어»로 찾는다.** `docsize:🚨 1000줄 초과:A.md` 와
+          #   `docsize:500줄 초과:B.md` 는 접두사가 같지만 **다른 파일**이라, 접두사로 묶으면
+          #   A 가 사라지고 B 가 생겼을 때 **없는 전이**를 지어낸다.
+          #   ⇒ 주어 = 「첫 칸 + 마지막 칸」(칸 ≥3) · 칸이 2 이하면 첫 칸. 등급은 «가운데»에 산다.
+          _from="$(printf '%s\n' "$PREV_KEYS" | key_sibling "$_k")"
+          if [ -n "$_from" ] && ! printf '%s\n' "$KEYS" | grep -qxF -- "$_from"; then
+              # 🔸 좌변이 «지금도 살아 있으면» 전이가 아니다(둘이 공존) — 위 `! grep KEYS` 가 그 조건이다.
+              NEW_LINES="${NEW_LINES}${_l}  ← ${_from} → ${_k}
 "
+          else
+              NEW_LINES="${NEW_LINES}${_l}
+"
+          fi
           continue
       fi
       # 이미 아는 항목 — 늙었나?
