@@ -49,6 +49,15 @@ BAND_STATE="${CHECK_USAGE_BAND_STATE:-$BOT_DIR/logs/check-usage-band.state}"
 #   ⇒ 전이 + 지속 반복. 주기 120분은 **Darren 이 정했다**(2026-08-10 M:juia 「b로하고 두시간」).
 #   ⚠️ 이 값을 코드 판단으로 바꾸지 말 것 — 사람 값이다.
 BAND_REPEAT_MIN="${CHECK_USAGE_BAND_REPEAT_MIN:-120}"
+# 🔴 **401 은 «사람을 부를 일»이 아니다** — `accessToken` 은 lazy refresh 라 «쓰는 순간»
+#   자가회복한다. 감시기가 401 을 봐도 대부분 정상이다(실측 12/12 자가회복).
+#   그렇다고 무음이면 진짜 만료(`refreshToken` 쪽)를 놓친다 ⇒ **로그엔 남기고 발신만 억제하되,
+#   유예를 넘겨 «지속»하면 부른다.** 처방은 Darren 승인(2026-08-14 `M:h89h` 「고쳐」).
+# ⚠️ **이 유예 값은 «추정»이다.** 진짜 만료 대조군이 **0/26** 이라 재서 나온 값이 아니다 —
+#   관측된 자가회복 최장 26분과 자가회복 0 이었던 52분 사이를 가르려고 60분을 골랐다.
+#   ⇒ 그래서 알림 «본문»에도 추정이라고 적는다(받는 사람이 이 수를 믿지 않게).
+AUTH_STATE="${CHECK_USAGE_401_STATE:-$BOT_DIR/logs/check-usage-401.state}"
+AUTH_GRACE_SEC="${CHECK_USAGE_401_GRACE_SEC:-3600}"
 DISCORD_SEND="${DISCORD_SEND:-$BOT_DIR/src/discord-send}"
 API_URL="${USAGE_API_URL:-https://api.anthropic.com/api/oauth/usage}"
 
@@ -98,11 +107,35 @@ emit_log() {
 # 🔑 **알림은 사실이 아니라 «변화»에 운다.** 401 이 이어지는 동안 매 회차 울면 그건 소음이고,
 #   소음은 곧 무시된다 — 지금 30분마다 오는 사용량 경고가 그 형태다(같은 값 아홉 번).
 #   ⇒ 전이에만 운다. **복구도 전이다** — 빼면 「울다 멈춘 것」과 「고쳐진 것」이 같은 모양이 된다.
+# 🔑 **시계는 «전이와 무관하게» 돈다** — 전이 게이트 뒤에 두면 `ok`→`ok` 회차에서 early return
+#   되어 **복구해도 시계가 안 지워진다**. 그러면 다음 401 이 「이미 오래 지속」으로 읽혀 즉시 울고,
+#   억제가 «한 번 쓰고 죽는다». 시험 ⑦-e 가 그 자리다.
+# 반환: 0 = 억제해라 · 1 = 보내라
+auth_grace_gate() {
+    if [ "$VERDICT" != http_error ] || [ "$CODE" != 401 ]; then
+        rm -f "$AUTH_STATE" 2>/dev/null || true
+        return 1
+    fi
+    local since now
+    since="$(cat "$AUTH_STATE" 2>/dev/null)"
+    # 🔑 «숫자가 아닌 것»은 없는 것으로 본다 — 손상된 상태가 「경과 0」이나 「경과 무한」으로
+    #   조용히 읽히면 억제가 영영 걸리거나 영영 안 걸린다.
+    case "$since" in ''|*[!0-9]*) since="" ;; esac
+    now="$(date +%s)"
+    if [ -z "$since" ]; then
+        printf '%s\n' "$now" > "$AUTH_STATE" 2>/dev/null || true
+        return 0
+    fi
+    [ "$(( now - since ))" -ge "$AUTH_GRACE_SEC" ] && return 1
+    return 0
+}
 verdict_transition() {
     # 🔴 `notify` 는 아래에서 정의된다. 인자 가드가 부트에서 끊으면 **아직 없다** —
     #   없는 함수를 부르면 trap 안에서 죽어 **로그 한 줄까지 같이 사라진다**(고치려던 것이 재발).
     declare -f notify >/dev/null 2>&1 || return 0
-    local prev nrc msg
+    local prev nrc msg suppress=0
+    # 🔴 전이 판정 «앞»에서 부른다 — 위 주석의 이유.
+    auth_grace_gate && suppress=1
     prev="$(cat "$STATE" 2>/dev/null)"
     # 🔑 상태가 없으면 **ok 로 본다.** 「모른다」로 두면 첫 회차가 비정상이어도 조용하다 —
     #   배포 직후가 정확히 그 자리다. ok 를 가정하면 **엄격한 쪽으로 틀린다**(비정상이면 운다).
@@ -116,6 +149,16 @@ verdict_transition() {
     else
         msg="🔴 **사용량 감시 이상** — 판정이 「${prev}」 → 「${VERDICT}」. 사용량을 못 재고 있어."
         [ "$CODE" != na ] && msg="$msg (HTTP $CODE)"
+        if [ "$CODE" = 401 ]; then
+            msg="${msg}\n🔑 401 이 $(( AUTH_GRACE_SEC / 60 ))분 넘게 이어졌어 — accessToken 은 보통 «쓰는 순간» 자가회복하는데 그게 안 됐다는 뜻이야. refreshToken 쪽 만료면 사람이 tmux attach -t nino 후 /login 해야 해."
+            msg="${msg}\n⚠️ 이 「$(( AUTH_GRACE_SEC / 60 ))분」은 **추정**이야 — 진짜 만료 대조군이 0/26 이라 재서 나온 값이 아니야."
+        fi
+    fi
+    # 🔴 억제는 «발신»만 막는다 — 판정도 로그도 그대로 남는다. 그리고 «억제했다»는 사실 자체를
+    #   표지로 남긴다: 안 남기면 「안 울렸다」와 「안 돌았다」가 로그에서 같은 모양이 된다.
+    if [ "$suppress" = 1 ]; then
+        NOTIFIED_AT=suppressed_401_grace
+        return 0
     fi
     notify "$msg"; nrc=$?
     case "$nrc" in

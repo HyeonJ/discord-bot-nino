@@ -310,6 +310,50 @@ grep -q 'verdict=network' "$LOGF" && ok "curl 실패는 verdict=network" \
 grep -q 'verdict=http_error' "$LOGF" && bad "네트워크 실패를 http_error 로 접었다" "network" "$(cat "$LOGF")" \
   || ok "네트워크와 HTTP 오류가 안 섞인다"
 
+echo "── ⑦-b 🔴 401 은 «사람을 부를 일»이 아니다 — 로그엔 남기고 «발신»만 억제 (Darren 승인 08-14) ──"
+# 🔑 `accessToken` 은 lazy refresh 라 «쓰는 순간» 자가회복한다. 감시기가 401 을 봐도
+#   실제로는 정상인 경우가 대부분이다 — 실측 12/12 자가회복, 진짜 만료 대조군 **0/26**.
+#   ⇒ 첫 401 에 사람을 부르면 «거짓 양성»이고, 그렇다고 무음이면 진짜 만료를 놓친다.
+#   ⇒ 처방: **로그엔 남기고 Discord 발신만 억제 · 유예를 넘겨 «지속»하면 부른다.**
+# 🔴 유예 값은 «추정»이다 — 위 대조군이 0 이라 재서 나온 값이 아니다. 그래서 메시지에도 적는다.
+_A1="$WORK/st-401a"; mkdir -p "$_A1"
+run_in "$_A1" FAKE_CODE=401 FAKE_BODY='{"error":"unauthorized"}' \
+  CHECK_USAGE_401_STATE="$_A1/401.state"
+[ "$(nlines "$SENT_LOG")" = 0 ] && ok "첫 401 은 발신 0건 (억제)" \
+  || bad "401 억제" "0건" "$(nlines "$SENT_LOG")건 — $(cat "$SENT_LOG")"
+grep -q 'verdict=http_error' "$LOGF" && ok "  🔑 그래도 로그엔 «남는다» (억제 ≠ 무기록)" \
+  || bad "401 로그" "verdict=http_error" "$(cat "$LOGF")"
+grep -q 'suppressed_401_grace' "$LOGF" && ok "  🔑 «억제했다»는 사실 자체가 로그에 표지로 남는다" \
+  || bad "억제 표지" "suppressed_401_grace" "$(cat "$LOGF")"
+
+echo "── ⑦-c 🔴 지속하면 부른다 — 유예를 넘긴 401 은 «운다» ──"
+# 첫 관측 시각을 과거로 심어 「지속」을 만든다(시계를 못 돌리니 상태를 돌린다).
+_A2="$WORK/st-401b"; mkdir -p "$_A2"
+printf '%s\n' "$(( $(date +%s) - 7200 ))" > "$_A2/401.state"
+run_in "$_A2" FAKE_CODE=401 FAKE_BODY='{"error":"unauthorized"}' \
+  CHECK_USAGE_401_STATE="$_A2/401.state"
+[ "$(nlines "$SENT_LOG")" = 1 ] && ok "유예(1h) 넘게 지속된 401 은 1건 보낸다" \
+  || bad "지속 401 발신" "1건" "$(nlines "$SENT_LOG")건"
+grep -q '추정' "$SENT_LOG" && ok "  🔑 메시지에 «임계는 추정»이라고 적혀 있다 (대조군 0/26)" \
+  || bad "추정 명시" "「추정」 포함" "$(cat "$SENT_LOG")"
+
+echo "── ⑦-d 🧪 대조군: 401 «아닌» HTTP 오류는 억제되지 «않는다» ──"
+# 🔑 이게 없으면 위 두 초록이 「401 억제」가 아니라 「http_error 전부 억제」로도 설명된다.
+_A3="$WORK/st-500"; mkdir -p "$_A3"
+run_in "$_A3" FAKE_CODE=500 FAKE_BODY='oops' \
+  CHECK_USAGE_401_STATE="$_A3/401.state"
+[ "$(nlines "$SENT_LOG")" = 1 ] && ok "500 은 첫 회차에 바로 운다 (억제는 401 «에만»)" \
+  || bad "500 억제 오탐" "1건" "$(nlines "$SENT_LOG")건 — $(cat "$SENT_LOG")"
+
+echo "── ⑦-e 🔴 복구하면 유예 시계를 «지운다» ──"
+# 안 지우면 다음 401 이 「이미 2시간 지속」으로 읽혀 즉시 운다 — 억제가 한 번 쓰고 죽는다.
+_A4="$WORK/st-401c"; mkdir -p "$_A4"
+printf '%s\n' "$(( $(date +%s) - 7200 ))" > "$_A4/401.state"
+run_in "$_A4" FAKE_CODE=200 FAKE_BODY="$(body_projected 10)" \
+  CHECK_USAGE_401_STATE="$_A4/401.state"
+[ ! -s "$_A4/401.state" ] && ok "ok 로 돌아오면 유예 시계가 지워진다" \
+  || bad "시계 초기화" "빈 파일/삭제" "$(cat "$_A4/401.state" 2>/dev/null)"
+
 echo "── ⑧ 본문 축: 200 인데 못 읽으면 **이유를 갈라** rc=2 ──"
 # 🔴 옛 코드는 {"unexpected":1} · null · [] 을 전부 rc=0 verdict=ok 로 접었다(실측).
 #    빈 alerts 는 *임계 미달* 과 구별되지 않는다 ⇒ 스키마가 바뀌면 *못 쟀다* 가 *재보니 낮다* 로 접힌다.
@@ -642,14 +686,19 @@ vany() { LC_ALL=C grep -c '사용량 감시' "$VSENT" 2>/dev/null || true; }  # 
 
 echo "── 판정 변화 알림 ──"
 
-# ① 핵심 결함: 401 이면 알림이 «나가야» 한다 (지금은 구조적으로 0건)
-vreset; vrun FAKE_CODE=401 FAKE_BODY='{}'
+# ① 핵심 결함: http_error 면 알림이 «나가야» 한다 (지금은 구조적으로 0건)
+# 🔴 이 아래 구역은 원래 `FAKE_CODE=401` 을 «임의의 http_error 대표»로 썼다. 2026-08-14 에
+#   401 이 «특별»해지면서(lazy refresh 유예 억제) **여섯 시험이 한꺼번에 빨개졌다.**
+#   ⇒ 픽스처가 「대표값」으로 고른 상수는 **그 값에 의미가 생기는 순간 의도와 어긋난다.**
+#   여기서 재려는 것은 「전이 알림 기전」이지 401 이 아니므로 **500** 으로 옮겼다.
+#   401 고유 동작은 위 ⑦-b~⑦-e 가 «따로» 잰다.
+vreset; vrun FAKE_CODE=500 FAKE_BODY='{}'
 [ "$(vbad)" -eq 1 ] \
-  && ok "401(http_error) 에서 «이상» 알림 1건 — 조기 종료가 trap 에 닿는다" \
-  || bad "401 알림" "1건" "$(vbad)건 — exit 2 가 알림 앞에서 끊고 있다"
+  && ok "http_error 에서 «이상» 알림 1건 — 조기 종료가 trap 에 닿는다" \
+  || bad "이상 알림" "1건" "$(vbad)건 — exit 2 가 알림 앞에서 끊고 있다"
 
 # ② 같은 판정이 이어지면 두 번째 회차는 조용하다
-vrun FAKE_CODE=401 FAKE_BODY='{}'
+vrun FAKE_CODE=500 FAKE_BODY='{}'
 [ "$(vany)" -eq 0 ] \
   && ok "  같은 판정 반복은 0건 — 30분마다 우는 소음이 아니다" \
   || bad "반복 회차" "0건" "$(vbad)건 — 변화가 아니라 상태에 울고 있다"
@@ -676,22 +725,22 @@ vreset; vrun CHECK_USAGE_CREDENTIALS="$VDIR/nonexistent.json"
 
 # ⑥ 🔴 발송이 실패하면 상태를 갱신하지 «않는다» — 다음 회차가 다시 시도한다.
 #    갱신해버리면 **못 보낸 전이가 영구히 묻힌다**(`#147` 에서 같은 자리를 밟았다).
-vreset; vrun FAKE_CODE=401 FAKE_BODY='{}' FAKE_SEND_RC=1
-vrun FAKE_CODE=401 FAKE_BODY='{}'
+vreset; vrun FAKE_CODE=500 FAKE_BODY='{}' FAKE_SEND_RC=1
+vrun FAKE_CODE=500 FAKE_BODY='{}'
 [ "$(vbad)" -eq 1 ] \
   && ok "발송 실패는 전이를 소비하지 않는다 — 다음 회차가 재시도" \
   || bad "발송 실패 후 재시도" "1건" "$(vbad)건 — 못 보낸 전이가 묻혔다"
 
 # ⑦ 🔴 dry-run 도 전이를 소비하지 않는다. 진단 한 번이 **진짜 알림을 먹는** 자리다.
-vreset; VARGS="--dry-run"; vrun FAKE_CODE=401 FAKE_BODY='{}'
-VARGS=""; vrun FAKE_CODE=401 FAKE_BODY='{}'
+vreset; VARGS="--dry-run"; vrun FAKE_CODE=500 FAKE_BODY='{}'
+VARGS=""; vrun FAKE_CODE=500 FAKE_BODY='{}'
 [ "$(vbad)" -eq 1 ] \
   && ok "dry-run 은 전이를 소비하지 않는다 — 진단이 알림을 먹지 않는다" \
   || bad "dry-run 후 실제 회차" "1건" "$(vbad)건 — 진단 한 번이 알림을 먹었다"
 
 # ⑧ 칸을 «시각 둘»로 둔다 — 하나면 「전이가 언제 났나」와 「언제 알렸나」가 안 갈린다.
 #    그 둘의 «간격»이 곧 `unreachable` 의 관측값이다(룬드 실측: 복구 32초 vs 복구 알림 30분 5초).
-vreset; vrun FAKE_CODE=401 FAKE_BODY='{}'
+vreset; vrun FAKE_CODE=500 FAKE_BODY='{}'
 # 🔴 **칸이 있는지가 아니라 «값이 들었는지»를 본다**(룬드 `#148` 리뷰). `printf` 가 항상 두 칸을
 #   내므로 `na na` 여도 「칸 있음」은 초록이다 — 주석은 「간격이 관측값」이라 적어놓고
 #   정작 그 값이 시각인지를 안 봤다. 🔑 [[#273]] 이 여기서도 났다: **형태가 내용을 위장한다.**
@@ -701,7 +750,7 @@ _vl="$(LC_ALL=C grep -cE 'verdict_changed_at=[0-9]{4}-[0-9]{2}-[0-9]{2}T.*notifi
   || bad "로그 칸 값" "둘 다 ISO 시각" "$(LC_ALL=C grep -o 'verdict_changed_at=[^ ]* notified_at=[^ ]*' "$VLOG" | tail -1)"
 # 🧪 [음성 대조군] 전이가 «없는» 회차는 두 칸이 `na` 로 남아야 한다 — 위 판별식이
 #   아무 줄이나 무는 것이면 여기서도 물어서 갈린다.
-vrun FAKE_CODE=401 FAKE_BODY='{}'
+vrun FAKE_CODE=500 FAKE_BODY='{}'
 _vn="$(LC_ALL=C grep -c 'verdict_changed_at=na notified_at=na' "$VLOG" 2>/dev/null || true)"
 [ "${_vn:-0}" -ge 1 ] \
   && ok "  🧪 [음성 대조군] 전이 없는 회차는 na na — 판별식이 아무 줄이나 물지 않는다" \
