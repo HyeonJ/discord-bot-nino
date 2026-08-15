@@ -55,12 +55,25 @@ bash "$V" --rc 2 --out "$f" --min-green 5 >/dev/null 2>&1; rc=$?
 [ "$rc" -eq 1 ] && ok "초록 4 · 기준 5 → 빨강" || bad "rc" "1" "$rc"
 
 echo "⑥ 🔑 초록 개수를 **못 읽으면 빨강** — 못 읽었다를 초록으로 만들지 않는다"
+# 🔴 `--min-green` 을 «반드시» 준다 — 안 주면 정본이 **그 앞에서** 죽어서(아래 ⑥-b)
+#   이 단언이 «다른 이유로» 초록이 된다. 옛 사본엔 기본값 5 가 있어 안 줘도 통과했는데,
+#   그건 이 칸이 「못 읽으면 빨강」이 아니라 **「기본값 경로」를 재고 있었다**는 뜻이다.
 printf '아무 요약 줄도 없는 출력\n' > "$WORK/noline"
-out="$(bash "$V" --rc 2 --out "$WORK/noline" 2>&1)"; rc=$?
+out="$(bash "$V" --rc 2 --out "$WORK/noline" --min-green 5 2>&1)"; rc=$?
 [ "$rc" -eq 1 ] && ok "요약 줄 없음 → exit 1" || bad "rc" "1" "$rc"
 printf '%s\n' "$out" | grep -q "못 읽었다" && ok "  → 못 읽었다고 말한다" || bad "문구" "못 읽었다" "$out"
-out="$(bash "$V" --rc 2 --out "$WORK/no-such-file-$$" 2>&1)"; rc=$?
+out="$(bash "$V" --rc 2 --out "$WORK/no-such-file-$$" --min-green 5 2>&1)"; rc=$?
 [ "$rc" -eq 1 ] && ok "출력 파일 부재 → exit 1" || bad "rc" "1" "$rc"
+
+echo "⑥-b 🔴 «기본값이 없다» — rc=2 인데 --min-green 을 안 주면 «분모를 안 말한 것»이라 죽는다"
+# 🔑 왜 이 칸이 생겼나: 옛 사본은 `MIN_GREEN=5` 라 **호출부가 자기 분모를 안 말해도 돌았다.**
+#   그러면 「초록 몇 개면 접나」가 코드에 숨고, 호출부마다 다른 값을 쓰는지 아무도 모른다.
+#   코어가 기본값을 없애며 적은 말이 그대로 좌변이다 — *「기본값을 두면 호출부가 자기 분모를 안 말한다」*.
+out="$(bash "$V" --rc 2 --out "$WORK/noline" 2>&1)"; rc=$?
+[ "$rc" -eq 1 ] && ok "--min-green 없음 → exit 1" || bad "rc" "1" "$rc"
+printf '%s\n' "$out" | grep -q 'min-green' \
+  && ok "  → «무엇이» 없는지 말한다 (분모를 안 말했다)" \
+  || bad "문구에 min-green 이 없다" "min-green" "$out"
 out="$(bash "$V" --rc 2 2>&1)"; rc=$?
 [ "$rc" -eq 1 ] && ok "--out 자체가 없으면 exit 1 (셀 수 없으면 가를 수 없다)" || bad "rc" "1" "$rc"
 
