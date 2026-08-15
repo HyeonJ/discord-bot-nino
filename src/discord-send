@@ -19,7 +19,7 @@ set -euo pipefail
 #   ✅ **다시 세운 근거(조회로 검산 가능):** 셋 다 **환경변수**라, 이걸 걸 수 있는 주체는 이미
 #      이 유저로 프로세스를 띄울 수 있고 그러면 **`PATH` 로 동등한 통제**를 가진다(그 경로에
 #      `bun` 을 놓으면 된다). ⇒ 실질 노출 증가는 0 이고, 근거가 **이 PR 밖**에 있다.
-#      🔸 그리고 기본값이 안 바뀌는지는 `tests/autosend-tag.test.sh` ⑥ 이 정적·실측 두 축으로 잰다.
+#      🔸 그리고 기본값이 안 바뀌는지는 `tests/autosend-tag.machine-local.test.sh` ⑥ 이 정적·실측 두 축으로 잰다.
 BOT_DIR="${DISCORD_SEND_BOT_DIR:-/home/bpx27/discord-bot-nino}"
 # 프로덕션 전용 체크아웃(-live) — dev 클론(~/yaksu-bot-core)을 쓰면 거기서 브랜치 체크아웃하는 순간
 # 통신선이 같이 흔들린다. relay(systemd unit)도 같은 경로라 relay↔send 버전 드리프트 불가(2026-07-25).
