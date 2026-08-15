@@ -10,19 +10,19 @@ WSL2에서 OneDrive 경로(`/mnt/c/Users/bpx27/OneDrive/문서/Vault/`)에 새 �
 ### CLI 도구: `onedrive-upload`
 ```bash
 # 파일 업로드
-~/discord-bot-nino/onedrive-upload file.md 문서/Vault/research/
+~/discord-bot-nino/tools/onedrive-upload file.md 문서/Vault/research/
 
 # 폴더 업로드
-~/discord-bot-nino/onedrive-upload ./my-folder/ 문서/Vault/
+~/discord-bot-nino/tools/onedrive-upload ./my-folder/ 문서/Vault/
 
 # 폴더 생성
-~/discord-bot-nino/onedrive-upload --mkdir 문서/Vault/new-folder
+~/discord-bot-nino/tools/onedrive-upload --mkdir 문서/Vault/new-folder
 
 # 디렉토리 동기화
-~/discord-bot-nino/onedrive-upload --sync /local/path 문서/Vault/target
+~/discord-bot-nino/tools/onedrive-upload --sync /local/path 문서/Vault/target
 
 # 목록 확인
-~/discord-bot-nino/onedrive-upload --ls 문서/Vault/
+~/discord-bot-nino/tools/onedrive-upload --ls 문서/Vault/
 ```
 
 ### rclone 직접 사용
