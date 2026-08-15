@@ -176,7 +176,10 @@ esac
 
 if [[ "$VERDICT" == "logged_out" ]]; then
     if should_alert "$LAST_ALERT_FILE" "$ALERT_INTERVAL"; then
-        if notify "$MENTION Claude Code 인증이 만료됐어! tmux attach -t nino 후 /login 해줘"; then
+        # 🔴 «만료됐어» 는 «추정»이었다 — `loggedIn:false` 는 만료·로그아웃·자격증명 손상을 «안 가른다».
+        #    관측(무엇을 봤나)과 처방(무엇을 하라)을 라벨로 가른다. 아래 stale 자리와 같은 계약이다.
+        #    🔑 접두 `[감시]` 는 「누가 말했나」만 가르지 «관측인가 판정인가»는 안 가른다.
+        if notify "$MENTION 관측: 니노 인증 상태 조회가 「로그아웃」으로 나왔어 (verdict=${VERDICT})\n처방(추정): tmux attach -t nino 후 /login"; then
             mark_alert "$LAST_ALERT_FILE"
             ALERT="$(sent_label sent)"
         else
@@ -264,7 +267,12 @@ if [[ -f "$CREDENTIALS" ]]; then
                 if should_alert "$LAST_EXPIRY_FILE" "$ALERT_INTERVAL"; then
                     # ⚠️ 호출부가 **둘**이다(로그아웃·여기). 한 자리만 고치면 다른 자리가 남고,
                     #    같은 계약이 여러 자리에 있으면 **한 자리만 덮고도 초록**이 된다(시험 ⑭).
-                    if notify "$MENTION 니노 토큰이 $(( -REMAIN / 60 ))분 전에 만료됐는데 갱신이 안 되고 있어! tmux attach -t nino 후 /login 해줘"; then
+                    # 🔴 «관측»과 «처방»을 문안에서 가른다 — 안 가르면 받는 쪽이 처방을 «관측»으로 읽는다.
+                    #    실물 2026-08-13: 이 알림의 「사람이 /login 해야 함」을 룬드가 관측으로 읽고
+                    #    자기 갈래 «정의»를 바꿨다(그의 3ec50e6 자기 정정).
+                    #    🔑 관측은 «탐침 뒤에도 과거»다 — 그게 이 갈래가 실제로 재는 것이고(위 probe_refresh),
+                    #      「갱신이 안 되고 있어」보다 좁고 확인 가능하다.
+                    if notify "$MENTION 관측: 니노 accessToken 이 $(( -REMAIN / 60 ))분 전에 만료됐고, 갱신 탐침을 찌른 «뒤에도» expiresAt 이 과거 그대로야\n처방(추정): tmux attach -t nino 후 /login"; then
                         mark_alert "$LAST_EXPIRY_FILE"
                         ALERT="${ALERT}+$(sent_label expiry)"
                     else
