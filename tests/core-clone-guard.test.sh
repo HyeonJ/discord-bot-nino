@@ -38,7 +38,7 @@ mkrepo() { # $1=경로 $2=브랜치
 
 echo "== 셔틀 코어 가드 =="
 
-[ -f "$GUARD" ] || { bad "가드 스크립트 없음: $GUARD"; echo; echo "합계 ✅$pass ❌$fail"; exit 1; }
+[ -f "$GUARD" ] || { bad "가드 스크립트 없음: $GUARD"; echo; echo "  통과 $pass · 실패 $fail"; exit 1; }
 bash -n "$GUARD" && ok "구문 검사 통과" || bad "구문 오류"
 
 # ① 기대와 같으면 조용하다
@@ -90,5 +90,5 @@ out="$(bash "$GUARD" "$TMP/dev" main 2>&1)"; rc=$?
     || bad "가드가 셔틀을 차단한다 (rc=$rc)"
 
 echo
-echo "합계 ✅$pass ❌$fail"
+echo "  통과 $pass · 실패 $fail"
 [ $fail -eq 0 ]
