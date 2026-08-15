@@ -120,7 +120,15 @@ PR_TOP="${PR_TOP:-3}"                     # 몇 개까지 줄로 읽어줄지
 
 TODAY="$(TZ=Asia/Seoul date +%Y-%m-%d)"
 DAY_NAMES=("" "월요일" "화요일" "수요일" "목요일" "금요일" "토요일" "일요일")
-DAY_NAME="${DAY_NAMES[$(TZ=Asia/Seoul date +%u)]}"
+# 🔴 **요일은 주입 가능하다** — 없으면 진짜 시계다(`DARREN_SLEEP_NOW`·`MEMORY_LINT_NOW` 관례).
+#   왜: 인사가 요일로 갈리는데(`greeting`), 그 갈래를 시험이 **오늘이 무슨 요일인지로** 재고 있었다.
+#   ⇒ 주말엔 강수 갈래가 «판정 불가»로 떨어져 **원장의 판불 칸이 요일마다 흔들린다**
+#     (토요일 머지는 매주 「판불이 늘었다」로 읽혀 자동 동결로 간다 — 기준선 행은 한 번만 면제한다).
+#   🔑 게이트 입력이 «시계·요일·달력»에 매달려 있으면 그 게이트는 **주기적으로 스스로 뒤집힌다.**
+#   ⚠️ 이 이음매는 «요일 하나»다 — `TODAY`·`_MON`·`_DAY` 와 아래 나이 계산(`date +%s`)은 진짜 시계라
+#      주입하면 머리글 날짜와 요일이 **갈린다.** 시험용이고, 넓히려면 별 PR 이다(`_NOW` 이음매).
+DOW="${MORNING_BRIEFING_DOW:-$(TZ=Asia/Seoul date +%u)}"
+DAY_NAME="${DAY_NAMES[$DOW]}"
 # ⚠️ `%-m`(0 제거)는 GNU 전용 — BSD strftime 은 안 받는다. 0 을 셸에서 떼면 양쪽에서 같다.
 _MON="$(TZ=Asia/Seoul date +%m)"; _DAY="$(TZ=Asia/Seoul date +%d)"
 HEADER="☀️ ${_MON#0}/${_DAY#0} $DAY_NAME"
@@ -461,7 +469,7 @@ WEATHER="$(weather_section)"
 RAIN_PCT="$(sed -n 's/.*강수 최대 \([0-9][0-9]*\)%.*/\1/p' <<<"$WEATHER" | head -1)"
 
 MSG="$HEADER
-$(greeting "$(TZ=Asia/Seoul date +%u)" "$RAIN_PCT")
+$(greeting "$DOW" "$RAIN_PCT")
 
 $WEATHER
 

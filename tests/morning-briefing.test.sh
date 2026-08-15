@@ -144,12 +144,16 @@ if grep -q '흐림' <<<"$out"; then ok "공백 붙어도 매핑된다(strip)"; e
 echo "⑧ 인사줄 — 요일·강수로 갈리고, **정보가 아니라 인사다**"
 out="$(run "$ROOT/todo.md" "$ROOT/weather.json")"
 if [[ "$(sed -n '2p' <<<"$out")" != "" ]]; then ok "둘째 줄에 인사가 있다"; else bad "인사줄 없음" "$out"; fi
-# 강수 54% → "비 올 수도" (평일 기준). 주말이면 주말 인사가 이기므로 요일로 기대값을 나눈다
-dow="$(TZ=Asia/Seoul date +%u)"
-case "$dow" in
-  1) want="월요일" ;; 5) want="금요일" ;; 6|7) want="주말" ;; *) want="비 올 수도" ;;
-esac
-if grep -q "$want" <<<"$out"; then ok "요일/날씨 분기 일치($want)"; else bad "분기 불일치(기대 $want)" "$out"; fi
+# 🔴 옛 판은 «오늘» 요일을 읽어 기대값을 그쪽으로 맞췄다 — 그러면 **매일 한 갈래만 재고**
+#   나머지 셋은 그날 안 재진다(어느 날 깨져도 그날이 와야 보인다). 요일을 주입해 **넷을 다 잰다.**
+#   강수 54% 는 고정이므로 갈리는 축은 요일 하나다.
+for _c in "1:월요일" "3:비 올 수도" "5:금요일" "6:주말" "7:주말"; do
+  _d="${_c%%:*}"; want="${_c#*:}"
+  # 🔴 **둘째 줄(인사)에만** 건다 — 본문 전체에 걸면 「월요일」·「금요일」이 **머리글의 요일 이름**
+  #   에도 있어서 `greeting` 이 깨져도 통과한다(변이로 확인: 인사를 통째로 지워도 1·5 가 초록이었다).
+  _o="$(MORNING_BRIEFING_DOW="$_d" run "$ROOT/todo.md" "$ROOT/weather.json" | sed -n '2p')"
+  if grep -q "$want" <<<"$_o"; then ok "요일 $_d 인사줄 → $want"; else bad "요일 $_d 분기 불일치(기대 $want)" "$_o"; fi
+done
 
 # ⑧-2 **BSD sed 에서도 강수를 읽는다** — `\+` 는 GNU 확장이라 BSD 는 매칭 자체가 실패한다
 #   왜: 실패하면 RAIN_PCT 이 비고 인사가 강수 갈래를 못 타 **평일 기본 인사로 조용히 떨어진다.**
@@ -161,12 +165,11 @@ if sed --posix -n 's/x\([0-9][0-9]*\)y/\1/p' </dev/null >/dev/null 2>&1; then
   mkdir -p "$ROOT/posixsed"
   printf '#!/bin/bash\nexec "$REAL_SED" --posix "$@"\n' > "$ROOT/posixsed/sed"
   chmod +x "$ROOT/posixsed/sed"
-  if [[ "$dow" != "1" && "$dow" != "5" && "$dow" != "6" && "$dow" != "7" ]]; then
-    out="$(PATH="$ROOT/posixsed:$PATH" run "$ROOT/todo.md" "$ROOT/weather.json")"
-    if grep -q '비 올 수도' <<<"$out"; then ok "GNU 확장 없는 sed 로도 강수를 읽는다(BSD 갈래)"; else bad "BSD sed 에서 강수를 잃었다 — 인사가 갈래를 못 탔다" "$out"; fi
-  else
-    nom "오늘은 요일 인사가 이겨서 강수 갈래를 못 잰다(평일에 재야 한다)"
-  fi
+  # 🔴 옛 판은 「오늘이 평일인가」로 갈라서 **주말이면 판정 불가**였다. 그러면 이 시험이
+  #   재는 것이 «BSD sed» 가 아니라 «오늘 요일»이 되고, 원장의 판불 칸이 **주마다 흔들린다.**
+  #   ⇒ 요일을 «못 박는다»(수요일). 강수 54% 가 이기는 갈래라 갈래가 하나로 정해진다.
+  out="$(MORNING_BRIEFING_DOW=3 PATH="$ROOT/posixsed:$PATH" run "$ROOT/todo.md" "$ROOT/weather.json")"
+  if grep -q '비 올 수도' <<<"$out"; then ok "GNU 확장 없는 sed 로도 강수를 읽는다(BSD 갈래)"; else bad "BSD sed 에서 강수를 잃었다 — 인사가 갈래를 못 탔다" "$out"; fi
 else
   nom "이 기계의 sed 가 --posix 를 안 받아 GNU 확장을 끌 수 없다"
 fi
