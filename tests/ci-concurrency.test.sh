@@ -21,8 +21,9 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WF="${CI_WORKFLOW:-$ROOT/.github/workflows/ci.yml}"
 
-pass=0; fail=0
+pass=0; fail=0; skip=0
 ok()  { echo "  ✅ $1"; pass=$((pass + 1)); }
+nom() { echo "  ⛔ $1 (판정 불가)"; skip=$((skip + 1)); }
 bad() { echo "  ❌ $1"; [ -n "${2:-}" ] && echo "     want: $2"; [ -n "${3:-}" ] && echo "     got:  $3"; fail=$((fail + 1)); }
 
 [ -f "$WF" ] || { echo "⛔ 판정 불가 — 워크플로가 없다: $WF"; exit 2; }
@@ -105,7 +106,7 @@ elif printf '%s\n' "$GVAL" | grep -q 'github\.sha'; then
 else
     bad "group 이 ref 로만 갈린다 — main 커밋 전부가 «한 그룹»이고 대기 자리는 하나다" \
         "group 에 github.sha (main 일 때)" "«${GVAL}»"
-    echo "  ⛔ 판정 불가 — 위가 깨져서 «sha 가 어느 가지인가»는 못 쟀다 (분모는 4 유지)"
+    nom "위가 깨져서 «sha 가 어느 가지인가»는 못 쟀다 (분모는 4 유지)"
 fi
 
 # 🧪 [양성 대조군] 검사기를 실제로 태운다 — 같은 코드에, 위반 파일을 만들어서.
@@ -124,5 +125,8 @@ if [ "${CI_CONC_SELFTEST:-1}" = "1" ]; then
 fi
 
 echo
-echo "  통과 $pass · 실패 $fail"
-[ "$fail" -eq 0 ]
+echo "  통과 $pass · 실패 $fail · 판정 불가 $skip"
+[ "$fail" -eq 0 ] || exit 1
+# 🔴 이 파일엔 판정 불가 칸이 «아예 없었다» — ⛔ 를 찍어도 rc=0 으로 나가서
+#   러너 집계엔 「통과」로 앉았다. 요약과 rc 를 같이 연다.
+[ "$skip" -eq 0 ] || exit 2
