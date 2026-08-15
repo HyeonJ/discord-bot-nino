@@ -56,7 +56,13 @@ fi
 DISCORD_SEND="${DISCORD_SEND:-$BOT_DIR/src/discord-send}"
 ALERT_CHANNEL="${CHECK_AUTH_CHANNEL:-현인-업무}"
 ALERT_INTERVAL="${CHECK_AUTH_ALERT_INTERVAL:-3600}"     # 같은 경보 재발송 간격
-EXPIRY_GRACE="${CHECK_AUTH_EXPIRY_GRACE:-1800}"         # 만료 직후 이 시간은 "갱신 중"으로 본다
+# 🔴 600 인 이유 — 옛 값 1800(30분)은 **20분짜리 만료를 통째로 삼켰다**(2026-08-12 05:46~06:07
+#   실물: 전용 감시가 한 번도 안 울었고 로그도 expiry=ok. 실제로 운 것은 사용량 체커가 «우연히»
+#   401 을 맞은 부수 효과뿐이라, 그게 없었으면 그 20분은 아무 데도 안 남았다).
+#   축은 「무음이냐 갱신 중 오보냐」라 **Ⅲ** — Darren 승인 2026-08-12 `M:4oqv`(「조용히 안 오는 쪽이
+#   시끄럽게 틀리는 쪽보다 나쁘다」를 이 자리에도 적용). ⚠️ 임의로 되돌리지 말 것.
+#   계약은 상수가 아니라 시험이 잡는다 — `tests/check-auth.test.sh` 「20분 만료는 알린다」.
+EXPIRY_GRACE="${CHECK_AUTH_EXPIRY_GRACE:-600}"          # 만료 직후 이 시간은 "갱신 중"으로 본다
 MENTION="${CHECK_AUTH_MENTION:-<@353914579929268226>}"
 
 mkdir -p "$STATE_DIR" 2>/dev/null || true
@@ -170,7 +176,10 @@ esac
 
 if [[ "$VERDICT" == "logged_out" ]]; then
     if should_alert "$LAST_ALERT_FILE" "$ALERT_INTERVAL"; then
-        if notify "$MENTION Claude Code 인증이 만료됐어! tmux attach -t nino 후 /login 해줘"; then
+        # 🔴 «만료됐어» 는 «추정»이었다 — `loggedIn:false` 는 만료·로그아웃·자격증명 손상을 «안 가른다».
+        #    관측(무엇을 봤나)과 처방(무엇을 하라)을 라벨로 가른다. 아래 stale 자리와 같은 계약이다.
+        #    🔑 접두 `[감시]` 는 「누가 말했나」만 가르지 «관측인가 판정인가»는 안 가른다.
+        if notify "$MENTION 관측: 니노 인증 상태 조회가 「로그아웃」으로 나왔어 (verdict=${VERDICT})\n처방(추정): tmux attach -t nino 후 /login"; then
             mark_alert "$LAST_ALERT_FILE"
             ALERT="$(sent_label sent)"
         else
@@ -188,8 +197,23 @@ else
 fi
 
 # ── ② 만료 후 미갱신 ─────────────────────────────────────────────────────────
-if [[ -f "$CREDENTIALS" ]]; then
-    REMAIN="$(python3 - "$CREDENTIALS" <<'PYEOF' 2>/dev/null || echo na
+# 🔴 **만료됐다 ≠ 고장났다** (2026-08-14, Darren 이 세서 알려줬다: 11일에 6번, 전부 `verdict=ok`).
+#    `accessToken` 갱신은 **«호출할 때»** 돈다 ⇒ 세션이 조용하면 `expiresAt` 은 과거인 채 남는다.
+#    옛 판정은 그걸 「갱신이 안 되고 있다」로 읽어 **idle 을 사고로 오독**했다.
+#    실물: 경보 16:15:07 · 자격증명 파일 갱신 16:15:32 — **25초 차이로 틀렸다**(그 갱신을 시킨 건
+#    Darren 의 항의 메시지였다. 항의한 행위가 항의 대상을 지웠다).
+#
+# 🔴 **순진한 수리를 쓰지 않는다** — 「`refreshTokenExpiresAt` 가 미래면 무해」로 두면
+#    룬드의 8시간 27분 먹통을 「무해」라 부른다. 그때 그의 파일엔 refreshToken 이 **있는데
+#    안 쓰이고 있었다**(2026-07-30 실측). **있음 ≠ 쓰임.**
+#
+# ✅ 그래서 좌변이 «필드»가 아니라 «호출»이다 — stale 이면 한 번 찔러보고 **파일을 다시 읽는다.**
+#    🔑 판정은 탐침의 rc 가 **아니라** 「`expiresAt` 이 미래로 갔나」다. 우리가 실제로 신경 쓰는
+#      상태를 직접 보므로, 탐침이 네트워크·한도로 죽어도 **시끄러운 쪽으로 실패**한다
+#      (Darren Ⅲ 08-12 `M:4oqv`: 「조용히 안 오는 쪽이 시끄럽게 틀리는 쪽보다 나쁘다」 보존).
+#    🔑 부수 효과가 처방이다 — 찌르는 행위가 갱신을 시켜 **진단이 곧 수리**다.
+read_remaining() {   # 자격증명의 남은 초. 못 읽으면 na
+    python3 - "$CREDENTIALS" <<'PYEOF' 2>/dev/null || echo na
 import sys, json, time
 try:
     d = json.load(open(sys.argv[1]))
@@ -197,17 +221,58 @@ try:
 except Exception:
     print("na")
 PYEOF
-)"
+}
+
+# 🔸 비용은 **stale 가지에서만** 든다(실측 11일에 6회). 5분마다 도는 자리에 안 넣는다.
+# 🔸 모델 이름은 여기 안 적는다 — `config/models.sh` 가 유일한 자리다(사본이 둘이면 한쪽만 낡는다).
+PROBE_TIMEOUT="${CHECK_AUTH_PROBE_TIMEOUT:-60}"
+probe_refresh() {
+    local model="${NINO_MODEL_HAIKU:-}"
+    [[ -z "$model" && -r "$BOT_DIR/config/models.sh" ]] && . "$BOT_DIR/config/models.sh"
+    model="${NINO_MODEL_HAIKU:-claude-haiku-4-5-20251001}"
+    # ⚠️ `timeout` 이 없으면 «걸어두지 않고» 그냥 돈다 — 없다고 탐침을 건너뛰면
+    #    그 환경에서 이 수리가 통째로 사라진다(조용한 회귀).
+    # 🔴 `< /dev/null` 필수 — 없으면 *"no stdin data received in 3s"* 로 **3초를 버리고**
+    #    cron 에서 stdin 이 파이프면 더 오래 매달린다(실측 08-14: 그 경고와 함께 15.8초).
+    if command -v timeout >/dev/null 2>&1; then
+        timeout "$PROBE_TIMEOUT" "$CLAUDE_BIN" -p ok --model "$model" >/dev/null 2>&1 </dev/null
+    else
+        "$CLAUDE_BIN" -p ok --model "$model" >/dev/null 2>&1 </dev/null
+    fi
+    return 0   # 🔴 rc 는 «판정에 안 쓴다» — 판정은 아래에서 파일을 다시 읽어 한다
+}
+
+if [[ -f "$CREDENTIALS" ]]; then
+    REMAIN="$(read_remaining)"
     case "$REMAIN" in
         ''|na|*[!0-9-]*)
             EXPIRY=unknown; NOTE="${NOTE:+$NOTE,}credentials-unreadable" ;;
         *)
+            PROBED=0
             if [[ $REMAIN -lt $(( -EXPIRY_GRACE )) ]]; then
+                probe_refresh
+                PROBED=1
+                REMAIN="$(read_remaining)"
+            fi
+            if [[ ! $REMAIN =~ ^-?[0-9]+$ ]]; then
+                # 🔴 탐침 뒤에 파일이 안 읽히면 «무해»가 아니라 **못 쟀다**. 0 으로 접지 않는다.
+                EXPIRY=unknown; NOTE="${NOTE:+$NOTE,}credentials-unreadable-after-probe"
+            elif [[ $REMAIN -ge $(( -EXPIRY_GRACE )) ]]; then
+                # 🔑 「원래 정상」과 「탐침이 되살렸다」를 **갈라 적는다** — 같은 `ok` 로 접으면
+                #   *「탐침이 실제로 값을 하고 있나」*를 로그에서 영영 못 센다(무음의 조건).
+                if [[ $PROBED -eq 1 ]]; then EXPIRY=refreshed; else EXPIRY=ok; fi
+                rm -f "$LAST_EXPIRY_FILE" 2>/dev/null || true
+            else
                 EXPIRY=stale
                 if should_alert "$LAST_EXPIRY_FILE" "$ALERT_INTERVAL"; then
                     # ⚠️ 호출부가 **둘**이다(로그아웃·여기). 한 자리만 고치면 다른 자리가 남고,
                     #    같은 계약이 여러 자리에 있으면 **한 자리만 덮고도 초록**이 된다(시험 ⑭).
-                    if notify "$MENTION 니노 토큰이 $(( -REMAIN / 60 ))분 전에 만료됐는데 갱신이 안 되고 있어! tmux attach -t nino 후 /login 해줘"; then
+                    # 🔴 «관측»과 «처방»을 문안에서 가른다 — 안 가르면 받는 쪽이 처방을 «관측»으로 읽는다.
+                    #    실물 2026-08-13: 이 알림의 「사람이 /login 해야 함」을 룬드가 관측으로 읽고
+                    #    자기 갈래 «정의»를 바꿨다(그의 3ec50e6 자기 정정).
+                    #    🔑 관측은 «탐침 뒤에도 과거»다 — 그게 이 갈래가 실제로 재는 것이고(위 probe_refresh),
+                    #      「갱신이 안 되고 있어」보다 좁고 확인 가능하다.
+                    if notify "$MENTION 관측: 니노 accessToken 이 $(( -REMAIN / 60 ))분 전에 만료됐고, 갱신 탐침을 찌른 «뒤에도» expiresAt 이 과거 그대로야\n처방(추정): tmux attach -t nino 후 /login"; then
                         mark_alert "$LAST_EXPIRY_FILE"
                         ALERT="${ALERT}+$(sent_label expiry)"
                     else
@@ -217,9 +282,6 @@ PYEOF
                 else
                     ALERT="${ALERT}+expiry_skip"
                 fi
-            else
-                EXPIRY=ok
-                rm -f "$LAST_EXPIRY_FILE" 2>/dev/null || true
             fi ;;
     esac
 else

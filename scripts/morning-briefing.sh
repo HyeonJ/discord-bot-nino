@@ -366,18 +366,29 @@ iso_epoch() {
 # gh 조회를 한 자리에 모은다 — 시험은 PR_LIST_CMD 로 통째로 갈아끼운다.
 # ⚠️ `timeout` 은 GNU coreutils 라 macOS 엔 기본이 없다. 있으면 쓰고 없으면 그냥 돈다 —
 #    **없다고 조회를 포기하면** 맥에서 이 섹션이 통째로 사라진다(무음=없음 규약 위반).
+# 🔴 좌변은 「리뷰가 0건인가」가 «아니라» 「«판정»이 0건인가」다.
+#   ⛔ `select(.reviews|length==0)` 로 적으면 **`COMMENTED` 만 달린 PR 이 「본 것」으로 접혀**
+#      목록에서 사라진다 — 정작 내가 막고 있는데.
+#   🔴 실사고: 내 `#72` 에 내가 `COMMENTED` 를 «둘» 남기고 판정을 안 냈다. 나흘 묻혔고
+#      상대가 물어서야 알았다. 룬드 `#29`(리뷰 0건)의 «가려진» 판이다.
+#   🔑 「무언가를 남겼다」와 「판정을 냈다」는 다른 양이고, 리뷰 «목록»에는 내 이름이 떠서
+#      사람 눈으로 훑으면 «처리된 것»으로 보인다. 그래서 좌변을 상태 이름으로 못 박는다.
+#   🔸 시험은 이 문자열을 이름으로 꺼내 «질의 자체»를 잰다(⑪-9). 인라인으로 두면 스텁이
+#      함수를 통째로 갈아끼워 질의가 분모 밖으로 떨어진다.
+PR_VERDICT_JQ='.[] | select([.reviews[] | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED")] | length == 0) | [.number, .createdAt, .title] | @tsv'
+
 _gh_unreviewed() {
   local t=()
   command -v timeout >/dev/null 2>&1 && t=(timeout 20)
   "${t[@]}" gh pr list --repo "$1" --limit 50 --json number,title,createdAt,reviews \
-    --jq '.[] | select(.reviews|length==0) | [.number, .createdAt, .title] | @tsv'
+    --jq "$PR_VERDICT_JQ"
 }
 
 unreviewed_pr_section() {
   local cmd="$PR_LIST_CMD"
   if [[ -z "$cmd" ]]; then
     # 🔑 gh 부재는 "PR 이 없다"가 아니라 **못 쟀다**다. 조용히 넘기면 둘이 같아진다.
-    command -v gh >/dev/null 2>&1 || { echo "⚠️ 리뷰 대기 PR 못 읽음 — gh 없음(판정 불가)"; return; }
+    command -v gh >/dev/null 2>&1 || { echo "⚠️ 판정 안 난 PR 못 읽음 — gh 없음(판정 불가)"; return; }
     cmd=_gh_unreviewed
   fi
 
@@ -386,7 +397,7 @@ unreviewed_pr_section() {
   for repo in $PR_REPOS; do
     out="$("$cmd" "$repo" 2>/dev/null)"; rc=$?
     if (( rc != 0 )); then
-      echo "⚠️ 리뷰 대기 PR 못 읽음 — $repo 조회 실패(rc=$rc)"
+      echo "⚠️ 판정 안 난 PR 못 읽음 — $repo 조회 실패(rc=$rc)"
       continue
     fi
     short="${repo##*/}"
@@ -407,7 +418,7 @@ unreviewed_pr_section() {
 
   (( ${#items[@]} > 0 )) || return   # 확인된 0건 → 줄을 뺀다(무음=없음)
 
-  echo "리뷰 안 달린 PR ${#items[@]}건"
+  echo "판정 안 난 PR ${#items[@]}건"
   local i
   for (( i = 0; i < ${#items[@]} && i < PR_TOP; i++ )); do
     printf '       %s\n' "${items[$i]}"

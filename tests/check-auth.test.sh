@@ -189,6 +189,18 @@ run "$C" FAKE_CLAUDE_OUT="$LOGGED_IN"
 [ ! -s "$SENT_LOG" ] && ok "막 만료(grace 안)는 안 보낸다 — 갱신 중 오탐 금지" \
   || bad "grace 내 오탐 금지" "0건" "$(cat "$SENT_LOG")"
 
+# 🔴 회귀 — **20분짜리 만료가 통째로 무음이었다** (2026-08-12 05:46~06:07 실물).
+#   옛 grace 가 1800(30분)이라 20분 만료는 «설계상» 한 번도 안 울었고 로그에도 expiry=ok 로 남았다.
+#   그때 실제로 운 것은 사용량 체커가 «우연히» 401 을 맞은 부수 효과였다 — 그게 없었으면
+#   이 20분은 아무 데도 안 남는다. 부재는 조용하다.
+# 🔑 이 시험이 없으면 grace 를 다시 키워도 초록이다 — 위 -3600·-300 은 1800 에서도 600 에서도
+#   같은 답을 내서 **경계를 하나도 안 잡는다**.
+# ⚠️ 좌변은 「상수가 600 이냐」가 아니라 **「20분 만료가 우나」**다 — 상수는 수단이고 계약은 이것이다.
+C="$(creds -1200)"                                   # 20분 전에 만료 · 갱신 안 됨
+run "$C" FAKE_CLAUDE_OUT="$LOGGED_IN"
+[ "$(nlines "$SENT_LOG")" = 1 ] && ok "20분 만료는 알린다 (08-12 무음 구간 회귀)" \
+  || bad "20분 만료 알림" "1건" "$(nlines "$SENT_LOG")건"
+
 echo "── ⑧ 저장소가 없으면(env 방식) 만료 판정을 **접지 않고 skip** 한다 ──"
 # 🔴 파일 부재를 "만료"로 접으면 env 토큰으로 정상 동작하는 봇에 오보가 간다(룬드 14:38 사고의 형태).
 run "$WORK/no-such-creds.json" FAKE_CLAUDE_OUT="$LOGGED_IN"
@@ -418,6 +430,147 @@ grep -q 'verdict=bad_env' "$G_LOG" 2>/dev/null && ok "  🔑 bad_args 와 갈라
 GUARD_ENV="" gr --help
 [ "$(g_sends)" -eq 0 ] && ok "--help 는 발송 0건" || bad "help 발송" "0건" "$(g_sends)건"
 printf '%s' "$g_out" | grep -q 'usage:' && ok "  → 사용법을 stdout 으로 낸다" || bad "usage 출력" "usage: 줄" "$g_out"
+
+echo "── ⑰ 🔴 stale 을 «탐침»으로 가른다 — idle 만료와 갱신 고장은 다른 것이다 ──"
+#
+# 🔴 왜 생겼나 (2026-08-14, Darren 이 세서 알려줬다):
+#   *「너 만료 안됐는데 이 알림 하루에 한번씩 꼭 오는거같아」* — 11일에 6번, **전부 verdict=ok**.
+#   오늘 건은 **25초** 차이였다: 경보 16:15:07 · 자격증명 파일 갱신 16:15:32.
+#   기전 — `accessToken` 갱신은 **«호출할 때»** 돈다. 세션이 조용하면 `expiresAt` 은 과거인 채
+#   남고, 옛 판정은 그걸 「갱신이 안 되고 있다」로 읽었다. ⇒ **idle 이 사고로 오독됐다.**
+#
+# 🔴 순진한 수리(「refreshTokenExpiresAt 가 미래면 무해」)는 **쓰면 안 된다** — 룬드 8시간 27분
+#   먹통 때 그의 파일엔 refreshToken 이 **있는데 안 쓰이고 있었다**(2026-07-30 실측).
+#   그 조건이면 그 사고를 「무해」라 불렀을 것이다. **있음 ≠ 쓰임.**
+#
+# ✅ 그래서 좌변이 «필드»가 아니라 «호출»이다: stale 이면 한 번 찔러보고 **파일을 다시 읽는다.**
+#   판정은 탐침의 rc 가 아니라 **「expiresAt 이 미래로 갔나」** — 우리가 실제로 신경 쓰는 그 상태다.
+#   🔑 부수 효과가 처방이다: 찌르는 행위가 갱신을 시켜서 **진단이 곧 수리**다.
+
+# 탐침용 가짜: 호출 횟수를 세고, PROBE_REFRESH=1 이면 자격증명을 «실제로» 갱신한다
+cat > "$WORK/bin/claude-probe" <<'STUB'
+#!/bin/bash
+PROBE=0
+for a in "$@"; do [ "$a" = "-p" ] && PROBE=1; done
+if [ "$PROBE" = 1 ]; then
+  echo probe >> "$PROBE_LOG"
+  [ "${PROBE_RC:-0}" != 0 ] && exit "$PROBE_RC"
+  if [ "${PROBE_REFRESH:-0}" = 1 ]; then
+    python3 -c 'import sys,json,time;p=sys.argv[1];d=json.load(open(p));d["claudeAiOauth"]["expiresAt"]=int((time.time()+28800)*1000);json.dump(d,open(p,"w"))' "$PROBE_CREDS"
+  fi
+  exit 0
+fi
+printf '%s' "${FAKE_CLAUDE_OUT:-}"; exit "${FAKE_CLAUDE_RC:-0}"
+STUB
+chmod +x "$WORK/bin/claude-probe"
+
+probe_run() {   # $1=creds · $2=PROBE_REFRESH · $3=PROBE_RC
+  PROBE_LOG="$WORK/probe-$RANDOM.log"; : > "$PROBE_LOG"
+  run "$1" CLAUDE_BIN="$WORK/bin/claude-probe" FAKE_CLAUDE_OUT="$LOGGED_IN" \
+      PROBE_LOG="$PROBE_LOG" PROBE_CREDS="$1" PROBE_REFRESH="$2" PROBE_RC="${3:-0}"
+}
+probes() { nlines "$PROBE_LOG"; }
+
+# ⓐ 오늘의 실물 — stale 인데 탐침이 갱신시킨다 ⇒ **안 울린다**
+C="$(creds -3600 no)"
+probe_run "$C" 1
+[ "$(nlines "$SENT_LOG")" = 0 ] && ok "🔴 갱신되면 «안» 울린다 (Darren 이 센 6건이 이 자리다)" \
+  || bad "idle 만료 오보" "0건" "$(nlines "$SENT_LOG")건 — 거짓 경보가 그대로다"
+[ "$(probes)" = 1 ] && ok "  → 탐침을 «한 번» 돌았다" || bad "탐침 횟수" "1" "$(probes)"
+grep -q 'expiry=refreshed' "$LOGF" && ok "  🔑 로그가 stale 과 갈라 적는다 (expiry=refreshed)" \
+  || bad "판정 표지" "expiry=refreshed" "$(grep -o 'expiry=[a-z_]*' "$LOGF" | tail -1)"
+
+# ⓑ 🔴 회귀 방지 — 탐침 후에도 미갱신이면 **진짜다.** 룬드 8시간 27분이 이 가지다
+C="$(creds -3600 no)"
+probe_run "$C" 0
+[ "$(nlines "$SENT_LOG")" = 1 ] && ok "🔴 탐침해도 안 갱신되면 «울린다» (룬드 8h27m 회귀 방지)" \
+  || bad "진짜 사고 무음" "1건" "$(nlines "$SENT_LOG")건 — 수리가 사고를 삼켰다"
+grep -q 'expiry=stale' "$LOGF" && ok "  → expiry=stale 로 남는다" \
+  || bad "stale 표지" "expiry=stale" "$(grep -o 'expiry=[a-z_]*' "$LOGF" | tail -1)"
+
+# ⓒ 🔴 탐침이 «죽어도» 무해로 새면 안 된다 — Darren Ⅲ(「조용히 안 오는 쪽이 더 나쁘다」) 보존
+C="$(creds -3600 no)"
+probe_run "$C" 0 9
+[ "$(nlines "$SENT_LOG")" = 1 ] && ok "🔴 탐침이 실패해도 «무해»로 접지 않는다 (시끄러운 쪽으로 실패)" \
+  || bad "탐침 실패 삼킴" "1건" "$(nlines "$SENT_LOG")건 — 탐침 고장이 감지기를 껐다"
+# 🔑 이게 «판정을 탐침 rc 가 아니라 파일 상태»로 두는 이유다 — rc 를 믿으면 이 가지가 뒤집힌다
+
+# ⓓ 🔑 비용 — stale 이 «아니면» 탐침을 아예 안 돈다 (이 스크립트는 5분마다 돈다)
+C="$(creds 3600)"
+probe_run "$C" 1
+[ "$(probes)" = 0 ] && ok "🔑 정상일 땐 탐침 0회 — 5분마다 도는 자리에 비용을 안 넣는다" \
+  || bad "불필요한 탐침" "0" "$(probes)회"
+[ "$(nlines "$SENT_LOG")" = 0 ] && ok "  → 발송도 0건" || bad "정상인데 발송" "0건" "$(nlines "$SENT_LOG")건"
+
+# ⓔ 🧪 ⓐ의 «양성» — 같은 픽스처에서 갱신만 끄면 판정이 뒤집힌다(ⓐ가 항진명제가 아니다)
+C="$(creds -3600 no)"; probe_run "$C" 1; A="$(nlines "$SENT_LOG")"
+C="$(creds -3600 no)"; probe_run "$C" 0; B="$(nlines "$SENT_LOG")"
+[ "$A" != "$B" ] && ok "🧪 갱신 여부 하나로 판정이 갈린다 ($A ↔ $B) — ⓐ가 항진명제가 아니다" \
+  || bad "판정이 안 갈린다" "다른 값" "둘 다 ${A}건 — 탐침이 아무것도 안 재고 있다"
+
+echo "── ⑱ 🔴 알림 문안이 «관측»과 «처방»을 가른다 — 호출부 «둘 다» ──"
+# 🔑 실물 2026-08-13: 내 알림이 「사람이 /login 해야 함」을 «사실»처럼 실어서 룬드가 그걸
+#    «관측»으로 읽고 자기 갈래 «정의»를 바꿨다(그의 3ec50e6 자기 정정).
+#    접두 «[감시]» 는 「누가 말했나」만 가르지 「관측인가 판정인가」는 «안» 가른다.
+# 🔴 호출부가 «둘»이다(로그아웃 · 만료 후 미갱신). 한 자리만 고치면 다른 자리가 남고,
+#    같은 계약이 여러 자리에 있으면 «한 자리만 덮고도 초록»이 된다(⑭ 와 같은 축).
+for _case in logged_out stale; do
+  if [ "$_case" = logged_out ]; then
+    C="$(creds 36000)"; run "$C" FAKE_CLAUDE_OUT="$LOGGED_OUT"
+  else
+    C="$(creds -7200 no)"; run "$C" FAKE_CLAUDE_OUT="$LOGGED_IN"
+  fi
+  body="$(cut -f2 "$SENT_LOG" 2>/dev/null)"
+  # 🔴 대조군 — 좌변이 비면 아래 case 가 «상수 참»이 된다. 추출 자체를 먼저 단언한다.
+  if [ -z "$body" ]; then
+    bad "⑱ ${_case} — 알림 본문 추출 실패" "1건 이상" "SENT_LOG 가 비었다(발송 자체가 안 났다)"
+    continue
+  fi
+  case "$body" in
+    *"관측:"*) ok "⑱ ${_case} — «관측:» 라벨이 있다" ;;
+    *) bad "⑱ ${_case} — 관측 라벨 없음" "관측:" "$body" ;;
+  esac
+  case "$body" in
+    *"처방(추정):"*) ok "⑱ ${_case} — «처방(추정):» 라벨이 있다" ;;
+    *) bad "⑱ ${_case} — 처방 라벨 없음" "처방(추정):" "$body" ;;
+  esac
+done
+
+echo "── ⑲ 🔴 정적 전수 — «새 호출부»가 생겨도 잡힌다 (⑱ 만으로는 다음 자리가 또 샌다) ──"
+# 🔑 ⑱ 은 «지금 있는 두 자리»를 재고, 이건 «앞으로 생길 자리»를 잰다. 근본이 「한 자리만
+#    덮고도 초록」이라 좌변이 «전수»여야 한다 — 동적 시험 옆에 정적 전수를 둔다.
+# 🔴 판별식: 이건 checklist(목록 «밖»이 무검사 = 조용하다)라 좌변이 «닫혀» 있어야 한다.
+#    ⇒ 리터럴 호출은 라벨을 «재고», 변수 호출은 «판정 불가»로 시끄럽게 낸다(안 재고 넘기지 않는다).
+# 🔴 **좌변(분모)과 판정을 «따로» 조인다 — 첫 판은 판정만 조였다** (룬드 #224 리뷰).
+#    분모가 `grep -c 'notify "'` 라 **겹따옴표로 시작하는 호출만** 셌다. 그래서
+#      notify '라벨 없는 홑따옴표'   ← 분모 밖 ⇒ 초록(미탐)
+#      notify $MSG                   ← 분모 밖 ⇒ 초록(미탐)
+#    가 «개수도 안 변한 채» 조용히 통과했다(실측: 심은 뒤에도 「2곳 전부」).
+#    🔑 *「검사가 틀리면 오탐이 시끄럽고, 분모가 좁으면 «아무 일도 안 일어난다»」* —
+#      allowlist 는 «판정»의 성질이지 «분모»를 넓혀주지 않는다.
+#    ⇒ 좌변은 «함수 이름»으로 잡는다(따옴표·조립 방식과 무관).
+# 🔴 **allowlist 로 읽는다 — 목록 «밖»이 더 엄격하다.** 첫 판에서 `notify "$...` 를
+#    「변수로 조립 → 판정 불가」로 접었는데, 지금 두 호출부가 «전부» `$MENTION` 으로 시작해서
+#    **라벨이 없어도 조용히 넘어갔다**(checklist 가 되어 미탐이 무음). 좌변을 뒤집는다:
+#    «라벨 형태와 정확히 일치하지 않으면 전부 실패». 변수로 조립한 새 호출부가 생기면
+#    그것도 여기서 «시끄럽게» 걸리고, 정당하면 그때 이 좌변을 함께 고친다.
+_sites="$(command grep -cE '(^|[^_[:alnum:]])notify ' "$CHECK" || true)"
+if [ "${_sites:-0}" -eq 0 ]; then
+  bad "⑲ 대조군 — notify 호출부가 0건이다" "1건 이상" "좌변이 비어 «항진명제»가 된다"
+else
+  _nolabel=0
+  while IFS= read -r line; do
+    case "$line" in
+      *'notify "$MENTION 관측:'*) : ;;
+      *) _nolabel=$((_nolabel + 1)); echo "     라벨 없음: $line" ;;
+    esac
+  done < <(command grep -nE '(^|[^_[:alnum:]])notify ' "$CHECK")
+  if [ "$_nolabel" -eq 0 ]; then
+    ok "⑲ notify 호출부 ${_sites}곳 «전부» 관측 라벨로 시작한다"
+  else
+    bad "⑲ 라벨 없는 호출부 ${_nolabel}곳" "0곳" "위 목록 참조"
+  fi
+fi
 
 echo
 # 🔑 형식을 러너 정규식(`통과 ?[0-9]+`)에 맞춘다 — 안 맞으면 `⚠️건수 미상` 이 되고,

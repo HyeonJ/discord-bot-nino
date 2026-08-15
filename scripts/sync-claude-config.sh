@@ -79,8 +79,15 @@ fi
 # 설계 결정:
 #   - main 워크트리의 **HEAD·인덱스를 건드리지 않는다**(내가 그 트리에서 작업 중일 수 있다)
 #     → 별 워크트리($SYNC_WORKTREE)에서 커밋한다. checkout·stash·add 를 공유 인덱스에 하지 않는다.
-#   - 열린 PR 이 있으면 그 위에 커밋을 **쌓고**, 없으면 브랜치를 main 기준으로 **새로 만든다**
-#     (PR 이 머지된 뒤에도 옛 베이스에 계속 쌓이는 걸 막는다).
+#   - 🛡 **브랜치는 매 회차 `origin/main` 위에서 «재생성»한다 — `main..브랜치` 는 항상 0 또는 1.**
+#     🔴 옛 계약(「열린 PR 위에 쌓는다」)이 결함이었다: 이건 아무도 손으로 커밋하지 않는
+#     **단방향 미러**라, 쌓기만 하면 **base 가 영원히 안 따라온다**. PR 이 며칠 열려 있으면
+#     그 사이 main 에 들어간 것이 전부 diff 에 남고 CI 도 낡은 base 에서 돈다
+#     (2026-08-15 실물: `#230` 을 손으로 «재생성»해야 했다).
+#     🔑 고르는 자리를 없앤다 — PR 이 열렸든 아니든 같은 동작이다.
+#     ⚠️ 대가: 회차마다 force-push 라 **리뷰가 자동으로 낡는다**(우리 «사건 축»이 그걸 잡는다).
+#     내용이 바뀌었으면 그게 맞고, 안 바뀌었으면 애초에 push 가 안 일어난다.
+#     ⚠️ 그리고 **브랜치에 사람이 커밋하면 조용히 날아간다** — 이 브랜치는 미러라 그래도 된다.
 #   - gh 가 없거나 실패해도 **커밋·push 는 진행**하고 로그에 남긴다 — 부재는 조용하니까.
 SYNC_BRANCH="${SYNC_BRANCH:-chore/claude-config-sync}"
 SYNC_WORKTREE="${SYNC_WORKTREE:-$BOT_DIR/../nino-config-sync}"
@@ -99,9 +106,20 @@ git -C "$BOT_DIR" fetch -q origin 2>/dev/null || log "WARN: git fetch 실패 (�
 #    **reset --hard** 하므로, 판정 불가를 none 으로 읽으면 이미 push 한 커밋을 버리려 하고
 #    push 는 non-FF 로 거부돼 **원격이 조용히 안 갱신된다**(시험이 이걸 잡았다).
 #    모르면 버리지 않는다 = 쌓는다.
+# 🔴 **`gh` 는 «cwd 가 레포 안»이라야 돈다 — 크론은 `cd` 없이 돌아 cwd 가 `$HOME` 이다.**
+#    이 파일의 `git` 은 전부 `git -C "$BOT_DIR"` 로 자리를 «명시»하는데 **`gh` 만 안 했고**,
+#    그래서 08-01 21:30 부터 10일간 `pr list`·`pr create` 가 **한 번도 안 됐다**
+#    (실측: `OK: PR 생성` 0회 / `WARN: PR 생성 실패` 14회 / `WARN: gh pr list 실패` 17회,
+#     전부 `failed to run git: fatal: not a git repository`).
+#    🔑 **같은 처방이 한 함수 옆에 이미 있었는데 「git」이라는 «이름»에 걸려 안 건너왔다**
+#      — `rc-pipe-guard` 의 `git_subcommand` 건과 같은 축이다(`#183`).
+#    ⚠️ 결과가 조용했다: 커밋·push 는 «되므로» 로그가 절반은 OK 다. 브랜치는 자라고
+#      **PR 만 없어서**, 「사본이 둘인데 한쪽이 리뷰 없이 흐른다」가 성립해 있었다.
+gh_here() { ( cd "$BOT_DIR" && "$GH_BIN" "$@" ); }
+
 PR_STATE=unknown
 if command -v "$GH_BIN" >/dev/null 2>&1; then
-    if pr_nums="$("$GH_BIN" pr list --head "$SYNC_BRANCH" --state open --json number -q '.[].number' 2>/dev/null)"; then
+    if pr_nums="$(gh_here pr list --head "$SYNC_BRANCH" --state open --json number -q '.[].number' 2>/dev/null)"; then
         if printf '%s' "$pr_nums" | grep -q '[0-9]'; then PR_STATE=open; else PR_STATE=none; fi
     else
         log "WARN: gh pr list 실패 — PR 상태 판정 불가(브랜치를 초기화하지 않는다)"
@@ -113,20 +131,16 @@ fi
 BASE="$(git -C "$BOT_DIR" rev-parse --verify -q origin/main || git -C "$BOT_DIR" rev-parse --verify -q main || git -C "$BOT_DIR" rev-parse HEAD)"
 
 # sync 워크트리 준비 (main 체크아웃은 그대로 둔다)
+# 🔴 **PR 상태로 갈리지 않는다** — 열렸든 아니든 `origin/main` 위에서 재생성한다.
+#   (`PR_STATE` 는 이제 「PR 을 만들까」에만 쓴다. 갈래가 하나면 「판정 불가로 어느 쪽에
+#    떨어지나」를 물을 자리 자체가 없어진다.)
 if [[ ! -d "$SYNC_WORKTREE/.git" && ! -f "$SYNC_WORKTREE/.git" ]]; then
     rm -rf "$SYNC_WORKTREE"
-    if [[ "$PR_STATE" != none ]] && git -C "$BOT_DIR" rev-parse --verify -q "origin/$SYNC_BRANCH" >/dev/null; then
-        git -C "$BOT_DIR" worktree add -q "$SYNC_WORKTREE" -B "$SYNC_BRANCH" "origin/$SYNC_BRANCH"
-    else
-        git -C "$BOT_DIR" worktree add -q "$SYNC_WORKTREE" -B "$SYNC_BRANCH" "$BASE"
-    fi
-    log "SYNC-WT: 워크트리 생성 ($SYNC_WORKTREE, PR=$PR_STATE)"
-elif [[ "$PR_STATE" == none ]]; then
-    # 열린 PR 이 **없다고 확인됐다** = 앞 PR 이 머지되거나 없었다 → main 기준으로 다시 시작
-    git -C "$SYNC_WORKTREE" reset -q --hard "$BASE"
-    log "SYNC-WT: 브랜치를 main 기준으로 초기화 (열린 PR 없음)"
+    git -C "$BOT_DIR" worktree add -q "$SYNC_WORKTREE" -B "$SYNC_BRANCH" "$BASE"
+    log "SYNC-WT: 워크트리 생성 ($SYNC_WORKTREE, BASE=$(git -C "$BOT_DIR" rev-parse --short "$BASE"))"
 else
-    log "SYNC-WT: 기존 브랜치에 쌓는다 (PR=$PR_STATE)"
+    git -C "$SYNC_WORKTREE" reset -q --hard "$BASE"
+    log "SYNC-WT: main 위에서 재생성 (BASE=$(git -C "$BOT_DIR" rev-parse --short "$BASE"), PR=$PR_STATE)"
 fi
 
 # 동기화 결과를 워크트리로 옮긴다 (제외는 복사·비교와 같은 목록을 쓴다)
@@ -141,7 +155,17 @@ git -C "$SYNC_WORKTREE" add -A claude-config .claude/settings.json 2>/dev/null |
     git -C "$SYNC_WORKTREE" add -A claude-config
 
 if git -C "$SYNC_WORKTREE" diff --cached --quiet; then
-    log "OK: 라이브는 바뀌었지만 tracked 내용은 동일 — 커밋할 게 없다"
+    log "OK: 라이브가 main 과 같다 — 커밋할 게 없다"
+    # 🔴 원격 브랜치가 main 보다 «앞선 채» 남으면, 그 PR 은 「이미 main 에 있는 것」을
+    #   리뷰하라고 계속 열려 있고 **그 낡음이 조용하다**. 되돌려서 빈 PR 로 만든다(시끄럽다).
+    if git -C "$BOT_DIR" rev-parse --verify -q "origin/$SYNC_BRANCH" >/dev/null \
+       && [[ "$(git -C "$BOT_DIR" rev-list --count "$BASE..origin/$SYNC_BRANCH" 2>/dev/null || echo 0)" != 0 ]]; then
+        if git -C "$SYNC_WORKTREE" push -q --force-with-lease origin "$SYNC_BRANCH" 2>/dev/null; then
+            log "OK: 브랜치를 main 으로 되돌렸다 (앞서 있던 커밋은 main 에 이미 있다)"
+        else
+            log "WARN: 브랜치 되돌리기 push 실패 — 원격이 main 보다 앞선 채 남아 있다"
+        fi
+    fi
     exit 0
 fi
 
@@ -153,7 +177,10 @@ main 직접 커밋 대신 이 브랜치로 모아 PR 로 검토한다(Darren 지
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>" && log "OK: $CHANGED files committed ($SYNC_BRANCH)" \
     || { log "ERROR: 커밋 실패 — 여기서 멈춘다"; exit 1; }
 
-if git -C "$SYNC_WORKTREE" push -q -u origin "$SYNC_BRANCH" 2>/dev/null; then
+# 🔴 `--force-with-lease` — 재생성이라 non-FF 가 «정상»이다. 다만 맨 force 는 아니다:
+#   원격이 내가 아는 값(원격추적 ref)과 다르면 거부된다. 위에서 `fetch` 했으니 좌변이 신선하고,
+#   fetch 가 실패했으면 lease 가 낡아 **거부되는 쪽으로** 실패한다(엄격한 방향).
+if git -C "$SYNC_WORKTREE" push -q --force-with-lease -u origin "$SYNC_BRANCH" 2>/dev/null; then
     log "OK: pushed → origin/$SYNC_BRANCH"
 else
     log "WARN: push 실패 (커밋은 로컬에 남아 있다 — 다음 회차에 다시 시도한다)"
@@ -162,7 +189,7 @@ fi
 if [[ "$PR_STATE" == open ]]; then
     log "OK: 열린 PR 에 커밋 추가 (새 PR 안 만듦)"
 elif command -v "$GH_BIN" >/dev/null 2>&1; then
-    if url="$("$GH_BIN" pr create --base main --head "$SYNC_BRANCH" \
+    if url="$(gh_here pr create --base main --head "$SYNC_BRANCH" \
             --title "chore: claude-config 동기화 (라이브 → tracked)" \
             --body "$(printf '%s\n' \
                 'sync-claude-config.sh cron 이 모은 라이브 설정(스킬·훅·settings) 변경이다.' \
