@@ -71,6 +71,17 @@ _scan="$(awk '
     gsub(/^[ \t]+|[ \t]+$/, "", line)
     if (line == "" || line == "(비어 있음)" || line ~ /^>/) next
     if (!on) { secbody++; next }
+    # 🔴 «이미 보낸 것»이 대기함에 앉아 있나 — 좌변은 «꼴»이 아니라 «뜻»이다:
+    #   Discord 메시지 id 는 «보내야» 생긴다. 그러니 대기 항목에 그 id 가 박혀 있으면
+    #   그건 정의상 「보낸 기록」이고, 그대로 두면 다음 회차에 **또 나간다**.
+    #   🔑 실물 2026-08-15: 「보낸 기록」 절에 넣으려고 그 «제목 앞»에 삽입했는데,
+    #      제목은 절의 «시작»이라 제목 앞은 이전 절이다 ⇒ 두 건이 대기 중 꼬리로 앉았다.
+    #      계수기는 `pending=33` 을 냈고 그게 «맞는 값처럼» 보였다 —
+    #      계수기는 「몇 개인가」만 묻고 **「이게 여기 있을 것인가」를 안 물었다.**
+    if (match(raw, /`[0-9]+`/)) {
+        tok = substr(raw, RSTART + 1, RLENGTH - 2)
+        if (length(tok) >= 17) sentmark++
+    }
     if (line ~ /^### /) { titles++; next }
     if (raw ~ /^- /) { bullets++; next }
     body++
@@ -78,10 +89,10 @@ _scan="$(awk '
   END {
     flush_sec()
     n = (titles > 0) ? titles : ((bullets > 0) ? bullets : ((body > 0) ? 1 : 0))
-    printf "%d\t%d\t%d\t%d\n", n, (titles > 0 && bullets > 0) ? 1 : 0, orphan + 0, seen_wait + 0
+    printf "%d\t%d\t%d\t%d\t%d\n", n, (titles > 0 && bullets > 0) ? 1 : 0, orphan + 0, seen_wait + 0, sentmark + 0
   }
 ' "$OUTBOX_FILE")"
-IFS=$'\t' read -r PENDING MIXED ORPHAN SEEN_WAIT <<< "$_scan"
+IFS=$'\t' read -r PENDING MIXED ORPHAN SEEN_WAIT SENTMARK <<< "$_scan"
 
 if (( ! SEEN_WAIT )); then
   echo "$(stamp) pending=na ERROR no-section=대기 중 file=$OUTBOX_FILE" >> "$FLUSH_LOG"
@@ -89,12 +100,19 @@ if (( ! SEEN_WAIT )); then
   exit 1
 fi
 
-echo "$(stamp) pending=$PENDING$( ((MIXED)) && echo " MIXED-FORMAT" )$( ((ORPHAN)) && echo " ORPHAN=$ORPHAN" )$( ((DRY)) && echo " DRY" )" >> "$FLUSH_LOG"
+echo "$(stamp) pending=$PENDING$( ((MIXED)) && echo " MIXED-FORMAT" )$( ((ORPHAN)) && echo " ORPHAN=$ORPHAN" )$( ((SENTMARK)) && echo " SENTMARK=$SENTMARK" )$( ((DRY)) && echo " DRY" )" >> "$FLUSH_LOG"
 if (( ORPHAN )); then
   echo "⚠️ 「## 대기 중」 «밖»에 내용이 든 절 ${ORPHAN}개 — 계수기가 못 본다" >&2
 fi
+if (( SENTMARK )); then
+  echo "⚠️ 대기함에 «이미 보낸» 표지(메시지 id)가 든 줄 ${SENTMARK}개 — 절을 잘못 넣었을 수 있다(또 나간다)" >&2
+fi
 # 🔴 고아가 있으면 pending=0 이어도 깨운다 — 0 이 「없다」인지 「못 봤다」인지 여기서 안 갈린다.
-(( PENDING > 0 || ORPHAN > 0 )) || exit 0   # 확인된 빈 상태 → 조용
+# ⚠️ `SENTMARK > 0` 갈래는 **지금 구조적으로 안 닿는다** — 대기 중의 «비지 않은» 줄은 전부
+#   titles·bullets·body 중 하나를 올리므로 `SENTMARK ≥ 1` 이면 `PENDING ≥ 1` 이다.
+#   방어로 남기되 **시험이 없다는 사실을 여기 적는다**(안 적으면 「덮였다」로 읽힌다).
+#   세는 규칙이 바뀌어 안 세는 줄이 생기면 그때 이 갈래가 산다.
+(( PENDING > 0 || ORPHAN > 0 || SENTMARK > 0 )) || exit 0   # 확인된 빈 상태 → 조용
 if (( DRY )); then
   echo "[dry-run] 주입 안 함 — pending=$PENDING"
   exit 0
@@ -103,6 +121,9 @@ fi
 MSG="📮 놀이터 발신 시각이야 — memory/outbox-botplayground.md 에 ${PENDING}건 쌓여 있어. 하나로 묶어서 봇-놀이터에 보내고 대기함을 비워줘."
 if (( ORPHAN )); then
   MSG="$MSG 🔴 그리고 「## 대기 중」 «밖»에 내용이 든 절이 ${ORPHAN}개 있어 — 그건 안 세어졌으니 직접 열어봐."
+fi
+if (( SENTMARK )); then
+  MSG="$MSG 🔴 그리고 대기함에 «이미 보낸» 표지(메시지 id)가 든 줄이 ${SENTMARK}개 있어 — 「보낸 기록」에 넣으려던 게 대기 중에 앉았을 수 있으니 «보내기 전»에 확인해줘."
 fi
 # 🔴 주입 실패를 «삼키지» 않는다 — 이 도구의 존재 이유가 「안 울렸다 ↔ 안 돌았다」를 가르는
 #   것인데, 마지막 단계가 조용히 실패하면 그 구별이 정확히 거기서 사라진다.
