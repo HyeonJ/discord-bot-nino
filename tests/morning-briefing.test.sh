@@ -165,10 +165,10 @@ if sed --posix -n 's/x\([0-9][0-9]*\)y/\1/p' </dev/null >/dev/null 2>&1; then
     out="$(PATH="$ROOT/posixsed:$PATH" run "$ROOT/todo.md" "$ROOT/weather.json")"
     if grep -q '비 올 수도' <<<"$out"; then ok "GNU 확장 없는 sed 로도 강수를 읽는다(BSD 갈래)"; else bad "BSD sed 에서 강수를 잃었다 — 인사가 갈래를 못 탔다" "$out"; fi
   else
-    echo "  ⛔ 판정 불가 — 오늘은 요일 인사가 이겨서 강수 갈래를 못 잰다(평일에 재야 한다)"
+    nom "오늘은 요일 인사가 이겨서 강수 갈래를 못 잰다(평일에 재야 한다)"
   fi
 else
-  echo "  ⛔ 판정 불가 — 이 기계의 sed 가 --posix 를 안 받아 GNU 확장을 끌 수 없다"
+  nom "이 기계의 sed 가 --posix 를 안 받아 GNU 확장을 끌 수 없다"
 fi
 # 인사는 소스가 죽어도 나온다 — 인사의 유무로 상태를 판단하면 안 된다는 규약
 out="$(run "$ROOT/없는파일.md" "$ROOT/없는날씨.json")"
