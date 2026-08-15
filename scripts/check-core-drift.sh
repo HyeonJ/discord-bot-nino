@@ -67,7 +67,23 @@ process_behind() {
   pid="$(systemctl --user show -p MainPID --value "$RELAY_UNIT" 2>/dev/null)"
   [ -n "$pid" ] && [ "$pid" != "0" ] || { echo "?"; return; }
   pstart="$(date -d "$(ps -o lstart= -p "$pid" 2>/dev/null)" +%s 2>/dev/null)" || { echo "?"; return; }
-  find "$CORE_REPO/relay" "$CORE_REPO/discord-send" -name '*.js' -newermt "@$pstart" 2>/dev/null | wc -l
+  # 🔴 **`relay/discord-send/` 는 빼고 센다 — 그건 «부를 때마다 새 프로세스»인 CLI 라 재시작과 무관하다.**
+  #   좌변은 「코어 안의 .js 가 새로운가」가 아니라 **「이 «프로세스»가 물고 있는 코드가 낡았나」**다.
+  #   ⚠️ **경로에 주의** — 그 CLI 는 최상위 `discord-send/` 가 «아니라» `relay/discord-send/` 에 산다
+  #     (최상위엔 그 디렉터리가 **없다**). 그래서 `find "$CORE_REPO/relay"` 로 좁히는 것만으로는
+  #     **안 빠진다** — 내가 처음에 그렇게 고쳤다가 대조군(여전히 2건)에 걸렸다.
+  #   실측 2026-08-15 (분모는 `relay/` **트리 전체**, 자기 참조 제외):
+  #     `grep -rE "require\(|from ['\"]" relay --include='*.js' | grep -i discord-send` → **0건**
+  #     유닛은 `bun relay/index.js` 하나만 띄우고(`systemctl show -p ExecStart`),
+  #     그 파일이 무는 것은 `./core`·`./db`·`./tmux-bridge`·`./addon-loader`·`./mentions`·`./formatter` 뿐이다.
+  #   🔑 **오탐의 대가가 컸다**: `relay/discord-send/{cli,parser}.js` 가 16:16·17:35 에 바뀌자
+  #     18:15·19:15·20:15 **세 시간 동안 매시** 「재시작 안 됨」이 나갔다. 재시작해도 «아무것도
+  #     안 바뀌는» 상태였다(그 CLI 는 이미 새 파일을 읽고 있었다). ⚠️ 이 알림은 `process_behind>0`
+  #     이면 억제를 **끄는** 갈래라, **오탐이 곧 무제한 반복**이 된다.
+  #   ⚠️ 그때 받은 처방이 「나이(첫 관측 이후 경과)를 붙이자」였는데, **그걸 먼저 넣었으면
+  #     오탐에 나이가 붙어 «더 급해» 보였을 것이다** — 좌변이 틀린 채로 표현만 고치는 꼴이다.
+  #   🔸 `discord-send` 가 바뀌어도 다음 «호출»이 새 코드를 쓴다 — 놓치는 것이 없다.
+  find "$CORE_REPO/relay" -name '*.js' ! -path '*/discord-send/*' -newermt "@$pstart" 2>/dev/null | wc -l
 }
 
 BEHIND="$(git -C "$CORE_REPO" rev-list --count HEAD..@{u} 2>/dev/null)" || BEHIND=""

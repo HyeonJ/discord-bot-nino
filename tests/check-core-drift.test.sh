@@ -81,6 +81,35 @@ else
     || ok "MainPID 를 실제로 구했다"
 fi
 
+echo '④-b 🔴 재시작 분모 — relay/discord-send/ 는 «세지 않는다» (부를 때마다 새 프로세스인 CLI)'
+# 🔴 실물 2026-08-15: `relay/discord-send/{cli,parser}.js` 가 바뀌자 **세 시간 동안 매시**
+#   「재시작 안 됨」이 나갔다. 재시작해도 아무것도 안 바뀌는 상태였다 — 그 CLI 는 이미 새 파일을 읽는다.
+#   ⚠️ 이 알림은 `process_behind>0` 이면 억제를 «끄는» 갈래라 **오탐이 곧 무제한 반복**이 된다.
+#   ⚠️ 경로 함정: 그 CLI 는 최상위 `discord-send/` 가 «아니라» `relay/discord-send/` 에 산다 —
+#     `find "$CORE_REPO/relay"` 로 좁히는 것만으로는 «안 빠진다»(내가 그렇게 고쳤다가 대조군에 걸렸다).
+if [ -z "${LIVE_UNIT:-}" ]; then
+  echo "  ⏭️  건너뜀 — 살아있는 --user 유닛이 없어 process_behind 를 못 잰다"
+else
+  # 🔴 **절대값으로 못 단언한다 — 픽스처가 만드는 relay/check-config.js 자체가 «지금» 만들어져
+  #   유닛 시작보다 새롭다.** 기준선이 이미 1 이라 「0 이냐」로 물으면 항상 실패한다(내가 밟았다).
+  #   ⇒ 좌변은 «델타»다: 파일을 더했을 때 그 수가 «변했나».
+  pb() { printf '%s' "$1" | sed -n 's/.*process_behind=\([0-9]\{1,\}\).*/\1/p' | head -1; }
+  base="$(pb "$(run "$LIVE_UNIT")")"
+  mkdir -p "$ROOT/core/relay/discord-send"
+  : > "$ROOT/core/relay/discord-send/cli.js"
+  afterA="$(pb "$(run "$LIVE_UNIT")")"
+  [ "$afterA" = "$base" ] \
+    && ok "discord-send/*.js 를 더해도 process_behind 가 그대로다 ($base) — 재시작 사유가 아니다" \
+    || bad "discord-send 를 재시작 사유로 세고 있다" "$base (그대로)" "$afterA"
+  # 🔴 대조군 — 빼기만 재고 «검출력»을 안 재면 「무엇을 더해도 안 는다」와 구별이 0 이다.
+  : > "$ROOT/core/relay/index.js"
+  afterB="$(pb "$(run "$LIVE_UNIT")")"
+  [ "$afterB" -gt "$base" ] 2>/dev/null \
+    && ok "  → 대조군: relay/index.js 를 더하면 «는다» ($base → $afterB) — 빼기가 과하지 않다" \
+    || bad "대조군 실패 — 진짜 런타임 파일도 안 센다(검출력 0)" ">$base" "$afterB"
+  rm -f "$ROOT/core/relay/index.js" "$ROOT/core/relay/discord-send/cli.js"
+fi
+
 echo "⑤ 🔴 뒤처짐(DRIFT)은 **위반(rc=1)** 이다 — 0 으로 내면 래퍼가 알림 전에 빠져나간다"
 # 실전에서 조용히 새고 있었다(2026-07-28 13:5x 발견). 로그:
 #   12:08 rc=0 DRIFT: repo_behind=3커밋   ← 발견해놓고 rc=0
