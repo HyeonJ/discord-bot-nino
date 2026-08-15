@@ -20,6 +20,14 @@
           {
             "type": "command",
             "command": "bash /home/bpx27/.claude/hooks/mdweb-link-guard.sh"
+          },
+          {
+            "type": "command",
+            "command": "bash /home/bpx27/.claude/hooks/rc-pipe-guard.sh"
+          },
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 /home/bpx27/yaksu-bot-core-pitfall/hooks/bash-pitfall-guard.py"
           }
         ]
       }
