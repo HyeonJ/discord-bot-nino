@@ -24,6 +24,41 @@ set -uo pipefail
 #    호출 자리마다 붙이지 않는 이유: 새 전송을 추가해도 자동으로 태그되게(환경에 건다).
 export NINO_AUTOSEND=1
 
+# 🔴 부분문자열 `${x:0:N}` 과 길이 `${#x}` 는 «로케일»에 매인다 — LC_CTYPE 이 UTF-8 이 아니면
+#   «바이트»로 센다. 실측(2026-08-15, 룬드 `#198` 리뷰 → 내가 리눅스에서 재현):
+#     LC_CTYPE 비움  `${#T}`=42 · `${T:0:10}` = `가나다�`   ← 글자 중간에서 잘린다
+#     C.UTF-8        `${#T}`=28 · `${T:0:10}` = `가나다라마바사아자차` ✅
+#   🔑 **cron·launchd·CI 는 로케일을 «안» 물려준다** ⇒ 「내 기계에선 된다」가 아니라
+#     스크립트가 «스스로» 잡아야 한다. 옛 주석은 이 사실을 알고도 *「이 로케일(C.UTF-8)에서는
+#     문자 단위다」*라고 **관측을 환경에 매어 적어두기만** 했다 — 그 환경을 «보장»하진 않았다.
+# 🔑 좌변은 「이름에 UTF-8 이 들었나」가 **아니라** 「한 글자가 1로 세어지나」다.
+#   이름은 대리물이고, `setlocale` 은 **실패해도 경고만 내고 이전 값이 그대로 남는다**
+#   (실측 대조군: 엉터리 로케일을 대입해도 `${#T}` 는 직전 값 1 을 유지했다).
+#   ⇒ 대입한 뒤 **매번 다시 잰다.**
+_charwise() { local t='가'; (( ${#t} == 1 )); }
+_ensure_charwise() {
+  _charwise && return 0
+  local saved="${LC_CTYPE-}" had_saved=0 c
+  [[ -n "${LC_CTYPE+x}" ]] && had_saved=1
+  # macOS 는 `C.UTF-8` 이 없고 glibc 는 `en_US.UTF-8` 이 없을 수 있다 — 둘 다 훑는다.
+  for c in C.UTF-8 en_US.UTF-8 ko_KR.UTF-8 C.utf8 en_US.utf8; do
+    export LC_CTYPE="$c"
+    _charwise 2>/dev/null && return 0
+  done
+  if (( had_saved )); then export LC_CTYPE="$saved"; else unset LC_CTYPE; fi
+  return 1
+}
+CHARWISE=1
+_ensure_charwise 2>/dev/null || CHARWISE=0
+
+# 문자 단위로 자른다. 🔑 **못 자르면 «조용히 깨진 걸» 내지 않고 «통째로» 낸다** —
+#   위 출력 규약대로 실패는 시끄러워야 하고, 깨진 바이트는 조용한 쪽이다.
+cut_chars() {  # cut_chars <문자열> <최대 문자수>
+  local s="$1" n="$2"
+  (( ${#s} > n )) || { printf '%s' "$s"; return; }
+  if (( CHARWISE )); then printf '%s…' "${s:0:$n}"; else printf '%s' "$s"; fi
+}
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
@@ -227,12 +262,11 @@ pending_section() {
 
   echo "📮 형이 정할 것 ${total}건"
   # 🔴 제목이 «문단 통째»인 항목이 있다 — 실물 첫 건은 300자가 넘어 브리핑에서 못 읽는다.
-  #   ⚠️ 바이트로 자르면 한글이 깨진다. bash 부분문자열은 이 로케일(C.UTF-8)에서 **문자 단위**다
-  #     (실측: `${x:0:5}` = 15바이트 = 5자).
+  #   자르기는 `cut_chars` 한 곳에 산다(위 머리말) — 로케일 판정도 거기 있다.
+  (( CHARWISE )) || echo "       ⚠️ UTF-8 로케일이 없어 제목을 못 자른다 — 긴 줄이 통째로 나온다"
   local i line
   for (( i = 0; i < total && i < PENDING_TOP; i++ )); do
-    line="${items[$i]}"
-    (( ${#line} > PENDING_TITLE_MAX )) && line="${line:0:$PENDING_TITLE_MAX}…"
+    line="$(cut_chars "${items[$i]}" "$PENDING_TITLE_MAX")"
     printf '       %s\n' "$line"
   done
   local rest=$(( total - PENDING_TOP ))
@@ -366,7 +400,8 @@ unreviewed_pr_section() {
         # 나이를 못 쟀다고 빼면 그 PR 이 사라진다 — 넣되 **못 쟀다고 적는다**.
         label="열린 날 못 읽음"
       fi
-      items[${#items[@]}]="$short#$num ($label) ${title:0:34}"   # bash 3.2 는 배열 += 없음
+      # 🔴 여기도 «같은» 로케일 함정이다 — 자르기는 `cut_chars` 한 곳에 모은다.
+      items[${#items[@]}]="$short#$num ($label) $(cut_chars "$title" 34)"   # bash 3.2 는 배열 += 없음
     done <<< "$out"
   done
 

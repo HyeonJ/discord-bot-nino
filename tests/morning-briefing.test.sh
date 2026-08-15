@@ -23,7 +23,7 @@ source "$SCRIPT_DIR/../scripts/lib/timeshift.sh"   # 시각 조작은 정본 하
 BOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 SCRIPT="$BOT_DIR/scripts/morning-briefing.sh"
 
-pass=0; fail=0
+pass=0; fail=0; skip=0
 ok()  { echo "  ✅ $1"; pass=$((pass + 1)); }
 bad() { echo "  ❌ $1"; fail=$((fail + 1)); [[ -n "${2:-}" ]] && printf '%s\n' "$2" | sed 's/^/     /'; }
 
@@ -595,6 +595,44 @@ sys.exit(1 if bad else 0)
 EOM
 [[ $? -eq 0 ]] && ok "잘린 자리에 깨진 바이트가 없다 (문자 단위 확인)" || bad "한글 깨짐" "가…만 남음" "$blk"
 
+echo "── ⑫-e 🔴 «로케일을 안 물려주는» 환경(cron·launchd·CI)에서도 문자 단위다 ──"
+# 🔑 위 ⑫-d 는 **시험을 돌리는 사람의 로케일을 그대로 물려받는다** — UTF-8 상자에서는
+#   고장난 코드도 초록이다(실제로 그랬다: 내 리눅스 `LANG=C.UTF-8` 초록 · 룬드 맥 빈 로케일 빨강).
+#   ⇒ 여기서는 **환경을 고정**한다. 그래야 「누가 어디서 돌리든」이 분모에 들어온다.
+# 🔴 먼저 «하네스가 진짜 적대적인가»를 잰다 — 로케일을 비웠는데도 셸이 문자 단위면
+#   이 시험은 아무것도 안 재고 조용히 초록이 된다(대조군 없는 0 과 같은 자리).
+harsh="$(env -u LANG -u LC_ALL -u LC_CTYPE bash -c 'T="가나다"; echo "${#T}"' 2>/dev/null)"
+if [[ "$harsh" != "9" ]]; then
+  echo "  ⛔ ⑫-e 판정 불가 — 로케일을 비워도 셸이 바이트 모드가 안 된다 (\${#가나다}=$harsh, 기대 9)"
+  skip=$((skip + 1))
+else
+  ok "⑫-e 대조군: 로케일을 비우면 셸이 «바이트» 모드다 (\${#가나다}=9)"
+  # 🔴 `env -u ... run` 으로 적으면 안 된다 — `run` 은 «셸 함수»라 `env` 가 못 찾고
+  #   출력이 통째로 비며, 빈 문자열에는 깨진 글자가 없어서 **이 시험이 항진으로 초록**이 된다.
+  #   (실제로 첫 판이 그랬다: 옛 스크립트에 대고도 ✅ 가 났다.) ⇒ 서브셸에서 `unset` 한다.
+  out="$( unset LANG LC_ALL LC_CTYPE
+          PENDING_FILE="$ROOT/pending-long.md" run "$ROOT/todo.md" "$ROOT/weather.json" 2>/dev/null )"
+  blk="$(echo "$out" | sed -n '/형이 정할 것/,$p' | sed -n '2p')"
+  # 🔴 그리고 «빈 결과»를 먼저 가른다 — 위 사고가 다시 나면 여기서 걸린다.
+  if [[ -z "${blk// /}" ]]; then
+    bad "⑫-e 대조군 무효 — 📮 줄이 비었다 (아무것도 안 재고 있다)" "제목 줄" "$out"
+  else
+  python3 - "$blk" <<'EOM'
+import sys
+s = sys.argv[1]
+bad = [c for c in s if c not in "가…" and not c.isspace()]
+sys.exit(1 if bad else 0)
+EOM
+  [[ $? -eq 0 ]] && ok "⑫-e 빈 로케일에서도 깨진 바이트가 없다" \
+                 || bad "⑫-e 빈 로케일에서 한글 깨짐" "가…만" "$blk"
+  fi
+fi
+
 echo
+if (( skip > 0 )); then
+  echo "  통과 $pass · 실패 $fail · 판정 불가 $skip"
+  [[ "$fail" -eq 0 ]] || exit 1
+  exit 2
+fi
 echo "  통과 $pass · 실패 $fail"
 [[ "$fail" -eq 0 ]]
