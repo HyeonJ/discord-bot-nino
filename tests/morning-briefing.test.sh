@@ -23,9 +23,10 @@ source "$SCRIPT_DIR/../scripts/lib/timeshift.sh"   # 시각 조작은 정본 하
 BOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 SCRIPT="$BOT_DIR/scripts/morning-briefing.sh"
 
-pass=0; fail=0
+pass=0; fail=0; skip=0
 ok()  { echo "  ✅ $1"; pass=$((pass + 1)); }
 bad() { echo "  ❌ $1"; fail=$((fail + 1)); [[ -n "${2:-}" ]] && printf '%s\n' "$2" | sed 's/^/     /'; }
+nom() { echo "  ⛔ $1 (판정 불가)"; skip=$((skip + 1)); }
 
 [[ -f "$SCRIPT" ]] || { echo "❌ 대상 스크립트 없음: $SCRIPT"; exit 1; }
 
@@ -311,7 +312,7 @@ if grep -q '27°C' <<<"$out" && grep -q '첫째 항목' <<<"$out"; then
   ok "하트비트가 낡아도 날씨·할 일은 그대로"; else bad "다른 섹션이 같이 죽었다" "$out"; fi
 
 echo
-echo "⑪ 리뷰 안 달린 PR — 조용한 큐를 소리 내게 한다"
+echo "⑪ 판정 안 난 PR — 조용한 큐를 소리 내게 한다"
 # 🔑 이 섹션의 본체도 ⑩ 과 같다: **0건(확인된 정상)과 못 읽음(판정 불가)을 가르는가.**
 #    실사고 — 룬드 `#29` 가 이틀 묻혔고, 같은 시각 내 레포에 리뷰 0건이 6개 있었다.
 
@@ -327,13 +328,13 @@ _mk pr-echo 'printf "%s\n" "$1" >> '"$ROOT/repos-seen"
 
 # ⑪-1 0건이면 **줄이 없다** (확인된 정상은 조용하다)
 out="$(PR_LIST_CMD="$ROOT/pr-none" run "$ROOT/todo.md" "$ROOT/weather.json")"
-if ! grep -q '리뷰 안 달린' <<<"$out"; then ok "0건이면 섹션을 뺀다"; else bad "0건인데 줄이 났다" "$out"; fi
+if ! grep -q '판정 안 난' <<<"$out"; then ok "0건이면 섹션을 뺀다"; else bad "0건인데 줄이 났다" "$out"; fi
 
 # ⑪-2 있으면 번호·나이가 보인다
 out="$(PR_LIST_CMD="$ROOT/pr-two" PR_REPOS=a/b run "$ROOT/todo.md" "$ROOT/weather.json")"
 if grep -q 'b#91' <<<"$out" && grep -q '2일째' <<<"$out"; then
   ok "PR 번호와 묵은 날수를 낸다"; else bad "번호/나이 누락" "$out"; fi
-if grep -q '리뷰 안 달린 PR 2건' <<<"$out"; then ok "총 건수를 낸다"; else bad "건수 없음" "$out"; fi
+if grep -q '판정 안 난 PR 2건' <<<"$out"; then ok "총 건수를 낸다"; else bad "건수 없음" "$out"; fi
 
 # ⑪-3 🔴 조회 실패는 **0건과 달라야 한다** — 이 시험 하나가 이 섹션의 존재 이유다
 out="$(PR_LIST_CMD="$ROOT/pr-fail" PR_REPOS=a/b run "$ROOT/todo.md" "$ROOT/weather.json")"
@@ -342,7 +343,7 @@ if grep -q '못 읽음' <<<"$out"; then ok "조회 실패는 소리를 낸다(0�
 
 # ⑪-4 오늘 연 PR 은 안 센다 (임계 미만) — 상시로 차면 배경이 된다
 out="$(PR_LIST_CMD="$ROOT/pr-today" PR_REPOS=a/b run "$ROOT/todo.md" "$ROOT/weather.json")"
-if ! grep -q '리뷰 안 달린' <<<"$out"; then ok "오늘 연 것은 아직 안 센다"; else bad "임계가 안 먹는다" "$out"; fi
+if ! grep -q '판정 안 난' <<<"$out"; then ok "오늘 연 것은 아직 안 센다"; else bad "임계가 안 먹는다" "$out"; fi
 
 # ⑪-5 나이를 **못 쟀다고 빼면 안 된다** — 빼면 그 PR 이 사라진다(무음이 곧 없음이 된다)
 out="$(PR_LIST_CMD="$ROOT/pr-bad" PR_REPOS=a/b run "$ROOT/todo.md" "$ROOT/weather.json")"
@@ -414,6 +415,60 @@ if command grep -q "date -j -f '%Y-%m-%d %H:%M:%S'" "$SCRIPT"; then
   bad "BSD 갈래가 날짜만 준다 — 맥에서 «그 날의 지금 시각»이 된다" \
       "$(command grep -n 'date -j -f' "$SCRIPT" | head -1)"; fi
 
+# ⑪-9 🔴 **좌변은 「리뷰 0건」이 아니라 「판정 0건」이다** — 이 절이 «질의 자체»를 잰다
+# 🔑 위 ⑪-1〜8 은 전부 PR_LIST_CMD 스텁이라 **jq 질의를 한 번도 안 밟는다.**
+#    형식·나이 규약만 재고, 「무엇을 뽑나」는 분모 밖이었다.
+# 🔴 실사고: 내 `#72` 에 내가 `COMMENTED` 를 둘 남기고 «판정»을 안 냈다.
+#    좌변이 `reviews|length==0` 이면 그 PR 은 「리뷰가 달린 것」으로 접혀 목록에서 사라진다
+#    — 정작 내가 막고 있는데. 나흘 묻혔고 상대가 물어서야 알았다.
+# ⚠️ 서브셸에서 ok/bad 를 부르지 «않는다» — 카운터가 부모에 안 돌아와 실패가 조용해진다.
+#    값만 서브셸에서 꺼내 오고 판정은 여기서 한다.
+PR_VERDICT_JQ="$( . "$(cd "$(dirname "$0")/.." && pwd)/scripts/morning-briefing.sh"; printf '%s' "${PR_VERDICT_JQ:-}" )"
+
+cat > "$ROOT/prs.json" <<'JSONEOF'
+[
+  {"number":101,"createdAt":"2026-08-01T09:00:00Z","title":"리뷰 0건",      "reviews":[]},
+  {"number":102,"createdAt":"2026-08-01T09:00:00Z","title":"COMMENTED 만",  "reviews":[{"state":"COMMENTED"},{"state":"COMMENTED"}]},
+  {"number":103,"createdAt":"2026-08-01T09:00:00Z","title":"APPROVED 있음", "reviews":[{"state":"COMMENTED"},{"state":"APPROVED"}]},
+  {"number":104,"createdAt":"2026-08-01T09:00:00Z","title":"CHANGES 있음",  "reviews":[{"state":"CHANGES_REQUESTED"}]}
+]
+JSONEOF
+
+# 🔴 «필터가 비었다»를 먼저 가른다 — 없는 변수로 jq 를 돌리면 아래가 전부 조용히 0 이 되고,
+#    그러면 대조군까지 «항진»으로 통과한다(빈 결과엔 103·104 가 당연히 없다).
+if [[ -n "$PR_VERDICT_JQ" ]]; then
+  ok "⑪-9 필터가 스크립트에서 «이름으로» 꺼내진다"
+  # ⑪-9a 정적 — jq 가 없어도 «어디서나» 돈다. 좌변이 옛 꼴로 되돌아가면 여기서 잡힌다.
+  if [[ "$PR_VERDICT_JQ" == *"reviews|length"* || "$PR_VERDICT_JQ" == *"reviews | length"* ]]; then
+    bad "⑪-9a 좌변이 «리뷰 수»로 되돌아갔다" "$PR_VERDICT_JQ"
+  elif [[ "$PR_VERDICT_JQ" == *APPROVED* && "$PR_VERDICT_JQ" == *CHANGES_REQUESTED* ]]; then
+    ok "⑪-9a 정적 — 좌변이 «판정 두 상태»를 이름으로 부른다"
+  else
+    bad "⑪-9a 좌변에 판정 상태가 안 보인다" "$PR_VERDICT_JQ"
+  fi
+  # ⑪-9b 동적 — 뜻까지 잰다. jq 가 없으면 «판정 불가»(통과로 접지 않는다).
+  if ! command -v jq >/dev/null 2>&1; then
+    nom "⑪-9b 질의 의미 — jq 가 없어 못 쟀다"
+  else
+  got="$(jq -r "$PR_VERDICT_JQ" "$ROOT/prs.json" | cut -f1 | sort | tr '\n' ' ')"
+  if [[ "$got" == "101 102 " ]]; then
+    ok "⑪-9 판정 0건만 뽑는다 (COMMENTED 만 달린 102 가 «들어온다»)"
+  else
+    bad "⑪-9 좌변이 「판정 0건」이 아니다" "want=[101 102 ] got=[$got]"
+  fi
+  # 대조군 — 「뽑히면 안 되는 것이 빠지나」. ⚠️ 결과가 «비지 않았을 때만» 뜻이 있다.
+  if [[ -z "$got" ]]; then
+    bad "⑪-9 대조군 무효 — 결과가 비어 배타성을 못 잰다" "got 이 빈 문자열"
+  elif [[ "$got" != *103* && "$got" != *104* ]]; then
+    ok "⑪-9 대조군 — 판정이 «있는» 103·104 는 빠진다"
+  else
+    bad "⑪-9 대조군 실패 — 판정 있는 것까지 뽑혔다" "got=[$got]"
+  fi
+  fi
+else
+  bad "⑪-9 필터를 못 꺼냈다" "PR_VERDICT_JQ 가 비었다 — 스크립트가 그 이름으로 안 내보낸다"
+fi
+
 echo "⑫ 🔴 인자 계약 (코어 cli-guard) — 09:50 사고의 형태를 막는다"
 # 🔴 이 스크립트는 **이미 한 번 말없이 안 나갔다** (07-30 23:03 재시작에 세션 cron 이 같이
 #   사라져 금요일 07시 브리핑이 조용히 빠졌고 아무도 몰랐다 — CLAUDE.md 기록).
@@ -482,5 +537,7 @@ grep -q 'SOURCED_RC=0' <<<"$src_out" && ok "🔴 source 해도 인자 파싱이 
   || bad "source 시 부작용" "SOURCED_RC=0" "$src_out"
 
 echo
-echo "  통과 $pass · 실패 $fail"
-[[ "$fail" -eq 0 ]]
+echo "  통과 $pass · 실패 $fail · 판정 불가 $skip"
+[[ "$fail" -eq 0 ]] || exit 1
+# 도구가 없어 «못 쟀다» 는 통과가 아니다 — 러너의 판정 불가 칸으로 보낸다
+[[ "$skip" -eq 0 ]] || exit 2
