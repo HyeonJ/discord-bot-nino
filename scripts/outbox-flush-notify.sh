@@ -51,34 +51,59 @@ fi
 #   `- ` 로 쓴다. 그래서 한 문서 안에서 「항목 불렛」과 「본문 불렛」이 같은 모양이 된다.
 #   ⇒ 문서 «단위»로 가른다: 제목이 하나라도 있으면 제목형(제목만 센다), 없으면 불렛형.
 #   ⇒ 섞인 문서는 접어 세되 **로그에 `MIXED-FORMAT` 표지를 남긴다**(조용히 접으면 그게 이 버그다).
+# 🔴 절 «밖»도 같이 본다 — 절 안만 보면 「없다」와 「못 봤다」가 같은 `pending=0` 이 된다.
+#   실물 2026-08-15 13:00: `cat >>` 로 쌓은 7건이 `## ⑰`…`## ㉓` 아래 앉아 **pending=0** 이었다.
+# 🔴 좌변을 「무엇이 항목처럼 생겼나」로 잡으면 오탐이다 — 머리말과 「보낸 기록」에도 최상위
+#   불렛이 산다. 좌변은 «절 이름»이고 **아는 절의 열거**(`대기 중` · `보낸 기록`)다.
+#   ⇒ 열거 밖 절에 실질 내용이 있으면 `ORPHAN=n`. 열거가 낡으면 «시끄러운 쪽»으로 실패한다.
+# 🔑 `## 대기 중` 자체가 없으면 그건 0 이 아니라 **측정의 부재**다(파일 부재와 같은 자리).
 _scan="$(awk '
-  /^## 대기 중/ { on = 1; next }
-  /^## / { on = 0 }
-  on {
+  function flush_sec(   n) { if (sec != "" && sec != "대기 중" && sec != "보낸 기록" && secbody > 0) orphan++ ; secbody = 0 }
+  /^## / {
+    flush_sec()
+    sec = $0; sub(/^## +/, "", sec); gsub(/[ \t]+$/, "", sec)
+    if (sec == "대기 중") { on = 1; seen_wait = 1 } else { on = 0 }
+    next
+  }
+  {
     raw = $0
     line = raw
     gsub(/^[ \t]+|[ \t]+$/, "", line)
     if (line == "" || line == "(비어 있음)" || line ~ /^>/) next
+    if (!on) { secbody++; next }
     if (line ~ /^### /) { titles++; next }
     if (raw ~ /^- /) { bullets++; next }
     body++
   }
   END {
+    flush_sec()
     n = (titles > 0) ? titles : ((bullets > 0) ? bullets : ((body > 0) ? 1 : 0))
-    printf "%d\t%d\n", n, (titles > 0 && bullets > 0) ? 1 : 0
+    printf "%d\t%d\t%d\t%d\n", n, (titles > 0 && bullets > 0) ? 1 : 0, orphan + 0, seen_wait + 0
   }
 ' "$OUTBOX_FILE")"
-PENDING="${_scan%%	*}"
-MIXED="${_scan##*	}"
+IFS=$'\t' read -r PENDING MIXED ORPHAN SEEN_WAIT <<< "$_scan"
 
-echo "$(stamp) pending=$PENDING$( ((MIXED)) && echo " MIXED-FORMAT" )$( ((DRY)) && echo " DRY" )" >> "$FLUSH_LOG"
-(( PENDING > 0 )) || exit 0   # 확인된 빈 상태 → 조용
+if (( ! SEEN_WAIT )); then
+  echo "$(stamp) pending=na ERROR no-section=대기 중 file=$OUTBOX_FILE" >> "$FLUSH_LOG"
+  echo "⚠️ 「## 대기 중」 절이 없다: $OUTBOX_FILE — 0건이 아니라 «못 쟀다»" >&2
+  exit 1
+fi
+
+echo "$(stamp) pending=$PENDING$( ((MIXED)) && echo " MIXED-FORMAT" )$( ((ORPHAN)) && echo " ORPHAN=$ORPHAN" )$( ((DRY)) && echo " DRY" )" >> "$FLUSH_LOG"
+if (( ORPHAN )); then
+  echo "⚠️ 「## 대기 중」 «밖»에 내용이 든 절 ${ORPHAN}개 — 계수기가 못 본다" >&2
+fi
+# 🔴 고아가 있으면 pending=0 이어도 깨운다 — 0 이 「없다」인지 「못 봤다」인지 여기서 안 갈린다.
+(( PENDING > 0 || ORPHAN > 0 )) || exit 0   # 확인된 빈 상태 → 조용
 if (( DRY )); then
   echo "[dry-run] 주입 안 함 — pending=$PENDING"
   exit 0
 fi
 
 MSG="📮 놀이터 발신 시각이야 — memory/outbox-botplayground.md 에 ${PENDING}건 쌓여 있어. 하나로 묶어서 봇-놀이터에 보내고 대기함을 비워줘."
+if (( ORPHAN )); then
+  MSG="$MSG 🔴 그리고 「## 대기 중」 «밖»에 내용이 든 절이 ${ORPHAN}개 있어 — 그건 안 세어졌으니 직접 열어봐."
+fi
 # 🔴 주입 실패를 «삼키지» 않는다 — 이 도구의 존재 이유가 「안 울렸다 ↔ 안 돌았다」를 가르는
 #   것인데, 마지막 단계가 조용히 실패하면 그 구별이 정확히 거기서 사라진다.
 #   (룬드 `4425734` 좌변: `2>/dev/null` 은 실패를 «뒤 명령의 에러»로 미뤄 원인을 못 가르게 한다.)
