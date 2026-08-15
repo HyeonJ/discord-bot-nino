@@ -24,6 +24,41 @@ set -uo pipefail
 #    호출 자리마다 붙이지 않는 이유: 새 전송을 추가해도 자동으로 태그되게(환경에 건다).
 export NINO_AUTOSEND=1
 
+# 🔴 부분문자열 `${x:0:N}` 과 길이 `${#x}` 는 «로케일»에 매인다 — LC_CTYPE 이 UTF-8 이 아니면
+#   «바이트»로 센다. 실측(2026-08-15, 룬드 `#198` 리뷰 → 내가 리눅스에서 재현):
+#     LC_CTYPE 비움  `${#T}`=42 · `${T:0:10}` = `가나다�`   ← 글자 중간에서 잘린다
+#     C.UTF-8        `${#T}`=28 · `${T:0:10}` = `가나다라마바사아자차` ✅
+#   🔑 **cron·launchd·CI 는 로케일을 «안» 물려준다** ⇒ 「내 기계에선 된다」가 아니라
+#     스크립트가 «스스로» 잡아야 한다. 옛 주석은 이 사실을 알고도 *「이 로케일(C.UTF-8)에서는
+#     문자 단위다」*라고 **관측을 환경에 매어 적어두기만** 했다 — 그 환경을 «보장»하진 않았다.
+# 🔑 좌변은 「이름에 UTF-8 이 들었나」가 **아니라** 「한 글자가 1로 세어지나」다.
+#   이름은 대리물이고, `setlocale` 은 **실패해도 경고만 내고 이전 값이 그대로 남는다**
+#   (실측 대조군: 엉터리 로케일을 대입해도 `${#T}` 는 직전 값 1 을 유지했다).
+#   ⇒ 대입한 뒤 **매번 다시 잰다.**
+_charwise() { local t='가'; (( ${#t} == 1 )); }
+_ensure_charwise() {
+  _charwise && return 0
+  local saved="${LC_CTYPE-}" had_saved=0 c
+  [[ -n "${LC_CTYPE+x}" ]] && had_saved=1
+  # macOS 는 `C.UTF-8` 이 없고 glibc 는 `en_US.UTF-8` 이 없을 수 있다 — 둘 다 훑는다.
+  for c in C.UTF-8 en_US.UTF-8 ko_KR.UTF-8 C.utf8 en_US.utf8; do
+    export LC_CTYPE="$c"
+    _charwise 2>/dev/null && return 0
+  done
+  if (( had_saved )); then export LC_CTYPE="$saved"; else unset LC_CTYPE; fi
+  return 1
+}
+CHARWISE=1
+_ensure_charwise 2>/dev/null || CHARWISE=0
+
+# 문자 단위로 자른다. 🔑 **못 자르면 «조용히 깨진 걸» 내지 않고 «통째로» 낸다** —
+#   위 출력 규약대로 실패는 시끄러워야 하고, 깨진 바이트는 조용한 쪽이다.
+cut_chars() {  # cut_chars <문자열> <최대 문자수>
+  local s="$1" n="$2"
+  (( ${#s} > n )) || { printf '%s' "$s"; return; }
+  if (( CHARWISE )); then printf '%s…' "${s:0:$n}"; else printf '%s' "$s"; fi
+}
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
@@ -59,6 +94,15 @@ CLI_GUARD_ON_REJECT=cli_guard_reject_log
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/cli-guard-boot.sh"
 TODO_TOP="${TODO_TOP:-3}"                 # 상위 몇 개를 읽어줄지
 STALE_DAYS="${STALE_DAYS:-3}"             # 며칠 이상 안 바뀌면 그 사실을 덧붙인다
+
+# 📮 「형이 정할 것」 — 세션 시작 절차만 읽던 목록을 매일 내보낸다.
+# 🔴 왜: 이 목록은 memory/current-tasks.md 에만 살고, 그걸 읽는 것은 **세션 시작 때뿐**이다.
+#   세션이 길게 붙어 있으면 며칠씩 안 나온다(실물 2026-08-11 재검: 끝난 항목이 6시간 넘게
+#   목록에 남아 있었고 아무도 지운 사람이 없었다). Darren 승인 2026-08-12 `M:4oqv`.
+# ⚠️ 좌변은 「## 📮 」 줄이다 — 🤝(룬드 몫)는 **안** 센다. 수신자가 다르다.
+PENDING_FILE="${PENDING_FILE:-$BOT_DIR/memory/current-tasks.md}"
+PENDING_TOP="${PENDING_TOP:-3}"
+PENDING_TITLE_MAX="${PENDING_TITLE_MAX:-50}"   # 문자 수(바이트 아님)
 DRIFT_HEARTBEAT="${DRIFT_HEARTBEAT:-$BOT_DIR/logs/core-drift.heartbeat}"
 # cron 은 `15 * * * *` = **매시 1회**. 임계 2시간은 곧 "두 번 연속 놓쳐야 경고" 다 —
 # 1회 실패로는 안 울린다(단일 blip 오탐 방지 · health-checker 디바운스와 같은 이유).
@@ -177,6 +221,72 @@ todo_section() {
     tail="${tail:+$tail · }목록 갱신일 못 읽음"
   fi
   [[ -n "$tail" ]] && printf '       (%s)\n' "$tail"
+}
+
+# ── 📮 승인 대기 ─────────────────────────────────────────────────────────────
+# 규약은 할 일 섹션과 같다 — **확인된 빈 상태는 조용**하고 **못 읽은 것은 시끄럽다.**
+# 🔑 이 목록이 낡아 있는 것 자체가 매일 보이는 게 값이다(지운 사람이 없으면 계속 뜬다).
+pending_section() {
+  if [[ ! -f "$PENDING_FILE" ]]; then
+    echo "⚠️ 승인 대기 못 읽음 — $PENDING_FILE 없음"
+    return
+  fi
+
+  # bash 3.2 호환 — mapfile 금지, 배열 `+=` 금지 (위 할 일 섹션과 같은 이유)
+  # 🔴 «절»이 아니라 «항목»을 센다 — `## 📮 승인 대기 — 8건 중 6건` 은 여섯 건을 담은 «그릇»인데
+  #   제목 하나라 「1건」이 된다. 오늘 아침 outbox 에서 밟은 「줄 vs 항목」의 절-판이고 방향만
+  #   반대다(과소계수). 🔑 두 계수기의 규칙을 같게 둔다 — 하위 `### ` 가 있으면 그것들이 항목이고,
+  #   없으면 그 절 자체가 한 건이다(형식 미준수를 0건으로 접으면 그 건이 조용히 사라진다).
+  local items=() total line
+  while IFS= read -r line; do
+    items[${#items[@]}]="$line"
+  #   ⚠️ 항목 꼴은 실물을 보고 정했다 — 내 첫 판은 `### ` 만 셌는데 실물은 **번호 목록**이고
+  #     번호가 «음수»부터 시작한다(`-2.` `-1.` `0.` `1.`). 픽스처가 실물을 안 닮으면 초록이 거짓이다.
+  #   🔴 **끝난 항목(`~~취소선~~`)은 뺀다** — 절 머리 표지는 「그 절의 «첫 사건»이 끝났나」만 말하고
+  #     항목마다 상태가 다르다(08-12 실측: 「끝남」 표시 절 31개 중 13개가 안에 산 항목을 품고 있었다).
+  #   ✅ 이 좌변이 사람이 센 값을 재현한다 — 실물 절 머리의 「8건 중 6건」과 정확히 일치.
+  done < <(awk '
+    /^## / { if (on && n == 0 && title != "") print title; on = 0; n = 0; title = "" }
+    /^## 📮 / { on = 1; n = 0; title = $0; sub(/^## 📮 +/, "", title); next }
+    on && (/^### / || /^-?[0-9]+\. /) {
+      line = $0
+      sub(/^### +/, "", line); sub(/^-?[0-9]+\. +/, "", line)
+      n++
+      if (line ~ /^~~/) next
+      print line
+    }
+    END { if (on && n == 0 && title != "") print title }
+  ' "$PENDING_FILE" 2>/dev/null)
+  total="${#items[@]}"
+  (( total > 0 )) || return   # 확인된 빈 상태 → 줄을 뺀다
+
+  echo "📮 형이 정할 것 ${total}건"
+  # 🔴 제목이 «문단 통째»인 항목이 있다 — 실물 첫 건은 300자가 넘어 브리핑에서 못 읽는다.
+  #   자르기는 `cut_chars` 한 곳에 산다(위 머리말) — 로케일 판정도 거기 있다.
+  (( CHARWISE )) || echo "       ⚠️ UTF-8 로케일이 없어 제목을 못 자른다 — 긴 줄이 통째로 나온다"
+  local i line
+  for (( i = 0; i < total && i < PENDING_TOP; i++ )); do
+    line="$(cut_chars "${items[$i]}" "$PENDING_TITLE_MAX")"
+    printf '       %s\n' "$line"
+  done
+  local rest=$(( total - PENDING_TOP ))
+  (( rest > 0 )) && printf '       (외 %d건)\n' "$rest"
+  pending_unmarked_warn
+}
+
+# 🔴 표지 «밖»은 정의상 관측되지 않고, 그 미탐이 «조용하다» — 위 블록에 뭔가는 뜨므로
+#   「0건」이라는 신호가 없다(룬드 절37 ⑤, `dazebug/assistant` 75e855f).
+# 🔑 좌변을 «표현 꼴의 열거»로 넓히지 않는다 — 꼴은 열린 집합이라 새 표현이 계속 나온다(내 판별식).
+#   대신 **「결정 대기처럼 읽히는데 📮 가 없는 절」의 수**를 낸다. 이건 allowlist 가 아니라
+#   **나그 줄**이라 오탐이 나도 「표지를 붙여라」로 끝난다 — 막지 않으므로 가드를 안 죽인다.
+# ⚠️ 닫힌 절(✅)은 뺀다. 끝난 것까지 매일 세면 재촉이 되고, 재촉은 읽히지 않는다.
+pending_unmarked_warn() {
+  local n
+  n="$(grep -E '^## ' "$PENDING_FILE" 2>/dev/null \
+       | grep -E '승인 대기|답 대기|결정 대기|정할 것|⏸️' \
+       | grep -vE '📮|✅' | wc -l | tr -d ' ')"
+  (( n > 0 )) && printf '       ⚠️ 📮 표지 없는 결정 대기 절 %d개 — 표지를 붙이거나 닫아줘\n' "$n"
+  return 0
 }
 
 # ── 코어 드리프트 감시 하트비트 ──────────────────────────────────────────────
@@ -301,7 +411,8 @@ unreviewed_pr_section() {
         # 나이를 못 쟀다고 빼면 그 PR 이 사라진다 — 넣되 **못 쟀다고 적는다**.
         label="열린 날 못 읽음"
       fi
-      items[${#items[@]}]="$short#$num ($label) ${title:0:34}"   # bash 3.2 는 배열 += 없음
+      # 🔴 여기도 «같은» 로케일 함정이다 — 자르기는 `cut_chars` 한 곳에 모은다.
+      items[${#items[@]}]="$short#$num ($label) $(cut_chars "$title" 34)"   # bash 3.2 는 배열 += 없음
     done <<< "$out"
   done
 
@@ -358,7 +469,9 @@ $(todo_section)
 
 $(drift_heartbeat_section)
 
-$(unreviewed_pr_section)"
+$(unreviewed_pr_section)
+
+$(pending_section)"
 
 # 섹션이 빠지면서 생긴 3줄 이상의 빈 줄을 정리한다(내용이 없는 건 티 안 나야 한다)
 MSG="$(printf '%s\n' "$MSG" | cat -s)"

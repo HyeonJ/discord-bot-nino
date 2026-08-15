@@ -60,10 +60,29 @@ run() {  # run <TODO_FILE> <WEATHER_JSON> [DRIFT_HEARTBEAT] — 항상 --dry-run
   TODO_FILE="$1" WEATHER_JSON="$2" \
     DRIFT_HEARTBEAT="${3:-$ROOT/hb-fresh}" \
     PR_LIST_CMD="${PR_LIST_CMD:-$ROOT/pr-none}" \
+    PENDING_FILE="${PENDING_FILE:-$ROOT/pending-none.md}" \
     DISCORD_SEND="$ROOT/should-not-be-called" \
     bash "$SCRIPT" --dry-run 2>"$ROOT/stderr"
 }
 printf '%s rc=0\n' "$(date '+%Y-%m-%d %H:%M:%S')" > "$ROOT/hb-fresh"
+# 🔴 기본값은 «없는 파일»이 아니라 «존재하는 빈 파일»이라야 한다 — 없는 파일을 가리키면
+#    앞쪽 시험 전부가 "승인 대기 못 읽음" 경고를 달고 나온다(위 pr-none 이 밟은 그 자리).
+printf '# current tasks\n\n## 상태\n아무것도 대기 없음\n' > "$ROOT/pending-none.md"
+cat > "$ROOT/pending-3.md" <<'PMD'
+# current tasks
+
+## 📮 Darren 승인 대기 — 검증 6권 래핑 해제
+본문 아무거나
+
+## 📮 Darren 께 물을 것 — check-auth 유예
+본문
+
+## 📮 Darren 께 보냄 — 답 대기
+본문
+
+## 🤝 이건 승인 대기가 아니다 (룬드 몫)
+본문
+PMD
 
 # 스텁 만들기 — `run()` 의 기본 스텁(pr-none)은 **여기서** 만들어야 한다.
 # ⚠️ 처음엔 ⑪ 구간에서 만들었다가 앞쪽 시험이 전부 "PR 못 읽음" 경고를 달고 나왔고,
@@ -535,6 +554,134 @@ grep -q 'usage:' <<<"$g_out" && ok "  → 사용법을 stdout 으로 낸다" || 
 src_out="$(bash -c 'source "$1" 2>&1; echo "SOURCED_RC=$?"' _ "$SCRIPT" --아무거나 2>&1)"
 grep -q 'SOURCED_RC=0' <<<"$src_out" && ok "🔴 source 해도 인자 파싱이 안 돈다 (부작용 0)" \
   || bad "source 시 부작용" "SOURCED_RC=0" "$src_out"
+
+echo "── ⑫ 📮 승인 대기 — «세션이 안 돌아도» 매일 나온다 ──"
+#
+# 🔴 왜: 📮 목록은 memory/current-tasks.md 에만 살고 그걸 읽는 것은 **세션 시작 절차뿐**이다.
+#   세션이 길게 붙어 있으면 며칠씩 안 나온다 — 실물로 끝난 항목이 6시간, 다른 건 하루를 넘겼고
+#   **아무도 지운 사람이 없었다**(2026-08-11 재검 「8건 중 6건」).
+# 🔑 룬드 브리핑 구멍(*「이미 해둔 걸 묻는다」*)의 **부호 반대판**이다 — 그의 것은 시끄럽고
+#   내 것은 **안 묻는다(무음)**. Darren 기준으로 무음이 더 나쁘다 ⇒ 칸을 만든다.
+# ⚠️ 좌변은 「## 📮 」 줄이다. 🤝(룬드 몫)는 **안** 센다 — 수신자가 다르다.
+out="$(PENDING_FILE="$ROOT/pending-3.md" run "$ROOT/todo.md" "$ROOT/weather.json")"
+grep -q '형이 정할 것 3건' <<<"$out" && ok "📮 건수를 낸다 (🤝 는 안 센다)" \
+  || bad "📮 건수" "형이 정할 것 3건" "$out"
+grep -q '검증 6권 래핑 해제' <<<"$out" && ok "제목을 읽어준다" \
+  || bad "📮 제목" "검증 6권 래핑 해제" "$out"
+
+# 확인된 빈 상태 → 섹션을 뺀다(무음 = 없음). 이 규약은 할 일 섹션과 같다.
+out="$(run "$ROOT/todo.md" "$ROOT/weather.json")"
+grep -q '형이 정할 것' <<<"$out" && bad "0건인데 줄이 나온다" "줄 없음" "$out" \
+  || ok "0건이면 섹션을 통째로 뺀다"
+
+# 🔴 그러나 «못 읽은 것»은 빈 상태와 갈라야 한다 — 이게 없으면 파일이 사라져도 조용하다.
+out="$(PENDING_FILE="$ROOT/no-such-pending.md" run "$ROOT/todo.md" "$ROOT/weather.json")"
+grep -q '승인 대기 못 읽음' <<<"$out" && ok "🔴 파일 부재는 시끄럽다 (빈 상태와 안 뭉친다)" \
+  || bad "부재 무음 금지" "승인 대기 못 읽음" "$out"
+
+# 상위 N 개만 읽고 나머지는 「외 N건」 — 목록이 길어져도 브리핑이 안 부푼다
+# ⚠️ 좌변을 «출력 전체»로 두면 항진명제다 — 할 일 픽스처가 4건이라 TODO_TOP=3 이
+#    「외 1건」을 «이미» 내고 있었다(첫 판이 그래서 구현 없이 초록이었다).
+#    ⇒ 📮 줄 «이후»로 잘라서 본다.
+out="$(PENDING_FILE="$ROOT/pending-3.md" PENDING_TOP=2 run "$ROOT/todo.md" "$ROOT/weather.json")"
+blk="$(sed -n '/형이 정할 것/,$p' <<<"$out")"
+grep -q '외 1건' <<<"$blk" && ok "상위 N 초과는 「외 N건」으로 접는다" \
+  || bad "외 N건(📮 블록 안)" "외 1건" "$out"
+# 대조군 — 같은 좌변을 «구현 없는» 0건 판에 대면 빨개져야 한다(항진명제 재발 방지)
+blk0="$(sed -n '/형이 정할 것/,$p' <<<"$(run "$ROOT/todo.md" "$ROOT/weather.json")")"
+[[ -z "$blk0" ]] && ok "0건이면 그 블록 자체가 없다 (위 단언의 대조군)" \
+  || bad "0건 대조군" "빈 블록" "$blk0"
+
+echo "── ⑫-b 🔴 «그릇»이 1건으로 세어지면 안 된다 (절 vs 항목) ──"
+# 실물: `## 📮 Darren 승인 대기 — 8건 중 6건` 은 여섯 건을 담은 그릇인데 제목 하나라 「1건」이 된다.
+#   오늘 아침 outbox 에서 밟은 「줄 vs 항목」의 «절 vs 항목» 판이다 — 방향만 반대(과소계수).
+cat > "$ROOT/pending-nested.md" <<'EOM'
+## 📮 승인 대기 모음 — 5건 중 3건
+-1. ~~끝난 것 하나~~ ✅ 머지됨
+0. ~~끝난 것 둘~~ ✅ 이미 들어가 있었다
+1. 웹훅 수리
+2. 백업 데몬
+3. 단위 결정
+## 📮 단독 건 — 하위 제목 없음
+- 본문만 있다
+EOM
+out="$(PENDING_FILE="$ROOT/pending-nested.md" run "$ROOT/todo.md" "$ROOT/weather.json" 2>/dev/null)"
+echo "$out" | sed -n '/형이 정할 것/,$p' | grep -q '4건' \
+  && ok "산 항목 3 + 단독 1 = 4건 (절 수 2 도, 전체 항목 5 도 아니다)" \
+  || bad "그릇 계수" "4건" "$(echo "$out" | sed -n '/형이 정할 것/,$p')"
+
+echo "── ⑫-c 🔴 표지 «밖»은 조용하다 — 그래서 시끄럽게 만든다 ──"
+# 룬드 절37 ⑤: 조회 좌변을 표지에 걸면 그 표지가 아닌 항목은 «관측 자체가 없다».
+#   그리고 미탐이 조용하다 — 무언가는 출력되므로 「0건」이라는 신호가 없다.
+# 🔑 좌변을 «표현 꼴의 열거»로 넓히지 않는다(꼴은 열린 집합 — 내 판별식). 대신 «표지 없음»을 센다.
+cat > "$ROOT/pending-unmarked.md" <<'EOM'
+## 📮 잡히는 것
+### 1. 하나
+## ⏸️ MEMORY.md 압축 — 게이트로 보류
+## 🔒 승인 대기 — 한 곳에 모음
+## ✅ 닫힌 것 — Darren 승인 M:xxxx
+EOM
+out="$(PENDING_FILE="$ROOT/pending-unmarked.md" run "$ROOT/todo.md" "$ROOT/weather.json" 2>/dev/null)"
+echo "$out" | grep -q '📮 표지 없는' \
+  && ok "표지 없는 결정 대기 절이 있으면 «시끄럽다»" \
+  || bad "무음 미탐" "표지 없음 경고" "$out"
+echo "$out" | grep -q '2개' \
+  && ok "닫힌 절(✅)은 안 센다 — 재촉이 되면 가드가 죽는다" \
+  || bad "닫힘 제외" "2개" "$out"
+out="$(PENDING_FILE="$ROOT/pending-nested.md" run "$ROOT/todo.md" "$ROOT/weather.json" 2>/dev/null)"
+echo "$out" | grep -q '📮 표지 없는' \
+  && bad "대조군" "경고 없음" "$out" \
+  || ok "대조군: 표지 밖이 없으면 경고도 없다"
+
+echo "── ⑫-d 🔴 긴 제목은 «문자» 단위로 자른다 (바이트로 자르면 한글이 깨진다) ──"
+python3 - "$ROOT/pending-long.md" <<'EOM'
+import sys, io
+io.open(sys.argv[1], "w", encoding="utf-8").write("## 📮 " + "가"*200 + "\n")
+EOM
+out="$(PENDING_FILE="$ROOT/pending-long.md" run "$ROOT/todo.md" "$ROOT/weather.json" 2>/dev/null)"
+blk="$(echo "$out" | sed -n '/형이 정할 것/,$p' | sed -n '2p')"
+echo "$blk" | grep -q '…' && ok "긴 제목은 잘리고 말줄임이 붙는다" || bad "자름" "…" "$blk"
+# 🔴 깨지지 않았나 — 바이트로 잘랐으면 마지막 글자가 깨져 U+FFFD 나 불완전 바이트가 남는다
+python3 - "$blk" <<'EOM'
+import sys
+s = sys.argv[1]
+bad = [c for c in s if c not in "가…" and not c.isspace()]
+sys.exit(1 if bad else 0)
+EOM
+[[ $? -eq 0 ]] && ok "잘린 자리에 깨진 바이트가 없다 (문자 단위 확인)" || bad "한글 깨짐" "가…만 남음" "$blk"
+
+echo "── ⑫-e 🔴 «로케일을 안 물려주는» 환경(cron·launchd·CI)에서도 문자 단위다 ──"
+# 🔑 위 ⑫-d 는 **시험을 돌리는 사람의 로케일을 그대로 물려받는다** — UTF-8 상자에서는
+#   고장난 코드도 초록이다(실제로 그랬다: 내 리눅스 `LANG=C.UTF-8` 초록 · 룬드 맥 빈 로케일 빨강).
+#   ⇒ 여기서는 **환경을 고정**한다. 그래야 「누가 어디서 돌리든」이 분모에 들어온다.
+# 🔴 먼저 «하네스가 진짜 적대적인가»를 잰다 — 로케일을 비웠는데도 셸이 문자 단위면
+#   이 시험은 아무것도 안 재고 조용히 초록이 된다(대조군 없는 0 과 같은 자리).
+harsh="$(env -u LANG -u LC_ALL -u LC_CTYPE bash -c 'T="가나다"; echo "${#T}"' 2>/dev/null)"
+if [[ "$harsh" != "9" ]]; then
+  echo "  ⛔ ⑫-e 판정 불가 — 로케일을 비워도 셸이 바이트 모드가 안 된다 (\${#가나다}=$harsh, 기대 9)"
+  skip=$((skip + 1))
+else
+  ok "⑫-e 대조군: 로케일을 비우면 셸이 «바이트» 모드다 (\${#가나다}=9)"
+  # 🔴 `env -u ... run` 으로 적으면 안 된다 — `run` 은 «셸 함수»라 `env` 가 못 찾고
+  #   출력이 통째로 비며, 빈 문자열에는 깨진 글자가 없어서 **이 시험이 항진으로 초록**이 된다.
+  #   (실제로 첫 판이 그랬다: 옛 스크립트에 대고도 ✅ 가 났다.) ⇒ 서브셸에서 `unset` 한다.
+  out="$( unset LANG LC_ALL LC_CTYPE
+          PENDING_FILE="$ROOT/pending-long.md" run "$ROOT/todo.md" "$ROOT/weather.json" 2>/dev/null )"
+  blk="$(echo "$out" | sed -n '/형이 정할 것/,$p' | sed -n '2p')"
+  # 🔴 그리고 «빈 결과»를 먼저 가른다 — 위 사고가 다시 나면 여기서 걸린다.
+  if [[ -z "${blk// /}" ]]; then
+    bad "⑫-e 대조군 무효 — 📮 줄이 비었다 (아무것도 안 재고 있다)" "제목 줄" "$out"
+  else
+  python3 - "$blk" <<'EOM'
+import sys
+s = sys.argv[1]
+bad = [c for c in s if c not in "가…" and not c.isspace()]
+sys.exit(1 if bad else 0)
+EOM
+  [[ $? -eq 0 ]] && ok "⑫-e 빈 로케일에서도 깨진 바이트가 없다" \
+                 || bad "⑫-e 빈 로케일에서 한글 깨짐" "가…만" "$blk"
+  fi
+fi
 
 echo
 echo "  통과 $pass · 실패 $fail · 판정 불가 $skip"
