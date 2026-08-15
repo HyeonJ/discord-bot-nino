@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
 # run-tests.sh — 이 레포의 **모든** 시험을 한 종료코드로 모은다 (양봇 공용 본체)
 #
-# 🔗 코어-사본: 정본은 `yaksu-bot-core` 의 `scripts/run-tests.sh` 다. **여기서 고치지 않는다** —
-#   고치면 사본이 갈린다. 수리는 코어에 내고 이 파일로 흘러온다. (이 표지를 `tests/cli-help-covers-options.test.sh` 가 읽는다)
-#
 # 왜 생겼나 (2026-07-28, 룬드 M:jcic 와 합의):
 #   `npm test`/`bun test` 가 그 레포의 시험을 **대표하지 않는다**. 두 방향으로 확인됐다:
 #     · 룬드 쪽 — JS 시험이 0개인데 jest 가 기본 러너라 하위 별도 레포를 긁어 **상시 rc=1**.
@@ -44,15 +41,29 @@
 #                    새로 깨진 것 🔴 · 고쳐진 것 ✅ · 오래된 것 ⏳N일째 를 찍는다.
 #                    안 주면 추세를 안 잰다 — CI 는 매번 새 컨테이너라 직전 값이 없다.
 #                    ⚠️ rc 는 안 바뀐다. 못 잰 건 새것이든 오래된 것이든 rc=2 다.
+#     --fail-list <파일>
+#                    실패한 시험 **이름**을 줄마다 하나씩 쓴다(기계용). 실패 0 이어도 **빈 파일**을
+#                    만든다 — 「0건」과 「안 쟀다」가 같은 모양이면 소비자가 못 가른다.
+#                    🔴 **이 목록은 러너의 raw 실패다 — `.github/ci-baseline.tsv` 의 `platform` 행이
+#                       «안 빠져 있다».** 우리 계약의 «실패»는 「러너 집계 − baseline platform 행」이라
+#                       한 칸 다르다. 그대로 실패집합으로 읽으면 platform 이 섞여 **과다 계상**되고,
+#                       platform 은 원래 안 줄어드는 축이라 **줄일 수 없는 원소가 실패집합에 눌러앉는다**
+#                       (동결 사전식이 「실패집합 ⊊」를 요구하므로 교착이 된다).
+#                       baseline 빼기는 `ci-baseline-check.py` 의 몫이다 — 러너는 레포별 baseline 을 모른다.
+#     -h, --help     이 도움말을 찍고 나간다(파일 머리 주석 블록 전체 — 범위가 손으로 안 적힌다)
 #
 # 예시:
 #   scripts/run-tests.sh --shell-glob 'tests/*.test.sh' --cmd 'bun test'
 #   scripts/run-tests.sh --cmd 'bun test' --unmeasured-state state/unmeasured.tsv
+#   scripts/run-tests.sh --shell-glob 'tests/*.test.sh' --fail-list /tmp/failed.txt
 set -uo pipefail
 
 ROOT=""
 # 판정 불가 이름 집합을 남길 파일. 안 주면 추세를 안 잰다(CI 는 매번 새 컨테이너라 직전 값이 없다).
 UNMEASURED_STATE="${UNMEASURED_STATE:-}"
+# 🔸 환경변수로는 안 받는다 — 켜지면 파일을 만드는 기능이라, 이름이 우연히 환경에 있으면
+#    «안 줬는데 켜진다». 판정 불가 상태 파일과 달리 이건 **플래그 전용**이다.
+FAIL_LIST=""
 GLOBS=""     # 개행 구분 문자열 — bash 3.2 에서 빈 배열 확장이 set -u 와 부딪히므로 배열을 안 쓴다
 CMDS=""
 # stderr 를 정상 출력으로 쓰는 항목(개행 구분). --cmd-allow-stderr 로만 채워진다.
@@ -110,7 +121,22 @@ while [ $# -gt 0 ]; do
         --unmeasured-state)
                       [ $# -ge 2 ] || die_usage "--unmeasured-state 뒤에 경로가 없다"
                       UNMEASURED_STATE="$2"; shift 2 ;;
-        -h|--help)    sed -n '2,36p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        --fail-list)  [ $# -ge 2 ] || die_usage "--fail-list 뒤에 경로가 없다"
+                      FAIL_LIST="$2"; shift 2 ;;
+        # 🔴 범위를 «상수»로 박지 않는다 — `sed -n '2,36p'` 였는데 사용법 절이 36줄 밖으로 밀려
+        #    `--root`(설명 줄) · `--unmeasured-state` · `--fail-list` 가 help 에서 사라져 있었다.
+        #    ⚠️ `--unmeasured-state` 는 그 옵션을 «추가한» PR(#91)부터 0건이었고 아무도 몰랐다 —
+        #       손으로 적은 범위는 옵션이 늘어도 «안 늘어나고», 그 어긋남은 조용하다.
+        #    ⇒ 머리 주석 블록이 «끝나는 자리»를 파일이 정하게 한다(정의에서 유도).
+        # 🔴 **그런데 상수를 없애고도 좌변이 여전히 «꼴»이었다 — `/^#/` 가 아닌 첫 줄에서 멈추니
+        #    머리 주석 한복판의 «빈 줄» 하나가 블록의 끝이 된다.** 문단을 나누려 넣은 한 줄이
+        #    help 를 통째로 자르는데, 잘린 뒤에도 앞부분은 멀쩡히 나오므로 **조용하다**
+        #    (실측: 이 파일에 빈 줄 하나를 심으면 57줄 → 3줄. 지금 본체엔 빈 줄이 0개라
+        #     ⑮ 「모든 플래그가 help 에 나온다」로는 이 갈래가 «구조적으로» 안 걸린다).
+        #    ⇒ 좌변을 뜻으로 옮긴다: 블록이 끝나는 자리는 **«주석도 빈 줄도 아닌» 첫 줄**이다.
+        #    빈 줄은 세뒀다 **다음 주석이 올 때만** 흘린다 — 블록 «꼬리»의 빈 줄이 help 끝에
+        #    딸려 나오지 않는다(니노 판. 그가 자기 시험 ④ 에 내 판을 심어 증인을 세웠다).
+        -h|--help)    awk 'NR==1 {next} /^#/ {for (; pending > 0; pending--) print ""; sub(/^# ?/,""); print; next} /^[[:space:]]*$/ {pending++; next} {exit}' "${BASH_SOURCE[0]}"; exit 0 ;;
         *)            die_usage "모르는 인자: $1" ;;
     esac
 done
@@ -141,6 +167,26 @@ unmeasured=""
 add_unmeasured() {
     unk=$((unk + 1))
     unmeasured="$unmeasured$(printf '%s' "$1" | tr '\t\n' '  ')
+"
+}
+
+# 🔴 **실패도 같은 병을 앓는다** — 요약의 `실패: a b c` 는 공백 구분이라 **이름에 공백이 있으면
+#    원소 경계가 사라진다.** 실물: 원장의 실패 이름이 `uv run --directory calendar-tool pytest -q`
+#    (공백 4개)라 둘만 실패해도 **출력만 보고는 몇 개인지 모른다.** 판불은 개행 구분이라 이미 안전했고
+#    (니노 N3), 이 자리만 남아 있었다.
+# 🔑 **stdout 은 안 바꾼다** — 소비자가 셋이다(코어 `tests/run-tests.test.sh` · 룬드
+#    `ci-baseline-check.py:37` 의 `^   실패: (.*)$` · 그 픽스처). 기계용 목록만 **파일로 뺀다.**
+#    ⇒ 두 표현을 한 함수에서 «동시에» 갱신한다. 축적 자리가 둘(run_one 의 두 분기)이라
+#      한쪽만 고치면 절반이 조용히 샌다.
+failed_list=""
+add_failed() {
+    fail=$((fail + 1))
+    # 🔴 `\r` 도 접는다 — 남기면 소비자의 `grep -qxF` 가 «보이지 않는 한 글자» 때문에 조용히 어긋나고,
+    #    터미널에서는 줄 되감기라 출력이 «맞게» 보인다(니노 지적 2026-08-11 — CR 유입 경로는 안 쟀다).
+    #    ⚠️ 대가: 이름에 진짜 CR 이 든 대상은 원본과 안 맞는다. `\t\n` 과 같은 트레이드오프를 따른다.
+    _fname="$(printf '%s' "$1" | tr '\t\n\r' '   ')"
+    failed="$failed $_fname"
+    failed_list="$failed_list$_fname
 "
 }
 
@@ -201,7 +247,7 @@ $name
         #   🔸 화이트리스트는 **일부러 안 만들었다**: 2026-07-29 실측으로 양봇 시험 20+개가
         #      stderr 0줄이었다(진행 로그는 다들 stdout 을 쓴다). 근거 0건에 예외 창구부터 만들면
         #      "일단 넣고 보자" 로 샌다 — 필요해지면 그 케이스를 보고 만든다.
-        fail=$((fail + 1)); failed="$failed $name"
+        add_failed "$name"
         n="$(extract_count "$out")"
         printf '  🔴 %-38s rc=0 인데 **stderr 가 있다** (%s)\n' "$name" "${n:-건수 미상}"
         printf '%s\n' "$err" | head -"$MARK_LINES" | sed 's/^/       ⚠ /'
@@ -232,7 +278,7 @@ $name
         printf '%s\n' "$out" | tail -3 | sed 's/^/       /'
         [ -n "$err" ] && printf '%s\n' "$err" | tail -3 | sed 's/^/       ⚠ /'
     else
-        fail=$((fail + 1)); failed="$failed $name"
+        add_failed "$name"
         printf '  🔴 %-38s rc=%s\n' "$name" "$rc"
         # 🔴 실패는 **꼬리가 아니라 표식 줄**을 먼저 보여준다(2026-07-28 니노 CI 실사고).
         #    `tail -8` 만 찍으면 마지막 8줄이 ⛔·요약으로 채워질 때 ❌ 줄이 **잘린다** —
@@ -312,6 +358,21 @@ echo "── 결과: 통과 $pass · 실패 $fail · 판정 불가 $unk"
 if [ -n "$unmeasured" ]; then
     echo "   판정 불가:"
     printf '%s' "$unmeasured" | sed 's/^/     · /'
+fi
+
+# 🔴 기계용 실패 목록 — **실패 0 이어도 «빈 파일»을 만든다.** 「0건」과 「안 쟀다」가 같은 모양이면
+#    소비자가 그 둘을 못 가른다(부재는 「못 쟀다」에만 남겨둔다).
+if [ -n "$FAIL_LIST" ]; then
+    # ⚠️ 상위 디렉터리가 없으면 매번 조용히 실패한다 — 판불 상태 파일이 정확히 그 자리였다(니노 N2).
+    mkdir -p "$(dirname "$FAIL_LIST")" 2>/dev/null
+    if printf '%s' "$failed_list" > "$FAIL_LIST" 2>/dev/null; then
+        :
+    else
+        # 🔴 **낡은 파일을 남기지 않는다** — 남기면 소비자가 «지난 회차»를 이번 값으로 읽는다.
+        #    그 오독은 조용하다(파일이 있고 그럴듯한 이름이 들어 있다).
+        rm -f "$FAIL_LIST" 2>/dev/null
+        echo "   🔴 실패 목록을 못 썼다: $FAIL_LIST" >&2
+    fi
 fi
 
 # 🔴 **판정 불가는 정직해서 안 아프다** (2026-07-28, 니노 `#53` 에서 나온 것).
