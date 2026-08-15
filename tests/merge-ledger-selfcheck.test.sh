@@ -302,6 +302,84 @@ else
         "last_row_raw 가 비지 않음 (행 $ROWS 개)" "빈 문자열"
 fi
 
+echo "── ⑤-b 🧪 변이 «행이 준다» — 여기까지의 변이가 전부 「행이 «는다»」였다 ──"
+# 🔴 왜 이 절이 생겼나 (2026-08-15 실사고): `#227` 의 행이 통째로 빠졌는데
+#   위 ⑤ 의 변이 둘(복붙 · 떨어진 복붙)이 **전부 「행이 는다」 모양**이라 한 번도 안 잡혔다.
+#   그때 우리 둘이 각자 돌린 「사슬 끊김 0」도 초록이었다 — 잡은 건 축① 하나뿐이다.
+# 🔑 룬드의 판별식(*「변이를 심고 «내 검사가 초록»이면 그게 값 있는 대조군」*)에
+#   내가 낸 한 겹: **변이 «집합»도 좌변이 낳는다.** 심을 것을 고르는 손이 좌변을 아니까
+#   좌변이 안 보는 «종류»는 후보에 못 오른다 ⇒ 생성기를 밖에서 가져온다:
+#   「원장이 겪을 수 있는 상태 변화」 = **추가 · 삭제 · 수정 · 순서 바꿈**. 여기가 «삭제»다.
+# 🔴 그리고 삭제엔 «두 꼴»이 있고 **둘의 값이 다르다**:
+#     C 생짜 삭제        → 다음 행의 좌변이 붕 떠서 **축②가 문다** (이미 보는 축 = 값 0)
+#     D 봉합된 삭제      → 다음 행의 좌변을 앞 행 sha 로 고쳐두면 **축②는 초록** (실사고의 그 꼴)
+#   🔑 **현실이 D 를 낳는 이유는 구조다** — 행을 안 적으면 다음 사람이 «원장의 마지막 행»을
+#     읽어 좌변에 적으므로, 사슬이 **저절로** 봉합된다. C 는 손으로 만들어야 나온다.
+DELMUT="$(mktemp)"; trap 'rm -f "$AXES" "$MUT" "$DELMUT" "$DELPY"' EXIT INT TERM
+DELPY="$(mktemp)"
+cat > "$DELPY" <<'PYEOF'
+import re, sys
+src, mode = sys.argv[1], sys.argv[2]          # mode: raw | sealed
+lines = open(src, encoding="utf-8").read().splitlines(True)
+idx = [i for i, l in enumerate(lines)
+       if l.startswith("| ") and [x.strip() for x in l.strip().strip("|").split("|")][:1] == ["니노"]]
+if len(idx) < 3:
+    sys.stderr.write("행이 3개 미만이라 «가운데»를 못 지운다\n"); sys.exit(3)
+tgt = idx[-2]                                  # 마지막에서 두 번째 = 가운데
+prv = idx[-3]
+nxt = idx[-1]
+def sha_of(i):
+    c = [x.strip() for x in lines[i].strip().strip("|").split("|")]
+    m = re.match(r"`?#(\d+)`?\s+`?([0-9a-f]{7,40})`?", c[1]);  return m.group(2) if m else None
+def pr_of(i):
+    c = [x.strip() for x in lines[i].strip().strip("|").split("|")]
+    m = re.match(r"`?#(\d+)`?", c[1]);  return m.group(1) if m else None
+# 🔴 «지우기 전»에 읽는다 — `del` 뒤의 같은 첨자는 «다음» 행을 가리킨다.
+#   첫 판이 그랬고, 시험이 「#195 를 지웠다는데 축①은 193 을 낸다」로 물었다.
+gone = pr_of(tgt)
+if mode == "sealed":
+    # 다음 행의 좌변 칸(세 번째 칸의 첫 백틱 sha)을 «앞 행»의 sha 로 바꾼다
+    cells = lines[nxt].rstrip("\n").split("|")
+    cells[3] = re.sub(r"`[0-9a-f]{7,40}`", "`%s`" % sha_of(prv), cells[3], count=1)
+    lines[nxt] = "|".join(cells) + "\n"
+del lines[tgt]
+sys.stdout.write("".join(lines))
+sys.stderr.write(gone + "\n")                  # 지운 PR 번호를 stderr 로
+PYEOF
+DELERR="$(mktemp)"
+for MODE in raw sealed; do
+    if ! python3 "$DELPY" "$LEDGER" "$MODE" > "$DELMUT" 2> "$DELERR"; then
+        und "⑤-b($MODE) 못 쟀다 — $(cat "$DELERR")"
+        continue
+    fi
+    GONE="$(cat "$DELERR")"
+    # 🔴 «주입 확인»부터 — 안 심겼는데 초록이면 「안 보는 축」이 아니라 그냥 못 잰 것이다.
+    #   (룬드 2026-08-15 자기 판별식 결함: 주입 MISS 도 초록이라 둘이 같은 값을 냈다)
+    BEFORE="$(grep -c '^| 니노 ' "$LEDGER")"; AFTER="$(grep -c '^| 니노 ' "$DELMUT")"
+    if [ "$AFTER" -ne $((BEFORE - 1)) ]; then
+        bad "⑤-b($MODE) 주입 실패 — 행이 안 줄었다" "$((BEFORE - 1))" "$AFTER"
+        continue
+    fi
+    ok "🧪 주입OK($MODE) — 니노 행 $BEFORE → $AFTER (#$GONE 을 지웠다)"
+    JD="$(axes "$DELMUT")"
+    BR="$(jq_ "$JD" broken)"; MS="$(jq_ "$JD" missing)"
+    if [ "$MODE" = raw ]; then
+        [ "$BR" != "[]" ] \
+          && ok "  → 생짜 삭제는 축②가 문다 ($BR) — 이 변이는 «이미 보는 축»이라 값이 0 이다" \
+          || bad "  → 생짜 삭제인데 축②가 조용하다" "빈 배열이 아님" "$BR"
+    else
+        # 🔴 여기가 이 절의 전부다 — 봉합하면 축②가 «초록»이고, 그게 실사고의 모양이다.
+        [ "$BR" = "[]" ] \
+          && ok "  → 봉합하면 축②는 «초록»이다 — 사슬은 이 종류를 «구조적으로» 못 본다" \
+          || bad "  → 봉합했는데 축②가 문다 (봉합이 안 됐다 = 이 대조군이 무효다)" "[]" "$BR"
+        case "$MS" in
+          *"$GONE"*) ok "  → 그런데 축①은 문다 (#$GONE) — 좌변이 «원장 밖»(git)이라서다" ;;
+          *) bad "  → 축①도 못 잡는다 — 이 종류를 잡는 축이 «0개»다" "#$GONE 을 포함" "$MS" ;;
+        esac
+    fi
+done
+rm -f "$DELERR"
+
 echo
 echo "  통과 $pass · 실패 $fail · 판정 불가 $skip"
 [ "$fail" -eq 0 ]
