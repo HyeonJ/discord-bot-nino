@@ -444,23 +444,39 @@ esac
 #   두 질문을 한 곳에 두면 문구를 고칠 때 억제 규칙이 같이 흔들린다.
 # 🔴 기준선은 **보낸 것만** 갱신한다 — 실패·dry-run 에 갱신하면 그 회차가 영구히 묻힌다
 #   (`#147` 과 같은 자리. verdict 쪽 :110 과 같은 계약).
+# 🔴 **상태 파일은 «세 칸»이다: `BAND \t 마지막_알림 \t 첫_관측`.**
+#   두 칸이던 시절엔 «마지막 알림»을 「지속」이라 불렀는데 **그건 다른 양이다**:
+#     · 재알림 게이트가 묻는 것 = 「직전 알림 이후 얼마나 됐나」  ← 마지막 알림 기준이 «맞다»
+#     · 사람이 「지속」을 읽을 때 = 「이 구간이 얼마나 이어졌나」   ← 첫 관측 기준이라야 한다
+#   한 칸에 둘을 담으면 재알림마다 「지속」이 0 으로 리셋된다.
+#   🔑 실물(룬드 `M:owsh` 2026-08-21): 밴드 `100-149` 가 08-20 20:00 부터 안 바뀌었는데
+#     05:30 알림이 「지속 149분」이라 적었다 — 진짜 570분. 그가 세 통을 나란히 놓고 잡았다.
+#   ⚠️ 옛 두 칸 상태를 만나면 첫 관측이 **미상**이라 마지막 알림으로 대신하고 «하한»이라 적는다
+#     — 「미상」을 「잰 값」으로 적지 않는다(모르는 걸 아는 척하면 다음 사람이 못 가른다).
 band_should_notify() {   # 0 = 보낸다 · 1 = 억제
-    local prev_band prev_at now_epoch age_min
+    local prev_band prev_at prev_since now_epoch age_min since_min since_mark
     # 🔑 상태가 없으면 **ok 로 본다.** 「모른다」로 두면 배포 직후 첫 회차가 높아도 조용하다 —
     #   ok 를 가정하면 «엄격한 쪽»으로 틀린다(높으면 운다).
     prev_band="$(cut -f1 "$BAND_STATE" 2>/dev/null)"; [ -n "$prev_band" ] || prev_band=ok
     prev_at="$(cut -f2 "$BAND_STATE" 2>/dev/null)"
-    [ "$BAND" != "$prev_band" ] && { BAND_REASON="전이 ${prev_band}→${BAND}"; return 0; }
-    # 같은 구간이 이어질 때: ok 는 조용히, 높은 구간은 주기마다 한 번 더.
-    [ "$BAND" = ok ] && { BAND_REASON=suppressed_ok; return 1; }
-    case "$prev_at" in ''|*[!0-9]*) BAND_REASON="지속(직전 시각 없음)"; return 0 ;; esac
+    prev_since="$(cut -f3 "$BAND_STATE" 2>/dev/null)"
     now_epoch="$(date +%s)"
-    age_min=$(( (now_epoch - prev_at) / 60 ))
+    # 🔴 전이면 «첫 관측»이 지금이다 — 여기서만 갱신한다. 재알림은 이 값을 물려받는다.
+    [ "$BAND" != "$prev_band" ] && {
+        BAND_SINCE="$now_epoch"; BAND_REASON="전이 ${prev_band}→${BAND}"; return 0
+    }
+    # 같은 구간이 이어질 때: ok 는 조용히, 높은 구간은 주기마다 한 번 더.
+    [ "$BAND" = ok ] && { BAND_SINCE="$prev_since"; BAND_REASON=suppressed_ok; return 1; }
+    case "$prev_at" in ''|*[!0-9]*) BAND_SINCE="$now_epoch"; BAND_REASON="지속(직전 시각 없음)"; return 0 ;; esac
+    case "$prev_since" in ''|*[!0-9]*) prev_since="$prev_at"; since_mark="(하한 — 첫 관측 미상)" ;; *) since_mark="" ;; esac
+    BAND_SINCE="$prev_since"
+    age_min=$(( (now_epoch - prev_at) / 60 ))          # 게이트가 쓰는 양
+    since_min=$(( (now_epoch - prev_since) / 60 ))     # 사람이 읽는 양
     if [ "$age_min" -ge "$BAND_REPEAT_MIN" ]; then
-        BAND_REASON="지속 ${age_min}분 ≥ ${BAND_REPEAT_MIN}"
+        BAND_REASON="지속 ${since_min}분${since_mark} · 직전 알림 ${age_min}분 전 ≥ ${BAND_REPEAT_MIN}"
         return 0
     fi
-    BAND_REASON="suppressed_repeat(${age_min}/${BAND_REPEAT_MIN}분)"
+    BAND_REASON="suppressed_repeat(${age_min}/${BAND_REPEAT_MIN}분 · 지속 ${since_min}분${since_mark})"
     return 1
 }
 
@@ -479,7 +495,8 @@ if band_should_notify; then
         *) ALERT=send_failed ;;
     esac
     # 🔴 **보낸 것만 기준선이 된다.** dry-run 으로 진단 한 번 돌린 것이 진짜 알림을 먹으면 안 된다.
-    [ "$nrc" -eq 0 ] && printf '%s\t%s\n' "$BAND" "$(date +%s)" > "$BAND_STATE" 2>/dev/null
+    # 🔑 셋째 칸(첫 관측)은 **전이에서만 새로 찍힌다** — 재알림은 물려받아야 「지속」이 안 리셋된다.
+    [ "$nrc" -eq 0 ] && printf '%s\t%s\t%s\n' "$BAND" "$(date +%s)" "${BAND_SINCE:-$(date +%s)}" > "$BAND_STATE" 2>/dev/null
 else
     ALERT=suppressed
 fi
