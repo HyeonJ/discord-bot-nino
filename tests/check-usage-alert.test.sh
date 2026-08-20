@@ -819,6 +819,30 @@ run_in "$BS2" CHECK_USAGE_BAND_REPEAT_MIN=0 FAKE_BODY="$(body_projected 20)"
 [ "$(nsent)" = 0 ] && ok "  🧪 [음성 대조군] ok 는 주기가 지나도 안 운다" \
   || bad "ok 주기 억제" "0건" "$(nsent)건"
 
+# ⑨-5b 🔴 「지속」의 기준 시각은 «첫 관측»이다 — 재알림마다 0 으로 리셋되면 안 된다
+#   유래: 룬드 `M:owsh` 2026-08-21 — 내 알림 세 통에서 지속이 120 → 150 → «149» 로 «줄었다».
+#   실측(logs/check-usage-alert.log): 밴드 `100-149` 는 08-20 20:00 부터 «한 번도» 안 바뀌었는데
+#   05:30 알림이 「지속 149분」이라 적었다. 진짜 지속은 **570분** — 3.8배 틀렸다.
+#   🔑 원인은 상태 파일이 «마지막 알림 시각»만 들고 있어서다. 그 양은 «재알림 주기»엔 맞고
+#     「지속」엔 틀리다 — **한 라벨 아래 다른 양 둘**. 두 양이라 칸도 둘이라야 한다.
+#   ⚠️ 이 시험이 재는 것은 「570 이 맞나」가 아니라 **«같은 구간에서 지속이 안 줄어드나»**다.
+BS2b="$WORK/bandsince"; rm -rf "$BS2b"
+run_in "$BS2b" FAKE_BODY="$(body_projected 500)"                                 # 첫 전이 → 상태 생성
+_past=$(( $(date +%s) - 300 * 60 ))                                              # 첫 관측을 300분 전으로
+_bandnow="$(cut -f1 "$BS2b/band.state")"
+printf '%s\t%s\t%s\n' "$_bandnow" "$_past" "$_past" > "$BS2b/band.state"
+run_in "$BS2b" CHECK_USAGE_BAND_REPEAT_MIN=0 FAKE_BODY="$(body_projected 500)"
+_d1="$(LC_ALL=C sed -n 's/.*band_reason=지속 \([0-9][0-9]*\)분.*/\1/p' "$LOGF" | tail -1)"
+run_in "$BS2b" CHECK_USAGE_BAND_REPEAT_MIN=0 FAKE_BODY="$(body_projected 500)"
+_d2="$(LC_ALL=C sed -n 's/.*band_reason=지속 \([0-9][0-9]*\)분.*/\1/p' "$LOGF" | tail -1)"
+# 🧪 [대조군] 두 값이 «뽑혔는지» 먼저 본다 — 빈 문자열 둘이면 비교가 항진명제가 된다
+[ -n "$_d1" ] && [ -n "$_d2" ] \
+  && ok "  🧪 [대조군] 두 회차에서 지속 값이 실제로 뽑혔다 (${_d1} · ${_d2})" \
+  || bad "지속 값 추출" "숫자 둘" "[$_d1] [$_d2]"
+[ -n "$_d1" ] && [ -n "$_d2" ] && [ "$_d2" -ge "$_d1" ] \
+  && ok "같은 구간이 이어지면 「지속」이 «안 줄어든다» (첫 관측 기준)" \
+  || bad "지속 단조성" "2회차 ≥ 1회차" "1회차 ${_d1}분 → 2회차 ${_d2}분 (리셋됐다)"
+
 # ⑨-6 🔴 발송 실패·dry-run 은 기준선을 «갱신하지 않는다» — 그러면 그 회차가 영구히 묻힌다
 BS3="$WORK/bandfail"; rm -rf "$BS3"
 run_in "$BS3" FAKE_SEND_RC=1 FAKE_BODY="$(body_projected 500)"
