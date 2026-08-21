@@ -1,1 +1,0 @@
-/home/bpx27/yaksu-bot-core-pinned/addons/github-autopull.js

@@ -1,1 +1,0 @@
-/home/bpx27/yaksu-bot-core-pinned/addons/health-server.js
