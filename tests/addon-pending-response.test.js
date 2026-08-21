@@ -3,7 +3,7 @@ process.env.DISCORD_APP_ID = 'nino';
 const addon = require('../relay-addons/pending-response');
 const {
   channelIdOf, shouldRegister, mentionsOtherUser,
-  registerPending, clearChannel, collectTimedOut, buildReminder,
+  registerPending, clearChannel, collectTimedOut, buildReminder, buildTimeoutAlerts,
 } = addon;
 
 // 테스트용 msg 팩토리
@@ -217,6 +217,60 @@ describe('addon: pending-response', () => {
       expect(out[0].msgId).toBe('old');
       expect(store.has('old')).toBe(false);
       expect(store.has('new')).toBe(true);
+    });
+  });
+
+  describe('buildTimeoutAlerts — 경보 단위는 «채널»이다', () => {
+    test('한 채널의 여러 미응답은 «한 통»으로 묶인다', () => {
+      const out = buildTimeoutAlerts([
+        { msgId: 'm1', info: { channelId: 'c1', timestamp: 0, preview: '세꼬시 안싫어하겠지' } },
+        { msgId: 'm2', info: { channelId: 'c1', timestamp: 0, preview: '믿음의 영역' } },
+        { msgId: 'm3', info: { channelId: 'c1', timestamp: 0, preview: '다 좋아할것이라는' } },
+        { msgId: 'm4', info: { channelId: 'c1', timestamp: 0, preview: '술 넘 땡기게' } },
+      ]);
+      expect(out).toHaveLength(1);
+      expect(out[0]).toMatch(/4개/);
+      expect(out[0]).toMatch(/세꼬시 안싫어하겠지/);
+      expect(out[0]).toMatch(/술 넘 땡기게/);
+    });
+
+    test('채널이 다르면 따로 나간다 — 묶는 축은 채널뿐이다', () => {
+      const out = buildTimeoutAlerts([
+        { msgId: 'm1', info: { channelId: 'c1', timestamp: 0, preview: 'a' } },
+        { msgId: 'm2', info: { channelId: 'c2', timestamp: 0, preview: 'b' } },
+      ]);
+      expect(out).toHaveLength(2);
+    });
+
+    test('하나뿐이면 «개수»를 안 붙인다 — 「1개」는 소음이다', () => {
+      const out = buildTimeoutAlerts([
+        { msgId: 'm1', info: { channelId: 'c1', timestamp: 0, preview: '안녕' } },
+      ]);
+      expect(out).toHaveLength(1);
+      expect(out[0]).toMatch(/안녕/);
+      expect(out[0]).not.toMatch(/1개/);
+    });
+
+    test('빈 입력이면 한 통도 안 나간다', () => {
+      expect(buildTimeoutAlerts([])).toEqual([]);
+    });
+
+    test('«clearChannel 과 같은 단위»다 — 이 모듈이 이미 채널을 응답 단위로 본다', () => {
+      // 대조군: 한 채널에 넷을 넣고 clearChannel 하면 넷이 통째로 지워진다.
+      const store = new Map();
+      for (const id of ['m1', 'm2', 'm3', 'm4']) {
+        store.set(id, { channelId: 'c1', timestamp: 0, preview: id });
+      }
+      expect(clearChannel(store, 'c1')).toBe(4);
+      expect(store.size).toBe(0);
+      // ⇒ 경보도 같은 단위여야 한다 (넷을 지우는 한 번의 응답 ↔ 한 통의 경보)
+      const alerts = buildTimeoutAlerts([
+        { msgId: 'm1', info: { channelId: 'c1', timestamp: 0, preview: 'm1' } },
+        { msgId: 'm2', info: { channelId: 'c1', timestamp: 0, preview: 'm2' } },
+        { msgId: 'm3', info: { channelId: 'c1', timestamp: 0, preview: 'm3' } },
+        { msgId: 'm4', info: { channelId: 'c1', timestamp: 0, preview: 'm4' } },
+      ]);
+      expect(alerts).toHaveLength(1);
     });
   });
 

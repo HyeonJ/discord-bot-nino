@@ -152,6 +152,33 @@ function collectTimedOut(store, now, timeoutMs) {
   return out;
 }
 
+/**
+ * 타임아웃된 항목들을 «채널 단위»로 묶어 경보 문자열 배열을 만든다.
+ *
+ * 🔑 묶는 축이 채널인 근거: 같은 모듈의 clearChannel 이 「내가 한 번 답하면 그 채널 pending 을
+ * 통째로 지운다」로 이미 채널을 «응답 단위»로 보고 있다. 경보만 메시지 단위면 한 흐름에
+ * N통이 뜨고, 그건 「일부러 빠진 대화」를 N번 재촉해 «끼어드는 쪽»으로 민다.
+ */
+function buildTimeoutAlerts(timedOut) {
+  const byChannel = new Map();
+  for (const { info } of timedOut) {
+    if (!info) continue;
+    const key = info.channelId;
+    if (!byChannel.has(key)) byChannel.set(key, []);
+    byChannel.get(key).push(info.preview);
+  }
+  const out = [];
+  for (const previews of byChannel.values()) {
+    if (previews.length === 1) {
+      out.push(`[SYSTEM] ⚠️ 응답 못 한 메시지 있어! 확인해줘: ${previews[0]}`);
+    } else {
+      const list = previews.map(p => `- ${p}`).join('\n');
+      out.push(`[SYSTEM] ⚠️ 응답 못 한 메시지 ${previews.length}개 있어! 한 흐름이면 한 번만 답하면 돼:\n${list}`);
+    }
+  }
+  return out;
+}
+
 /** 미응답 리마인더 문자열 (없으면 null) */
 function buildReminder(store) {
   if (store.size === 0) return null;
@@ -222,8 +249,8 @@ module.exports = {
     // 타임아웃 → tmux 알림
     timeoutTimer = setInterval(() => {
       const timedOut = collectTimedOut(pending, Date.now(), responseTimeoutMs);
-      for (const { info } of timedOut) {
-        try { sendToTmux(`[SYSTEM] ⚠️ 응답 못 한 메시지 있어! 확인해줘: ${info.preview}`); } catch (e) {}
+      for (const alert of buildTimeoutAlerts(timedOut)) {
+        try { sendToTmux(alert); } catch (e) {}
       }
     }, TIMEOUT_CHECK_MS);
 
@@ -253,5 +280,6 @@ module.exports = {
   clearChannel,
   collectTimedOut,
   buildReminder,
+  buildTimeoutAlerts,
   resolveTimeoutMs,
 };
