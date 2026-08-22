@@ -27,7 +27,7 @@
           },
           {
             "type": "command",
-            "command": "/usr/bin/python3 /home/bpx27/yaksu-bot-core-pitfall/hooks/bash-pitfall-guard.py"
+            "command": "/usr/bin/python3 /home/bpx27/yaksu-bot-core-live/hooks/bash-pitfall-guard.py"
           }
         ]
       }
